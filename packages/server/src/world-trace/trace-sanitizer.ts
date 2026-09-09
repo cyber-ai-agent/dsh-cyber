@@ -1,4 +1,4 @@
-import { redactToolTraceText, TOOL_TRACE_INPUT_LIMIT } from '@dsh-cyber/contracts'
+import { redactToolTraceText } from '@dsh-cyber/contracts'
 import type { JsonObject, JsonValue, WorldTraceEntry } from '@dsh-cyber/contracts'
 
 const SENSITIVE_KEY = /^(?:authorization|cookie|set-cookie|password|passphrase|secret|api[-_]?key|access[-_]?token|refresh[-_]?token|token|credential)$/i
@@ -26,16 +26,22 @@ export class TraceSanitizer {
     const summary = this.text(entry.summary, 160)
     const detail = entry.detail === undefined ? undefined : this.text(entry.detail, 500)
     const reasoningSummary = entry.reasoningSummary === undefined ? undefined : this.text(entry.reasoningSummary, 1_200)
+    // The tool step's `input`/`output` are the raw, unmasked call parameters
+    // and result the trace panel expands on click; they only ever get clipped
+    // to a bounded length here. `name`/`label`/`description` are narrative
+    // fields (and may interpolate a runtime-supplied tool name), so they stay
+    // on the redaction path.
     const tools = entry.tools?.map((tool) => ({
       ...tool,
       callId: this.text(tool.callId, 160),
       ...(tool.name === undefined ? {} : { name: this.text(tool.name, 160) }),
       label: this.text(tool.label, 200),
       ...(tool.description === undefined ? {} : { description: this.text(tool.description, 300) }),
-      // Second redaction layer for the call target produced at the adapter
-      // boundary; the trace exit must never trust an upstream string.
-      ...(tool.input === undefined ? {} : { input: redactToolTraceText(tool.input, TOOL_TRACE_INPUT_LIMIT) }),
-      ...(tool.output === undefined ? {} : { output: redactToolTraceText(tool.output) }),
+      ...(tool.input === undefined ? {} : { input: clip(tool.input, 32_000) }),
+      ...(tool.output === undefined ? {} : {
+        output: clip(tool.output, 32_000),
+        outputTruncated: tool.outputTruncated || tool.output.length > 32_000,
+      }),
     }))
     // Artifact titles are author-supplied text and reach the trace verbatim, so
     // they pass through the same redaction as every other displayed string.
@@ -84,4 +90,9 @@ export class TraceSanitizer {
     if (value !== null && typeof value === 'object') return this.#record(value)
     return value
   }
+}
+
+/** Plain length clipping without any masking: raw text stays verbatim. */
+function clip(value: string, limit: number): string {
+  return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`
 }

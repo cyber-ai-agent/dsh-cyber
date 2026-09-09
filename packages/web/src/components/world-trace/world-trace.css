@@ -104,21 +104,23 @@
 .world-trace-turn__body .world-trace-item { padding-bottom: 12px; }
 .world-trace-turn__body .world-trace-item > article { background: var(--surface-1); }
 
-/* Typed tool evidence uses the same tokens as the trace, with no repeated target line. */
+/* One tool step: a compact heading plus a single evidence box holding the
+   raw command and the raw result; the box previews five lines and expands. */
 .world-trace-tools > .world-trace-tool { grid-template-columns: 16px minmax(0, 1fr) auto; align-items: start; }
 .world-trace-tool__body { min-width: 0; display: grid; gap: 6px; }
 .world-trace-tool__heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
 .world-trace-tool__heading strong { font-size: 14px; }
 .world-trace-tool__heading code, .world-trace-tool__status { font-size: 12px; }
-.world-trace-tools code.world-trace-tool__target { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; color: var(--text); }
-.world-trace-tools .world-trace-tool__evidence { height: auto; min-width: 0; border: 1px solid var(--border); background: var(--surface-0); }
-.world-trace-tools .world-trace-tool__evidence > summary { display: block; min-height: 36px; padding: 8px 10px; list-style: disclosure-closed; color: var(--text); font-size: 13px; cursor: pointer; }
-.world-trace-tools .world-trace-tool__evidence[open] > summary { list-style: disclosure-open; }
-.world-trace-tools .world-trace-tool__evidence pre { margin: 0; padding: 10px; max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; color: var(--text); user-select: text; }
-.world-trace-tool__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.world-trace-tool__body button { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; padding: 4px 8px; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); font: inherit; font-size: 12px; cursor: pointer; }
-.world-trace-tool__body button:focus-visible, .world-trace-tool__body summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.world-trace-tool__body small { font-size: 12px; line-height: 1.5; }
+.world-trace-tool__heading small, .world-trace-tool__body small { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.world-trace-tool__evidence { min-width: 0; border: 1px solid var(--border); background: var(--surface-0); }
+.world-trace-tool__evidence.is-clickable { cursor: pointer; }
+.world-trace-tool__evidence.is-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.world-trace-tool__evidence > pre { margin: 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; color: var(--text); user-select: text; }
+.world-trace-tool__part { padding: 8px 10px 10px; }
+.world-trace-tool__part + .world-trace-tool__part { border-top: 1px solid var(--border); }
+.world-trace-tool__part > span { display: block; margin-bottom: 4px; font-size: 12px; color: var(--text-muted); }
+.world-trace-tool__part pre { margin: 0; max-height: 480px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; color: var(--text); user-select: text; }
+.world-trace-tool__hint { display: block; padding: 6px 10px; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.5; color: var(--text-muted); }
 @container world-trace (max-width: 520px) { .world-trace-tools > .world-trace-tool { grid-template-columns: 16px minmax(0, 1fr); } .world-trace-tool__status { grid-column: 2; } }
 
 .world-trace-tools li.has-warning > svg { color: var(--danger); }

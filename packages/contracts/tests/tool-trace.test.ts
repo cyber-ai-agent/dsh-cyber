@@ -23,7 +23,7 @@ describe('tool evidence value redaction', () => {
     expect(redactToolTraceText('\u001b[31mfirst\nsecond\u001b[0m')).toBe('first\nsecond')
     const text = redactToolTraceText('password=' + 's'.repeat(500), 80)
     expect(text).not.toContain('ssss')
-    expect(redactToolTraceText('x'.repeat(100_000))).toHaveLength(4_000)
+    expect(redactToolTraceText('x'.repeat(100_000))).toHaveLength(32_000)
   })
   it('suppresses credential container bodies, not source files discussing credentials', () => {
     for (const path of ['.env', '/etc/secrets.json', 'C:\\Users\\alice\\.ssh\\id_rsa', 'HEAD:.env']) expect(isSensitiveToolPath(path)).toBe(true)

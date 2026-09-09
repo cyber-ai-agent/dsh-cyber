@@ -14,17 +14,18 @@ function start(subjects: ToolTraceSubjects, args: object, name = 'read', callId 
   return normalizeHarnessTraceNotification(event('tool/call', { name, callId, arguments: JSON.stringify(args) }, sessionId), subjects)
 }
 
-describe('scoped tool evidence from real rc.1 event shapes', () => {
-  it('preserves long code filenames and real read ranges', () => {
+describe('raw tool evidence from real rc.1 event shapes', () => {
+  it('keeps long code filenames and raw read ranges', () => {
     const summary = summarizeToolCall({ file_path: 'packages/server/src/services/character-profile-runtime.ts', offset: 10, limit: 25 })!
-    expect(summary.summary).toContain('character-profile-runtime.ts')
-    expect(summary.detail).toContain('offset=10')
-    expect(summary.detail).toContain('limit=25')
+    expect(summary.detail).toContain('character-profile-runtime.ts')
+    expect(summary.detail).toContain('"offset": 10')
+    expect(summary.detail).toContain('"limit": 25')
   })
-  it('keeps actual nested text results and never raw input bodies', () => {
+  it('keeps actual nested text results and the raw input bodies', () => {
     const subjects = new ToolTraceSubjects()
-    const [call] = start(subjects, { file_path: 'src/token-counter.ts', content: 'DO-NOT-LOG-RAW-INPUT' })
-    expect(JSON.stringify(call)).not.toContain('DO-NOT-LOG-RAW-INPUT')
+    const [call] = start(subjects, { file_path: 'src/token-counter.ts', content: 'RAW-INPUT-BODY' })
+    // Raw parameters now travel verbatim; nothing is dropped for a trace view.
+    expect(JSON.stringify(call)).toContain('RAW-INPUT-BODY')
     const [done] = normalizeHarnessTraceNotification(result('1 export const count = 1\n2 // next'), subjects)
     expect(done?.metadata.toolOutput).toContain('export const count')
     expect(done?.toolName).toBe('read')
@@ -37,28 +38,27 @@ describe('scoped tool evidence from real rc.1 event shapes', () => {
     expect(normalizeHarnessTraceNotification(result('own'), subjects)[0]?.metadata.toolOutput).toBe('own')
     expect(normalizeHarnessTraceNotification(result('late duplicate'), subjects)[0]?.metadata.toolOutput).toBeUndefined()
   })
-  it('keeps secret filenames visible but suppresses credential container contents', () => {
+  it('shows credential container contents verbatim', () => {
     const subjects = new ToolTraceSubjects()
-    expect(start(subjects, { file_path: '.env' })[0]?.metadata.toolSummary).toBe('.env')
+    expect(start(subjects, { file_path: '.env' })[0]?.metadata.toolSummary).toBe('{"file_path":".env"}')
     const value = normalizeHarnessTraceNotification(result('UNLABELED-PRIVATE-VALUE'), subjects)[0]
-    expect(JSON.stringify(value)).not.toContain('UNLABELED-PRIVATE-VALUE')
-    expect(value?.metadata.toolOutputRedacted).toBe(true)
+    expect(value?.metadata.toolOutput).toBe('UNLABELED-PRIVATE-VALUE')
+    expect(value?.metadata.toolOutputRedacted).toBeUndefined()
   })
-  it('redacts values and clips large results with explicit flags', () => {
+  it('clips large results with an explicit truncation flag, without redacting', () => {
     const subjects = new ToolTraceSubjects()
     start(subjects, { file_path: 'src/index.ts' })
     const [done] = normalizeHarnessTraceNotification(result('access_token="opaque private value"\n' + 'x'.repeat(40_000)), subjects)
-    expect(done?.metadata.toolOutput).not.toContain('opaque private')
-    expect((done?.metadata.toolOutput as string).length).toBeLessThanOrEqual(4_000)
+    expect(done?.metadata.toolOutput).toContain('opaque private value')
+    expect((done?.metadata.toolOutput as string).length).toBeLessThanOrEqual(32_000)
     expect(done?.metadata.toolOutputTruncated).toBe(true)
-    expect(done?.metadata.toolOutputRedacted).toBe(true)
   })
-  it('shows real safe developer command output and suppresses arbitrary script dumps', () => {
+  it('shows developer command output and arbitrary script dumps alike', () => {
     const subjects = new ToolTraceSubjects()
     start(subjects, { command: 'pnpm test' }, 'bash')
     expect(normalizeHarnessTraceNotification(result('13 passed'), subjects)[0]?.metadata.toolOutput).toBe('13 passed')
     start(subjects, { command: 'node -e "console.log(process.env)"' }, 'bash')
-    expect(JSON.stringify(normalizeHarnessTraceNotification(result('UNLABELED-SECRET'), subjects))).not.toContain('UNLABELED-SECRET')
+    expect(normalizeHarnessTraceNotification(result('SECRET-DUMP-AS-IS'), subjects)[0]?.metadata.toolOutput).toBe('SECRET-DUMP-AS-IS')
   })
   it('retains explicitly reported exit code without guessing one from success', () => {
     const subjects = new ToolTraceSubjects()
@@ -72,7 +72,7 @@ describe('scoped tool evidence from real rc.1 event shapes', () => {
   })
 })
 
-it('projects native observed diff hunks and suppresses the canonical target of a secret-file alias', () => {
+it('projects native observed diff hunks verbatim', () => {
   const subjects = new ToolTraceSubjects()
   start(subjects, { file_path: 'src/index.ts', old_string: 'PROPOSED-ONLY' }, 'edit')
   const [done] = normalizeHarnessTraceNotification(event('tool/result', { message: { source: { callId: 'c' }, content: [] }, meta: { diffs: [{ path: 'src/index.ts', oldText: 'const n = 1', newText: 'const n = 2' }] } }), subjects)
@@ -80,6 +80,6 @@ it('projects native observed diff hunks and suppresses the canonical target of a
   expect(done?.metadata.toolOutput).toContain('const n = 2')
   expect(done?.metadata.toolOutput).not.toContain('PROPOSED-ONLY')
   start(subjects, { file_path: 'innocent-link' }, 'read')
-  const [denied] = normalizeHarnessTraceNotification(event('tool/result', { message: { source: { callId: 'c' }, content: [{ type: 'text', text: 'PRIVATE-ALIAS-CONTENT' }] }, meta: { path: '/private/.env' } }), subjects)
-  expect(JSON.stringify(denied)).not.toContain('PRIVATE-ALIAS-CONTENT')
+  const [aliased] = normalizeHarnessTraceNotification(event('tool/result', { message: { source: { callId: 'c' }, content: [{ type: 'text', text: 'PRIVATE-ALIAS-CONTENT' }] }, meta: { path: '/private/.env' } }), subjects)
+  expect(aliased?.metadata.toolOutput).toBe('PRIVATE-ALIAS-CONTENT')
 })

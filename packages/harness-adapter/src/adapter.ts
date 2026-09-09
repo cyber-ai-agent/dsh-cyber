@@ -852,9 +852,9 @@ export function normalizeHarnessTraceNotification(
       const toolName = stringValue(data.name) ?? 'unknown-tool'
       const callId = stringValue(data.callId) ?? 'unknown-call'
       const metadata: JsonObject = { turn: numberValue(data.turn) ?? 0, step: numberValue(data.step) ?? 0 }
-      // The raw argument blob never travels; only its redacted allow-listed
-      // subject does, so the trace can say what a call operated on.
-      toolSubjects?.start(sourceSessionId, callId, toolName, data.arguments)
+      // The raw parameter text (clipped, never redacted) travels as the
+      // trace's "查看参数" evidence for this call.
+      toolSubjects?.start(sourceSessionId, callId, toolName)
       const summary = summarizeToolCall(data.arguments)
       if (summary !== undefined) {
         metadata.toolSummary = summary.summary

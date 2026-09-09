@@ -6,7 +6,7 @@ import { WorldTraceToolItem } from '../src/components/world-trace/WorldTraceTool
 
 let root: Root | undefined
 let container: HTMLDivElement
-const base: WorldTraceToolStep = { callId: 'c', name: 'read', label: '读取文件', status: 'success', description: 'src/character-profile-runtime.ts', input: 'src/character-profile-runtime.ts', durationMs: 11 }
+const base: WorldTraceToolStep = { callId: 'c', name: 'pwsh', label: '执行本地命令', status: 'success', input: 'Get-ChildItem src', output: 'file-a.ts\nfile-b.ts', durationMs: 11 }
 function mount(patch: Partial<WorldTraceToolStep> = {}) {
   container = document.createElement('div'); document.body.append(container)
   root = createRoot(container)
@@ -16,36 +16,45 @@ function mount(patch: Partial<WorldTraceToolStep> = {}) {
 afterEach(() => { if (root) act(() => root!.unmount()); root = undefined; container?.remove(); vi.restoreAllMocks() })
 
 describe('owner-facing tool evidence', () => {
-  it('shows a path once instead of repeating summary and input', () => {
+  it('keeps the label + tool name heading, and drops the redundant target command line', () => {
     const view = mount()
-    expect(view.textContent!.split(base.input!).length - 1).toBe(1)
-    expect(view.querySelector('details')).toBeNull()
-    expect(view.textContent).not.toContain('匹配')
+    expect(view.textContent).toContain('执行本地命令')
+    expect(view.textContent).toContain('pwsh')
+    expect(view.querySelector('.world-trace-tool__target')).toBeNull()
+    // No copy affordances at all: the owner selects text in the box.
+    expect(view.querySelector('button')).toBeNull()
   })
-  it('expands distinct parameters and actual result, with truthful truncation notices', () => {
-    const view = mount({ input: `${base.input} · offset=20 · limit=5`, output: '20 export const value = 1\n21 // next', outputTruncated: true, outputRedacted: true })
-    const details = [...view.querySelectorAll('details')]
-    expect(details).toHaveLength(2)
-    expect(details[1]?.textContent).toContain('已截断')
-    expect(details[1]?.textContent).toContain('已脱敏')
-    act(() => details[1]!.querySelector('summary')!.click())
-    expect(details[1]!.open).toBe(true)
-    expect(details[1]!.querySelector('pre')!.textContent).toContain('20 export const value')
+  it('shows command and result in one box, collapsed to five lines by default', () => {
+    const view = mount({ output: Array.from({ length: 8 }, (_, index) => `line-${index + 1}`).join('\n') })
+    const box = view.querySelector('.world-trace-tool__evidence')!
+    expect(box).not.toBeNull()
+    // Collapsed: a five-line preview without section labels.
+    expect(box.querySelector('pre')!.textContent).toContain('Get-ChildItem src')
+    expect(box.textContent).toContain('line-4')
+    expect(box.textContent).not.toContain('line-8')
+    expect(box.classList.contains('is-clickable')).toBe(true)
+    act(() => box.querySelector('pre')!.click())
+    // Expanded: the full raw command and the full raw result, labeled.
+    expect(box.textContent).toContain('line-8')
+    expect(box.textContent).toContain('命令')
+    expect(box.textContent).toContain('结果')
+    act(() => box.querySelector('pre')!.click())
+    expect(box.textContent).not.toContain('line-8')
   })
-  it('copies only displayed sanitized result and reports copy failure', async () => {
-    const copy = vi.fn().mockResolvedValue(undefined)
-    vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue({ writeText: copy } as unknown as Clipboard)
-    const view = mount({ output: 'token=[已隐藏敏感信息]' })
-    const button = [...view.querySelectorAll('button')].find((entry) => entry.textContent?.includes('复制结果'))!
-    await act(async () => button.click())
-    expect(copy).toHaveBeenCalledWith('token=[已隐藏敏感信息]')
-    expect(view.querySelector('[role=status]')?.textContent).toBe('已复制')
-    copy.mockRejectedValue(new Error('denied'))
-    await act(async () => button.click())
-    expect(view.querySelector('[role=status]')?.textContent).toContain('复制失败')
+  it('shows short content in full without an expand affordance', () => {
+    const view = mount()
+    const box = view.querySelector('.world-trace-tool__evidence')!
+    expect(box.classList.contains('is-clickable')).toBe(false)
+    expect(box.querySelector('pre')!.textContent).toBe('Get-ChildItem src\nfile-a.ts\nfile-b.ts')
+  })
+  it('renders only the available side when the result is missing', () => {
+    const view = mount({ output: undefined, status: 'running' })
+    const box = view.querySelector('.world-trace-tool__evidence')!
+    expect(box.querySelector('pre')!.textContent).toBe('Get-ChildItem src')
+    expect(box.textContent).not.toContain('结果')
   })
   it('does not equate writing an artifact manifest with publishing an artifact', () => {
-    const view = mount({ name: 'write', label: '写入文件', input: '.dsh/artifacts/run-123.json', description: '.dsh/artifacts/run-123.json' })
+    const view = mount({ name: 'write', label: '写入文件', input: '.dsh/artifacts/run-123.json' })
     expect(view.textContent).toContain('写入产物登记清单')
     expect(view.textContent).toContain('不同步骤')
     expect(view.textContent).not.toContain('登记成功')
