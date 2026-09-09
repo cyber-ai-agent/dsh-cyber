@@ -85,6 +85,12 @@ export const CUSTOM_TOOL_NAME = /^[a-z0-9][a-z0-9._+-]{0,63}$/
 export class EnvironmentService implements EnvironmentContextPort {
   readonly #store: EnvironmentProfileStore
   readonly #options: EnvironmentServiceOptions
+  /**
+   * One local probe at a time. Several lanes can cross their first boundary
+   * together; they must share the fast PATH scan and its durable publish
+   * instead of each lane paying for a separate fsync.
+   */
+  #localRefresh: { tier: EnvironmentProbeTier; promise: Promise<EnvironmentProfile> } | undefined
 
   constructor(store: EnvironmentProfileStore, options: EnvironmentServiceOptions = {}) {
     this.#store = store
@@ -107,6 +113,26 @@ export class EnvironmentService implements EnvironmentContextPort {
    * knowledge, not probe facts.
    */
   async refreshLocal(tier: EnvironmentProbeTier = 'full'): Promise<EnvironmentProfile> {
+    const active = this.#localRefresh
+    if (active !== undefined) {
+      // A full refresh is at least as strong as a fast one, so a fast caller
+      // can safely consume it. If a full refresh arrives while a fast one is
+      // publishing, chain it after that publish instead of racing two writes.
+      if (active.tier === 'full' || active.tier === tier) return active.promise
+      if (tier === 'full') {
+        const promise = active.promise
+          .catch(() => undefined)
+          .then(() => this.#refreshLocal(tier))
+        this.#localRefresh = { tier, promise }
+        return this.#awaitLocalRefresh(promise)
+      }
+    }
+    const promise = this.#refreshLocal(tier)
+    this.#localRefresh = { tier, promise }
+    return this.#awaitLocalRefresh(promise)
+  }
+
+  async #refreshLocal(tier: EnvironmentProbeTier): Promise<EnvironmentProfile> {
     const existing = this.#store.load(LOCAL_ENVIRONMENT_PROFILE_ID)
     // Custom names are part of the battery from now on; a refresh that forgot
     // them would silently delete the owner's own entries.
@@ -132,6 +158,14 @@ export class EnvironmentService implements EnvironmentContextPort {
     }
     await this.#store.save(profile)
     return profile
+  }
+
+  async #awaitLocalRefresh(promise: Promise<EnvironmentProfile>): Promise<EnvironmentProfile> {
+    try {
+      return await promise
+    } finally {
+      if (this.#localRefresh?.promise === promise) this.#localRefresh = undefined
+    }
   }
 
   /**
@@ -248,6 +282,13 @@ export class EnvironmentService implements EnvironmentContextPort {
     if (tier !== undefined) {
       try {
         profile = await this.refreshLocal(tier)
+        // Presence discovery is the only probe allowed on the turn's critical
+        // path. A version refresh is still owed, but it must not hold up a
+        // queued follow-up or a second concurrent lane; publish it in the
+        // background and let the next boundary consume the result.
+        if (tier === 'fast' && profile.fullDirty) {
+          setTimeout(() => { void this.refreshLocal('full').catch(() => undefined) }, 0)
+        }
       } catch {
         // A failed probe keeps whatever the host already knew.
       }
