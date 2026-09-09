@@ -105,6 +105,13 @@ export interface ComposeTurnContextInput {
    */
   worldContext?: ContextLayer
   worldDirectory?: ContextLayer
+  /**
+   * The host-probed machine facts (OS, shell, available/missing CLIs, host
+   * notes). Stable per machine and pinned per conversation lane upstream:
+   * it joins the cacheable prefix, so nothing that moves per turn may be in
+   * it either.
+   */
+  environment?: ContextLayer
   conversationId: string
   prompt: string
   history: readonly ConversationHistoryEntry[]
@@ -268,18 +275,20 @@ export class ConversationContextComposer {
     })
 
     const worldContext = input.worldContext
+    const environment = input.environment
     const envelope = composeContextEnvelope({
       stableIdentity,
       ...(worldContext === undefined ? {} : { worldContext }),
       ...(input.worldDirectory === undefined ? {} : { worldDirectory: input.worldDirectory }),
+      ...(environment === undefined ? {} : { environment }),
       promptCache: derivePromptCachePolicy({
-        stablePrefixHash: stableContextHash(stableIdentity, worldContext, input.worldDirectory),
+        stablePrefixHash: stableContextHash(stableIdentity, worldContext, input.worldDirectory, environment),
         // Partitioned down to the character. Two characters whose prefixes are
         // byte-identical still never share one, because a cache partition is a
         // boundary and boundaries are not an optimisation.
         namespace: `${input.employee.worldId}/${input.employee.id}`,
         scope: 'employee',
-        stablePrefixTokens: stableIdentity.tokenEstimate + (worldContext?.tokenEstimate ?? 0) + (input.worldDirectory?.tokenEstimate ?? 0),
+        stablePrefixTokens: stableIdentity.tokenEstimate + (worldContext?.tokenEstimate ?? 0) + (input.worldDirectory?.tokenEstimate ?? 0) + (environment?.tokenEstimate ?? 0),
         // A direct lane is the same character answering again tomorrow; a group
         // or task lane is assembled per collaboration and rarely reruns.
         retentionHint: lane === 'direct' ? 'long' : 'short',

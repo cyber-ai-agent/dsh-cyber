@@ -6,7 +6,7 @@ const JOURNAL_SCHEMA_VERSION = 1
 const TRANSACTIONS_DIRECTORY = '.restore-transactions'
 const JOURNAL_FILE = 'journal.json'
 
-const ALLOWED_TOP_LEVELS = new Set(['data', 'worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations'])
+const ALLOWED_TOP_LEVELS = new Set(['data', 'worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations', 'environments'])
 
 export type LocalRestoreTransactionPhase =
   | 'prepared'

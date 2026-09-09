@@ -1,6 +1,7 @@
 import {
   CheckCircle,
   Cpu,
+  Desktop,
   Info,
   MagnifyingGlass,
   Palette,
@@ -16,6 +17,7 @@ import type { AgentPermissionMode, ModelAssignment, ModelProfile, ReasoningEffor
 
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 import { ModelPicker } from '../features/models/ModelPicker.js'
+import { MachineProfilePanel } from '../features/machine-profile/MachineProfilePanel.js'
 import { applyWorldTheme, DEFAULT_SKIN_ID, readWorldTheme, saveWorldTheme, themeRegistry } from '../features/world/world-themes.js'
 import { useI18n } from '../i18n/runtime.js'
 
@@ -30,7 +32,7 @@ interface WorldSettingsDialogProps {
   onSave(value: WorldSettings): Promise<void>
 }
 
-type WorldManagementTab = 'basic' | 'visual' | 'model' | 'permissions'
+type WorldManagementTab = 'basic' | 'visual' | 'model' | 'permissions' | 'machine'
 
 /**
  * Resolve the model shown by the "restore inherited" action.
@@ -221,6 +223,14 @@ export function WorldSettingsDialog({
           >
             <ShieldCheck size={16} />
             <span>{t('worldSettings.tabPermissions', '技能权限')}</span>
+          </button>
+          <button
+            type="button"
+            className={`world-tab-btn ${activeTab === 'machine' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('machine')}
+          >
+            <Desktop size={16} />
+            <span>{t('machineProfile.title', '机器档案')}</span>
           </button>
         </nav>
 
@@ -599,6 +609,11 @@ export function WorldSettingsDialog({
                 </div>
               </div>
             </section>
+          </div>
+          <div className="world-tab-panel" hidden={activeTab !== 'machine'}>
+            {/* Host state, not world state: the panel owns its own fetch and
+                refresh, so closing without saving never touches it. */}
+            <MachineProfilePanel />
           </div>
         </div>
 

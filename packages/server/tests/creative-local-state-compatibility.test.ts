@@ -74,6 +74,8 @@ describe('local-first creative state compatibility', () => {
     await writeFile(join(root, 'skills', 'actions.json'), '{"version":2,"actions":[]}\n')
     await mkdir(join(root, 'integrations'), { recursive: true })
     await writeFile(join(root, 'integrations', 'connections.json'), '{"version":1,"items":[]}\n')
+    await mkdir(join(root, 'environments'), { recursive: true })
+    await writeFile(join(root, 'environments', 'local.json'), '{"schemaVersion":1,"profileId":"local"}\n')
     await mkdir(join(root, 'credentials'), { recursive: true })
     await writeFile(join(root, 'credentials', 'secret.bin'), 'must-not-be-backed-up')
     await mkdir(join(root, 'runtime'), { recursive: true })
@@ -111,10 +113,13 @@ describe('local-first creative state compatibility', () => {
     }
 
     expect(bundle.format).toBe('dsh-cyber-local-backup')
-    expect(bundle.included).toEqual(expect.arrayContaining(['database.sqlite', 'workshop', 'skills', 'integrations']))
+    expect(bundle.included).toEqual(expect.arrayContaining(['database.sqlite', 'workshop', 'skills', 'integrations', 'environments']))
     expect(paths).toContain('workshop/projects/project-a/project.json')
     expect(paths).toContain('skills/actions.json')
     expect(paths).toContain('integrations/connections.json')
+    // The host's own machine profile is local-first state too: an upgrade or a
+    // restore must not silently drop what the host learned about this machine.
+    expect(paths).toContain('environments/local.json')
     expect(paths.some((path) => path.startsWith('credentials/'))).toBe(false)
     expect(paths.some((path) => path.startsWith('runtime/'))).toBe(false)
     expect(bundle.excluded).toEqual(expect.arrayContaining(['credentials', 'runtime']))

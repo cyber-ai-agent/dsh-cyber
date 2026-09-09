@@ -52,6 +52,8 @@ import { AssetService } from './services/asset-service.js'
 import { LocalTtsAssetService } from './services/local-tts-asset-service.js'
 import { ApplicationAccessService } from './services/application-access-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
+import { createEnvironmentService } from './environments/environment-service.js'
+import { composeSshEnvironmentDeviceSource } from './composition/compose-environment.js'
 import { ContextPlanningRuntime, contextModelLimits } from './services/context-planning-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { composeConversationControl } from './services/conversation-control-composition.js'
@@ -237,9 +239,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   const worldFiles = new WorldFileService(worldRoots)
   const worldKnowledgeRepository = new WorldKnowledgeRepository(store.database)
   const worldKnowledgeSearch = createKnowledgeSearchPort({
-    // The repository always exposes a world-scoped indexed SQL path. This
-    // fallback is deliberately empty so the chat hot path can never degrade
-    // into reading every chunk into JavaScript.
+    // A world-scoped indexed SQL path always exists; this fallback is empty on purpose.
     listChunks: () => [],
     searchIndexed: (input) => worldKnowledgeRepository.search(input.worldId, input.query, input.limit),
   }, store.database)
@@ -285,11 +285,13 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
 
   const worldManagementHost = createWorldManagementHost({ store, worldSettings, worldPackages, authority })
 
+  const environments = createEnvironmentService(stateRoot, { devices: composeSshEnvironmentDeviceSource({ store, integrations }) })
+
   const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry({
     firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId) },
     browser: { store, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), publishScreenshot: (input) => worldArtifacts.publishBrowserScreenshot(input), ...(options.browserClientFactory === undefined ? {} : { clientFactory: options.browserClientFactory }), ...(options.browserPolicy === undefined ? {} : { policy: options.browserPolicy }) },
     worldManagement: worldManagementHost,
-    ssh: { store, integrations, sessions: sshSessions, connectionGrantsFor: createConnectionGrantsResolver(store) },
+    ssh: { store, integrations, sessions: sshSessions, connectionGrantsFor: createConnectionGrantsResolver(store), environment: environments },
   })
   const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
@@ -309,14 +311,11 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     publish: (worldId, payload) => publishKnowledgeChanged?.(worldId, payload),
   })
   const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, request) } })
-  // World settings are the source of the envelope's `world-context` layer: the
-  // runtime renders them into the cacheable prefix, so the request composers
-  // below no longer repeat them behind the retrieved memories.
-  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings, runFileEvidence)
+  // World settings and the host-probed machine profile are rendered by the runtime into the cacheable prefix.
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings, runFileEvidence, environments)
   const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
   const loggingRuntime = new TurnInteractionLoggingRuntime({ inner: contextRuntime, service: interactions, resolveRoute(request) { return resolveHarnessRoute(store, request) } })
-  // Image-model turns branch before the whole chat stack: the prompt goes to
-  // the images endpoint and never becomes a conversational request.
+  // Image-model turns branch before the chat stack: the prompt goes to the images endpoint.
   const runtime = createImageAwareRuntime({ inner: loggingRuntime, store, credentials, images: new ImageGenerationService(), worldFiles, interactions })
   const completionWorker = composeCompletionWorker(store, worldArtifacts)
   const groupTurnPlanner = composeGroupTurnPlanner(store, credentials, options.groupTurnPlanner)
@@ -410,8 +409,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   let skillActions = options.skillActionRepository
   if (skillActions === undefined) {
     const sqliteActions = new SqliteSkillActionRepository(store)
-    // A corrupt legacy ledger must not stop a local-first application from
-    // starting; the SQLite ledger is authoritative and already loaded.
+    // A corrupt legacy ledger must not stop startup; SQLite is authoritative and already loaded.
     try {
       const legacyActions = new LocalSkillActionRepository(join(stateRoot, 'skills', 'actions.json'))
       for (const workspace of store.listWorkspaces()) {
@@ -454,7 +452,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   const router = new Router()
   const { work: workSystem, taskIntent } = composeWorkSystem({ store, credentials, groupTasks, router, worldAccess, worldRuntime, skillRuntime, continuations: turnContinuations, ...(options.conversationTaskIntent === undefined ? {} : { intentClassifier: options.conversationTaskIntent }) })
   registerApplicationAccessRoutes(router, applicationAccess)
-  registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
+  registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates, environments })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
   composeGenerators({ store, credentials, skillCatalog, packageCatalog, marketplace: generatedMarketplace, overrides: options }).registerGeneratorRoutes(router)
@@ -464,6 +462,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   registerIntegrationRoutes(router, {
     store,
     integrations,
+    environments,
     onChanged: async (integrationId) => {
       if (integrationId === MCP_INTEGRATION_ID && mcpAdapter !== undefined) await refreshMcpCatalog(mcpAdapter, skillRegistry)
     },

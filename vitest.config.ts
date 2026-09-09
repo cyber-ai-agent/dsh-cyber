@@ -10,6 +10,13 @@ const shared = {
 
 export default defineConfig({
   test: {
+    // Vitest defaults to `availableParallelism() - 1` fork workers per project.
+    // On a 24-core developer machine that is 23 Node child processes per
+    // project (46 across both), each holding its own module graph; the
+    // resulting temp-directory churn has already cost one full run to ENOSPC.
+    // The cap is per project, so 4 + 4 keeps the whole suite at eight fork
+    // workers without giving up file-level parallelism.
+    maxWorkers: 4,
     projects: [
       {
         test: {

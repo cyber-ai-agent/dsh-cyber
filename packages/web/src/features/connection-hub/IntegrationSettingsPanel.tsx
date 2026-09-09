@@ -7,6 +7,7 @@ import type {
   JsonObject,
 } from '@dsh-cyber/contracts'
 import { api } from '../../api.js'
+import { MachineProfilePanel } from '../machine-profile/MachineProfilePanel.js'
 
 export interface IntegrationSettingsPanelProps {
   workspaceId: string
@@ -211,6 +212,9 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
             </label>
           })}
           <div className="integration-egress"><strong>会发送到外部服务</strong><span>{descriptor.dataEgress.join('、') || '无'}</span></div>
+          {descriptor.id === 'builtin.ssh-device' && connection !== undefined ? (
+            <MachineProfilePanel scope={{ workspaceId, integrationId: descriptor.id, connectionId: connection.id }} />
+          ) : null}
           {error ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
           {health ? <p className={health.status === 'ready' ? 'model-form-message model-form-message--success' : 'model-form-message model-form-message--error'} role="status">{health.detail}{typeof health.latencyMs === 'number' ? ` · ${health.latencyMs} ms` : ''}</p> : null}
           <footer>

@@ -8,6 +8,9 @@ import type { Router } from '../http/router.js'
 import type { IntegrationService } from '../integrations/integration-service.js'
 import { FIRECRAWL_INTEGRATION_ID } from '../integrations/firecrawl-provider.js'
 import { FIRECRAWL_SEARCH_SKILL } from '../skills/firecrawl-skill-adapter.js'
+import { sshEnvironmentDeviceTarget } from '../composition/compose-environment.js'
+import type { EnvironmentService } from '../environments/environment-service.js'
+import type { EnvironmentProbeTier } from '../environments/environment-probe.js'
 
 function parseSecretWrites(body: Record<string, unknown>): { secrets?: Record<string, string>; clearSecretFields?: string[] } {
   const rawSecrets = record(body.secrets)
@@ -30,14 +33,36 @@ function parseClearSecretFields(body: Record<string, unknown>): { clearSecretFie
   return { clearSecretFields: clear as string[] }
 }
 
-export function registerIntegrationRoutes(router: Router, dependencies: { store: SqliteStore; integrations: IntegrationService; onChanged?: (integrationId: string) => Promise<void> }): void {
-  const { store, integrations, onChanged } = dependencies
+export function registerIntegrationRoutes(router: Router, dependencies: { store: SqliteStore; integrations: IntegrationService; environments?: EnvironmentService; onChanged?: (integrationId: string) => Promise<void> }): void {
+  const { store, integrations, environments, onChanged } = dependencies
 
   router.get(/^\/api\/workspaces\/([^/]+)\/integrations$/, ({ response, params }) => {
     const workspaceId = requireWorkspace(store, params[0]!)
     const descriptors = visibleDescriptors(store, integrations, workspaceId)
     const allowed = new Set(descriptors.map((descriptor) => descriptor.id))
     writeJson(response, 200, { descriptors, items: integrations.list(workspaceId).filter((item) => allowed.has(item.integrationId)) })
+  })
+
+  // Device machine profile. Reading is free; probing costs a real SSH round
+  // trip, so it only happens on the owner's explicit refresh.
+  router.get(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/connections\/([^/]+)\/environment$/, ({ response, params }) => {
+    const workspaceId = requireWorkspace(store, params[0]!); const integrationId = params[1]!; const connectionId = params[2]!
+    assertConnection(store, integrations, workspaceId, integrationId, connectionId)
+    writeJson(response, 200, { profile: environments?.profile(`ssh:${connectionId}`) ?? null })
+  })
+
+  router.post(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/connections\/([^/]+)\/environment\/refresh$/, async ({ request, response, params }) => {
+    const workspaceId = requireWorkspace(store, params[0]!); const integrationId = params[1]!; const connectionId = params[2]!
+    assertConnection(store, integrations, workspaceId, integrationId, connectionId)
+    if (environments === undefined) throw new HttpError(503, 'environment_unavailable', '本机环境档案服务未启用')
+    const target = sshEnvironmentDeviceTarget({ integrations, workspaceId, connectionId })
+    if (target === undefined) throw new HttpError(422, 'environment_device_unavailable', '设备未启用或缺少私钥/密码凭据')
+    const body = record(await readJson(request)) ?? {}
+    const tier = body.tier === undefined ? 'full' : body.tier === 'fast' || body.tier === 'full' ? body.tier : undefined
+    if (tier === undefined) throw new HttpError(422, 'environment_tier_invalid', '刷新层级无效')
+    const profile = await environments.refreshDevice(target, tier as EnvironmentProbeTier)
+    if (profile === undefined) throw new HttpError(502, 'environment_device_unprobeable', '该设备没有返回可识别的系统信息')
+    writeJson(response, 200, { profile })
   })
 
   router.put(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/connections\/([^/]+)$/, async ({ request, response, params }) => {
@@ -144,6 +169,15 @@ function visibleDescriptors(store: SqliteStore, integrations: IntegrationService
 function assertIntegrationAvailable(store: SqliteStore, workspaceId: string, integrationId: string): void {
   if (integrationId === FIRECRAWL_INTEGRATION_ID && !hasFirecrawlPackage(store, workspaceId)) {
     throw new HttpError(409, 'integration_requires_package', '请先安装对应插件，再配置这个外部连接')
+  }
+}
+
+/** The connection must exist and belong to the integration the path names. */
+function assertConnection(store: SqliteStore, integrations: IntegrationService, workspaceId: string, integrationId: string, connectionId: string): void {
+  assertIntegrationAvailable(store, workspaceId, integrationId)
+  const connection = integrations.getById(workspaceId, connectionId)
+  if (connection === undefined || connection.integrationId !== integrationId) {
+    throw new HttpError(404, 'integration_connection_not_found', '外部连接不存在')
   }
 }
 
