@@ -104,6 +104,7 @@ import { WorldPermissionRequestService } from './services/world-permission-reque
 import { OwnerRuntimeAccessService } from './services/owner-runtime-access-service.js'
 import { WorldRuntimePermissionResolver } from './services/world-runtime-permission-resolver.js'
 import { createBuiltinSkillRegistry, createConnectionGrantsResolver } from './skills/builtin-skill-registry.js'
+import { SshSessionPool } from './integrations/ssh-client.js'
 import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
 import { SqliteSkillActionRepository } from './skills/sqlite-skill-action-repository.js'
 import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
@@ -275,14 +276,12 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   })
   const mcpClients = options.mcpClientFactory ?? new OfficialMcpClientFactory()
   const integrations = await IntegrationService.open(stateRoot, createBuiltinIntegrationRegistry(mcpClients))
-  // Keep one transport/timeout boundary for both the Skill adapter and the
-  // Knowledge Library. Credentials remain owned by IntegrationService; the
-  // client is only the provider-neutral request path.
   const firecrawlClient = new FirecrawlClient({ integrations })
   const knowledgeWeb = new KnowledgeWebImportService({
     client: firecrawlClient,
     library: worldKnowledge,
   })
+  const sshSessions = new SshSessionPool()
 
   const worldManagementHost = createWorldManagementHost({ store, worldSettings, worldPackages, authority })
 
@@ -290,7 +289,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId) },
     browser: { store, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), publishScreenshot: (input) => worldArtifacts.publishBrowserScreenshot(input), ...(options.browserClientFactory === undefined ? {} : { clientFactory: options.browserClientFactory }), ...(options.browserPolicy === undefined ? {} : { policy: options.browserPolicy }) },
     worldManagement: worldManagementHost,
-    ssh: { store, integrations, connectionGrantsFor: createConnectionGrantsResolver(store) },
+    ssh: { store, integrations, sessions: sshSessions, connectionGrantsFor: createConnectionGrantsResolver(store) },
   })
   const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
@@ -573,6 +572,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
       await completionWorker.close()
       credentials.close()
       integrations.close()
+      sshSessions.close()
       store.close()
     },
   }

@@ -3,16 +3,18 @@ import type { JsonObject } from '@dsh-cyber/contracts'
 
 import { SSH_DEVICE_INTEGRATION_ID } from '../integrations/ssh-provider.js'
 import type { IntegrationService } from '../integrations/integration-service.js'
-import { SshError, sshExecOnce } from '../integrations/ssh-client.js'
+import { SshError, SshSessionPool } from '../integrations/ssh-client.js'
+import type { SshDeviceCredential } from '../integrations/ssh-client.js'
+import { osProbeCommand, parseSshOperation, resolveOs, sshCommandFor, type SshOperation } from './ssh-command-parser.js'
 import type {
   CharacterSkillActionProposal,
   CharacterSkillAdapter,
   CharacterSkillExecutionContext,
   CharacterSkillExecutionResult,
+  CharacterSkillInstructionContext,
   CharacterSkillMatchContext,
   CharacterSkillPreflightResult,
 } from './skill-adapter.js'
-import { osProbeCommand, parseSshOperation, resolveOs, sshCommandFor, type SshOperation } from './ssh-command-parser.js'
 
 export const SSH_COMMAND_SKILL = 'device.ssh.command'
 export const SSH_COMMAND_ADAPTER_ID = 'builtin.ssh-device'
@@ -43,6 +45,8 @@ export interface SshSkillAdapterOptions {
   integrations: IntegrationService
   /** Returns the character's current revision grants; undefined blocks connect use. */
   connectionGrantsFor?(characterId: string): readonly string[] | undefined
+  /** Shared long-lived sessions; default per-command connection when omitted. */
+  sessions?: SshSessionPool
 }
 
 /** Minimal store shape the grants resolver needs (SqliteStore satisfies it). */
@@ -64,66 +68,91 @@ export function createConnectionGrantsResolver(store: ConnectionGrantsRevisionSt
   }
 }
 
+interface DeviceRef {
+  id: string
+  displayName: string
+  host: string
+}
+
 export class SshSkillAdapter implements CharacterSkillAdapter {
   readonly id = SSH_COMMAND_ADAPTER_ID
   readonly descriptors = [DESCRIPTOR] as const
   readonly #store: { getWorld(worldId: string): WorldRef | undefined }
   readonly #integrations: IntegrationService
   readonly #connectionGrantsFor: ((characterId: string) => readonly string[] | undefined) | undefined
+  readonly #sessions: SshSessionPool | undefined
 
   constructor(options: SshSkillAdapterOptions) {
     this.#store = options.store
     this.#integrations = options.integrations
     this.#connectionGrantsFor = options.connectionGrantsFor
+    this.#sessions = options.sessions
+  }
+
+  /**
+   * Per-character capability note folded into the persona. The character
+   * learns it can operate its granted devices and how the user phrases a
+   * request, so SSH stops being an invisible skill. Credential-free and
+   * bounded by the current grant list so it can live in the cacheable prefix.
+   */
+  instructionsFor(context: CharacterSkillInstructionContext): string[] | undefined {
+    if (!context.grantedSkillIds.includes(SSH_COMMAND_SKILL)) return undefined
+    if (context.workspaceId === undefined) return undefined
+    const devices = this.#grantedDevices(context.workspaceId, context.characterId)
+    if (devices.length === 0) {
+      return ['SSH 设备操作：你已经获得这项能力，但目前没有授权可操作的设备。请让用户先到“连接中心”添加并启用设备，再到你的角色设置勾选这台设备后，你才能执行设备命令。']
+    }
+    const lines = devices.map((device) => `- ${device.displayName}（${device.host}）`).join('\n')
+    const instruction = devices.length === 1
+      ? `你可以操作这台设备，用户说“连这台设备看看磁盘/内存/进程”等自然表达时，你会收到经过批准的受控命令。`
+      : `你可以操作这些设备；当用户说出设备名和操作（例如“连${devices[0]!.displayName}看看磁盘”）时，你会收到经过批准的受控命令；用户没有指明是哪台设备时，先问清楚再执行。`
+    return [`SSH 设备操作（已授权设备）：\n${lines}\n${instruction}`]
   }
 
   propose(context: CharacterSkillMatchContext): CharacterSkillActionProposal[] {
     if (!context.grantedSkillIds.includes(SSH_COMMAND_SKILL)) return []
-    const op = parseSshOperation(context.prompt)
-    if (op === undefined) return []
     const world = this.#store.getWorld(context.worldId)
-    const deviceLabel = world === undefined ? undefined : this.#resolveDeviceLabel(world.workspaceId, op)
+    if (world === undefined) return []
+    const devices = this.#grantedDevices(world.workspaceId, context.characterId)
+    if (devices.length === 0) return []
+    const op = parseSshOperation(context.prompt, {
+      deviceCandidates: devices.map(({ displayName, host }) => ({ displayName, host })),
+      ...(devices.length === 1 ? { singleDefaultDisplayName: devices[0]!.displayName } : {}),
+    })
+    if (op === undefined) return []
+    const match = matchDevice(devices, op.connectionId)
+    if (match === undefined) {
+      // The role owns several devices but the user named none (or an unknown
+      // one): never guess. The persona note tells the role to ask for it.
+      return []
+    }
     return [{
       skillId: SSH_COMMAND_SKILL,
       adapterId: this.id,
       action: `ssh.${op.op}`,
       target: 'ssh:device',
-      label: deviceLabel === undefined ? op.summary : `${op.summary}（设备：${deviceLabel}）`,
+      label: `${op.summary}（设备：${match.displayName}）`,
       risk: 'external-side-effect',
       authorization: 'explicit-user-request',
       parameters: {
         op: op.op,
         summary: op.summary,
         params: op.params,
-        ...(op.connectionId === undefined ? {} : { deviceHint: op.connectionId }),
+        deviceId: match.id,
       },
     }]
-  }
-
-  #resolveDeviceLabel(workspaceId: string, op: SshOperation): string | undefined {
-    const hint = op.connectionId
-    const devices = this.#integrations.listByType(workspaceId, SSH_DEVICE_INTEGRATION_ID)
-    if (devices.length === 0) return undefined
-    const match = hint === undefined
-      ? (devices.length === 1 ? devices[0] : undefined)
-      : devices.find((item) => item.displayName === hint || String(item.config.host ?? '') === hint)
-    return match?.displayName ?? hint
   }
 
   async preflight(action: CharacterSkillAction): Promise<CharacterSkillPreflightResult> {
     const world = this.#store.getWorld(action.worldId)
     if (world === undefined) return { ready: false, detail: '当前世界不存在' }
-    const op = parseOperationParams(action.parameters)
-    if (op === undefined) return { ready: false, detail: 'SSH 动作参数无效' }
-    const connectionId = await this.#resolveConnectionId(world.workspaceId, action, op)
-    if (connectionId === undefined) {
-      return { ready: false, detail: '当前工作区没有可用的 SSH 设备，请先在“连接中心”添加设备' }
+    if (parseOperationParams(action.parameters) === undefined) return { ready: false, detail: 'SSH 动作参数无效' }
+    const connectionId = this.#resolveDeviceId(world.workspaceId, action)
+    if (connectionId === undefined) return { ready: false, detail: '没有可用或匹配的 SSH 设备，请先在“连接中心”添加设备' }
+    if (!this.#isConnectionGranted(action.characterId, connectionId)) {
+      return { ready: false, detail: '该角色没有被授权使用这台设备，请在角色设置中勾选对应连接' }
     }
-    const granted = this.#isConnectionGranted(action.characterId, connectionId)
-    if (!granted) return { ready: false, detail: '该角色没有被授权使用这台设备，请在角色设置中勾选对应连接' }
-    const connection = this.#integrations.getById(world.workspaceId, connectionId)
-    const secrets = this.#integrations.secretsForConnection(world.workspaceId, connectionId)
-    if (connection === undefined || !connection.enabled || secrets === undefined || (!secrets.privateKey && !secrets.password)) {
+    if (this.#secretsFor(world.workspaceId, connectionId) === undefined) {
       return { ready: false, detail: '目标设备未启用或缺少私钥/密码凭据' }
     }
     return { ready: true }
@@ -135,32 +164,37 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
     const workspaceId = world.workspaceId
     const op = parseOperationParams(action.parameters)
     if (op === undefined) return { status: 'failed', detail: 'SSH 动作参数无效，未执行任何命令' }
-    const connectionId = await this.#resolveConnectionId(workspaceId, action, op)
+    const connectionId = this.#resolveDeviceId(workspaceId, action)
     if (connectionId === undefined) {
-      return { status: 'waiting-for-integration', detail: '没有指定要操作的设备，请先在“连接中心”添加并选择设备' }
+      return { status: 'waiting-for-integration', detail: '没有可用或匹配的 SSH 设备，请先在“连接中心”添加设备' }
     }
     if (!this.#isConnectionGranted(action.characterId, connectionId)) {
       return { status: 'failed', detail: '该角色没有被授权使用这台设备，动作未执行' }
     }
-    const connection = this.#integrations.getById(workspaceId, connectionId)
-    const secrets = this.#integrations.secretsForConnection(workspaceId, connectionId)
-    if (connection === undefined || !connection.enabled || secrets === undefined || (!secrets.privateKey && !secrets.password)) {
+    const secrets = this.#secretsFor(workspaceId, connectionId)
+    if (secrets === undefined) {
       return { status: 'waiting-for-integration', detail: '该设备未启用或尚未配置私钥/密码，未发送任何命令' }
     }
-    const config = connection.config
-    const device = {
+    const connection = this.#integrations.getById(workspaceId, connectionId)
+    const config = connection?.config
+    if (config === undefined) return { status: 'failed', detail: '目标设备信息不存在，未执行任何命令' }
+    const device: SshDeviceCredential = {
       host: String(config.host ?? connectionId),
       port: Number(config.port ?? 22),
       username: String(config.username ?? 'root'),
       ...(secrets.privateKey === undefined ? {} : { privateKey: secrets.privateKey }),
       ...(secrets.privateKey !== undefined || secrets.password === undefined ? {} : { password: secrets.password }),
     }
+    const exec = (command: string) => this.#sessions === undefined
+      ? execFresh(device, command)
+      : this.#sessions.exec(device, command)
     try {
-      const probe = await sshExecOnce(device, osProbeCommand())
+      // OS probe and the actual command share one session when pooling is on.
+      const probe = await exec(osProbeCommand())
       const os = resolveOs(probe.stdout)
       const command = sshCommandFor(op, os)
       if (command === undefined) return { status: 'failed', detail: `当前设备系统暂不支持该操作（detected ${os}）` }
-      const result = await sshExecOnce(device, command)
+      const result = await exec(command)
       return { status: 'executed', detail: summarize(op.summary, result.stdout, result.stderr, result.code) }
     } catch (error) {
       if (error instanceof SshError) {
@@ -179,16 +213,53 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
     return grants !== undefined && grants.includes(connectionId)
   }
 
-  async #resolveConnectionId(workspaceId: string, action: CharacterSkillAction, op: SshOperation): Promise<string | undefined> {
-    const hint = typeof action.parameters.deviceHint === 'string' && action.parameters.deviceHint.trim()
-      ? action.parameters.deviceHint.trim()
-      : op.connectionId
-    const devices = this.#integrations.listByType(workspaceId, SSH_DEVICE_INTEGRATION_ID)
-    if (devices.length === 0) return undefined
-    if (hint === undefined) return devices.length === 1 ? devices[0]!.id : undefined
-    const byName = devices.find((item) => item.displayName === hint || String(item.config.host ?? '') === hint)
-    return byName?.id ?? undefined
+  /** Granted, enabled and credentialed SSH devices for a character. */
+  #grantedDevices(workspaceId: string, characterId: string): DeviceRef[] {
+    if (this.#connectionGrantsFor === undefined) return []
+    const grants = this.#connectionGrantsFor(characterId)
+    if (grants === undefined) return []
+    const allowed = new Set(grants)
+    const devices: DeviceRef[] = []
+    for (const connection of this.#integrations.listByType(workspaceId, SSH_DEVICE_INTEGRATION_ID)) {
+      if (!allowed.has(connection.id)) continue
+      const secrets = this.#integrations.secretsForConnection(workspaceId, connection.id)
+      if (connection.enabled && secrets !== undefined && (secrets.privateKey !== undefined || secrets.password !== undefined)) {
+        devices.push({ id: connection.id, displayName: connection.displayName, host: String(connection.config.host ?? '') })
+      }
+    }
+    return devices.sort((left, right) => left.displayName.localeCompare(right.displayName, 'zh-CN'))
   }
+
+  #secretsFor(workspaceId: string, connectionId: string): Record<string, string> | undefined {
+    const connection = this.#integrations.getById(workspaceId, connectionId)
+    if (connection === undefined || !connection.enabled) return undefined
+    const secrets = this.#integrations.secretsForConnection(workspaceId, connectionId)
+    return secrets === undefined || (secrets.privateKey === undefined && secrets.password === undefined) ? undefined : secrets
+  }
+
+  /** Prefer the approved action's pinned connection id; fall back to legacy hint. */
+  #resolveDeviceId(workspaceId: string, action: CharacterSkillAction): string | undefined {
+    const pinned = action.parameters.deviceId
+    if (typeof pinned === 'string' && pinned.trim()) {
+      const connection = this.#integrations.getById(workspaceId, pinned.trim())
+      if (connection !== undefined) return connection.id
+    }
+    const hint = typeof action.parameters.deviceHint === 'string' ? action.parameters.deviceHint.trim() : undefined
+    if (hint === undefined) return undefined
+    const devices = this.#integrations.listByType(workspaceId, SSH_DEVICE_INTEGRATION_ID)
+    return devices.find((item) => item.displayName === hint || String(item.config.host ?? '') === hint)?.id
+  }
+}
+
+/** Resolve a parser device reference (displayName/host) onto an allowed device. */
+function matchDevice(devices: DeviceRef[], reference: string | undefined): DeviceRef | undefined {
+  if (reference === undefined) return devices.length === 1 ? devices[0] : undefined
+  return devices.find((device) => device.displayName === reference || device.host === reference)
+}
+
+async function execFresh(device: SshDeviceCredential, command: string): Promise<import('../integrations/ssh-client.js').SshExecResult> {
+  const { sshExecOnce } = await import('../integrations/ssh-client.js')
+  return sshExecOnce(device, command)
 }
 
 function parseOperationParams(parameters: JsonObject): SshOperation | undefined {

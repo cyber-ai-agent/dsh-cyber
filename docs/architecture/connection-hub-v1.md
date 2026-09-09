@@ -57,6 +57,12 @@ Character revision
 - 每个动作的最终执行状态写入 Skill Action Ledger；失败原因映射为可读中文（认证失败/不可达为 failed，超时/断流为 outcome-unknown，禁止自动重试）。
 - 世界轨迹通过通用 `SkillActionTraceAdapter` 投影每次 SSH 动作：只暴露摘要、状态与限长结果片段，不带结构化参数、私钥或原始 payload，与其它外部 Skill 共用同一脱敏边界。
 
+## 对话驱动与长连接（角色会话体验）
+
+- **设备可见性注入 persona**：Adapter 可声明 `instructionsFor(character)`，registry 通过 `instructionsForCharacter` 把静态 recipe 指令与按角色的能力说明一起折进角色 persona。SSH Adapter 据此告诉角色它获授了哪些设备（名称/主机）、用户如何表达请求（“连客厅主机看看磁盘”）、以及一台都没有时先让用户去连接中心配置。
+- **设备/操作分离解析**：用户点名（displayName 或 host，可不带“连/到”等连接词）即绑定该设备；角色只有一台可用设备时，不带设备名的操作自动落到它；多台设备时未点名不猜测、由角色追问。
+- **SSH 会话复用池**：`SshSessionPool` 按设备指纹（host/port/user + 凭据哈希）保持一条已认证传输，同设备连续命令复用握手，空闲默认 5 分钟自动断开；改凭据/停用/删除会因指纹变化或显式失效立即重建。安全性不变：仍是一次一命令的白名单执行，无交互 shell，审批与授权边界不受影响。
+
 ## 本地 API
 
 连接中心（连接级）：
