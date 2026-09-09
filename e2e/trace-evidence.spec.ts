@@ -19,7 +19,12 @@ class EvidenceRuntime {
       for (const event of normalizeHarnessTraceNotification(notification, subjects)) request.onEvent?.(event)
     }
     notify('tool/call', { name: 'read', callId: 'fixture-read', arguments: JSON.stringify({ file_path: 'packages/server/src/services/character-profile-runtime.ts' }) })
-    notify('tool/result', { message: { source: { callId: 'fixture-read' }, content: [{ type: 'tool-result', toolCallId: 'fixture-read', content: [{ type: 'text', text: 'export const directoryEnabled = true;\naccess_token="LOCAL-FIXTURE-SECRET"' }] }] } })
+    const resultLines = [
+      'export const directoryEnabled = true;',
+      'access_token="LOCAL-FIXTURE-SECRET"',
+      ...Array.from({ length: 6 }, (_, index) => `body-${index + 1}`),
+    ]
+    notify('tool/result', { message: { source: { callId: 'fixture-read' }, content: [{ type: 'tool-result', toolCallId: 'fixture-read', content: [{ type: 'text', text: resultLines.join('\n') }] }] } })
     return { agentSessionId: 'evidence-runtime', finalResponse: '已完成轨迹样例。', eventCount: 2 }
   }
   async close() {}
@@ -31,7 +36,7 @@ test.beforeAll(async () => {
 })
 test.afterAll(async () => { await server.close(); await rm(stateRoot, { recursive: true, force: true }) })
 
-test('expands and copies sanitized real-event evidence, survives reload, and fits three viewports', async ({ page }, info) => {
+test('expands and reads raw event evidence, survives reload, and fits three viewports', async ({ page }, info) => {
   const consoleIssues: string[] = []
   page.on('console', (message) => { if (message.type() === 'error' || message.type() === 'warning') consoleIssues.push(message.text()) })
   page.on('pageerror', (error) => consoleIssues.push(error.message))
@@ -53,21 +58,27 @@ test('expands and copies sanitized real-event evidence, survives reload, and fit
   }
   await openTraceTab()
   let entry = await openTraceEntry(dock, '完成处理')
-  const target = 'packages/server/src/services/character-profile-runtime.ts'
-  await expect(entry.locator('.world-trace-tool__target')).toHaveText(target)
-  await expect(entry.getByText('查看参数', { exact: true })).toHaveCount(0)
-  await entry.locator('.world-trace-tool__evidence > summary').click()
-  await expect(entry.locator('pre')).toContainText('directoryEnabled = true')
-  await expect(entry.locator('pre')).not.toContainText('LOCAL-FIXTURE-SECRET')
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin })
-  await entry.getByRole('button', { name: '复制结果', exact: true }).click()
-  await expect(entry.getByRole('status')).toHaveText('已复制')
-  const copied = await page.evaluate(() => navigator.clipboard.readText())
-  expect(copied).toContain('directoryEnabled')
-  expect(copied).not.toContain('LOCAL-FIXTURE-SECRET')
+  // The redundant target command line is gone; one merged evidence box holds
+  // the raw command and the raw result together.
+  await expect(entry.locator('.world-trace-tool__target')).toHaveCount(0)
+  let box = entry.locator('.world-trace-tool__evidence')
+  await expect(box).toHaveCount(1)
+  // Collapsed: a five-line preview, raw and unmasked, with an expand affordance.
+  await expect(box).toHaveClass(/is-clickable/)
+  const preview = box.locator('pre')
+  await expect(preview).toContainText('character-profile-runtime.ts')
+  await expect(preview).toContainText('LOCAL-FIXTURE-SECRET')
+  await expect(preview).not.toContainText('body-6')
+  // The copy affordances are gone: select text in the box instead.
+  await expect(entry.getByRole('button', { name: /复制/ })).toHaveCount(0)
+  // Clicking the box expands the full raw command and result.
+  await preview.click()
+  await expect(box).toHaveText(/命令/)
+  await expect(box).toHaveText(/结果/)
+  await expect(box.locator('.world-trace-tool__part pre').last()).toContainText('body-6')
   for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 }]) {
     await page.setViewportSize(size)
-    await expect(entry.locator('pre')).toBeVisible()
+    await expect(box).toBeVisible()
     const overflow = await entry.locator('.world-trace-tool__body').evaluate((element) => element.scrollWidth > element.clientWidth + 1)
     expect(overflow).toBe(false)
     await page.screenshot({ path: info.outputPath(`trace-${size.width}x${size.height}.png`) })
@@ -75,9 +86,12 @@ test('expands and copies sanitized real-event evidence, survives reload, and fit
   await page.reload()
   await openTraceTab()
   entry = await openTraceEntry(dock, '完成处理')
-  await entry.locator('.world-trace-tool__evidence > summary').click()
-  await expect(entry.locator('pre')).toContainText('directoryEnabled')
-  await expect(entry.locator('pre')).not.toContainText('LOCAL-FIXTURE-SECRET')
+  // Persisted evidence reloads collapsed again; expand to the full raw text.
+  box = entry.locator('.world-trace-tool__evidence')
+  await expect(box).toHaveClass(/is-clickable/)
+  await expect(box.locator('pre')).toContainText('LOCAL-FIXTURE-SECRET')
+  await box.locator('pre').click()
+  await expect(box.locator('.world-trace-tool__part pre').last()).toContainText('body-6')
   await writeFile(info.outputPath('console.json'), JSON.stringify(consoleIssues, null, 2))
   expect(consoleIssues).toEqual([])
 })

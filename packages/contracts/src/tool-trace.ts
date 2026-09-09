@@ -1,6 +1,10 @@
-/** Display-safe tool evidence. Paths are identifiers, not credentials. */
-export const TOOL_TRACE_INPUT_LIMIT = 2_000
-export const TOOL_TRACE_OUTPUT_LIMIT = 4_000
+/**
+ * Raw tool evidence shown verbatim in the trace panel. The trace adapter
+ * clips parameters and results to these bounds; `redactToolTraceText` below
+ * only still guards narrative summary fields.
+ */
+export const TOOL_TRACE_INPUT_LIMIT = 32_000
+export const TOOL_TRACE_OUTPUT_LIMIT = 32_000
 const HIDDEN = '[已隐藏敏感信息]'
 
 /** Redact before clipping, so a truncated credential can never escape detection. */

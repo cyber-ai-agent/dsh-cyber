@@ -40,6 +40,7 @@ export interface WorldTraceToolStep {
   callId: string
   name?: string
   label: string
+  /** Narrative summary line; unlike `input`/`output` it stays host-sanitized. */
   description?: string
   status: 'running' | 'success' | 'failed'
   createdAt?: IsoTimestamp
@@ -47,17 +48,21 @@ export interface WorldTraceToolStep {
   /** Wall-clock span of the call, once both ends are known. */
   durationMs?: number
   /**
-   * The redacted call target — the command or file the tool worked on.
+   * The raw tool-call parameters: the actual command and/or argument payload
+   * the runtime executed, shown verbatim in the trace panel's expandable
+   * "查看参数" box.
    *
-   * Allow-listed argument fields only, home-directory prefixes stripped and
-   * secret shapes masked at the adapter boundary and again by the trace
-   * sanitizer. Present only when the runtime reported usable arguments;
-   * unknown or sensitive keys are never rendered.
+   * Only clipped to a bounded length (marked by the trailing ellipsis); no
+   * secret masking or argument allow-listing happens on this field.
    */
   input?: string
-  /** Bounded, credential-redacted text actually returned by this tool call. */
+  /** The raw text actually returned by this tool call, clipped to a bounded length. */
   output?: string
   outputTruncated?: boolean
+  /**
+   * @deprecated Legacy flag from the credential-redacted era. New trace data
+   * no longer sets it; persisted older entries may still carry it.
+   */
   outputRedacted?: boolean
   /** Only present when the runtime explicitly supplied a process exit code. */
   exitCode?: number
@@ -83,7 +88,9 @@ export interface WorldTraceArtifactRef {
  * Provider- and renderer-neutral read model for meaningful activity in a world.
  *
  * Entries reference canonical facts; they are not a second source of truth.
- * Details are display-safe summaries and must have passed the host sanitizer.
+ * Narrative fields (summary, detail, reasoning) stay host-sanitized; the tool
+ * step's `input`/`output` carry the raw, unmasked call parameters and result
+ * text so the trace panel can show them verbatim.
  */
 export interface WorldTraceEntry {
   id: string

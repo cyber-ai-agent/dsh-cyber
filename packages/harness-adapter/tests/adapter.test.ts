@@ -579,7 +579,7 @@ describe('Harness profile and adapter', () => {
     await adapter.close()
   })
 
-  it('normalizes Harness facts without persisting tool arguments', () => {
+  it('normalizes Harness facts and carries the raw tool arguments into tool.started', () => {
     const events = normalizeHarnessNotification({
       method: 'session.event',
       params: {
@@ -607,11 +607,13 @@ describe('Harness profile and adapter', () => {
         callId: 'call-1',
       }),
     ])
-    expect(JSON.stringify(events)).not.toContain('must-not-leak')
-    expect(JSON.stringify(events)).not.toContain('apiKey')
+    // Raw parameters travel verbatim so the trace panel can expand them.
+    expect(events[0]!.metadata.toolDetail).toBe('{"apiKey":"must-not-leak"}')
+    expect(events[0]!.metadata.toolSummary).toBe('{"apiKey":"must-not-leak"}')
+    expect(JSON.stringify(events)).not.toContain('"arguments"')
   })
 
-  it('carries the redacted call target of an allow-listed argument into tool.started', () => {
+  it('carries the direct command target of an argument into tool.started', () => {
     const events = normalizeHarnessNotification({
       method: 'session.event',
       params: {
@@ -633,9 +635,8 @@ describe('Harness profile and adapter', () => {
     expect(events[0]).toMatchObject({
       kind: 'tool.started',
       toolName: 'bash',
-      metadata: { toolSummary: 'git commit', toolDetail: 'git commit -m msg' },
+      metadata: { toolSummary: 'git commit -m msg', toolDetail: '{"command":"git commit -m msg"}' },
     })
-    // The raw argument key survives only as its redacted subject.
     expect(JSON.stringify(events)).not.toContain('"arguments"')
   })
 
