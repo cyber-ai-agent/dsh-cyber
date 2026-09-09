@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const { fakeConnectLog, fakeEndLog, fakeState } = vi.hoisted(() => ({
   fakeConnectLog: [] as Array<Record<string, unknown>>,
   fakeEndLog: [] as string[],
-  fakeState: { failNextConnect: false },
+  fakeState: {
+    failNextConnect: false,
+    activeClient: undefined as { failTransport(error: Error): void } | undefined,
+  },
 }))
 
 type Handler = (...args: any[]) => void
@@ -49,6 +52,7 @@ const { FakeStreamClass, FakeClientClass } = vi.hoisted(() => {
   class FakeClient {
     #listeners = new Map<string, Array<(...args: any[]) => void>>()
     #ended = false
+    constructor() { fakeState.activeClient = this }
     connect(options: Record<string, unknown>) {
       fakeConnectLog.push(options)
       if (fakeState.failNextConnect) {
@@ -86,6 +90,7 @@ const { FakeStreamClass, FakeClientClass } = vi.hoisted(() => {
       fakeEndLog.push('end')
       return this
     }
+    failTransport(error: Error) { this.#emit('error', error) }
     #emit(event: string, ...payload: unknown[]) {
       for (const fn of [...(this.#listeners.get(event) ?? [])]) fn(...payload)
     }
@@ -100,7 +105,7 @@ function device(password = 'pw-1'): SshDeviceCredential {
   return { host: '10.0.0.10', port: 22, username: 'root', password }
 }
 
-beforeEach(() => { fakeConnectLog.length = 0; fakeEndLog.length = 0; fakeState.failNextConnect = false })
+beforeEach(() => { fakeConnectLog.length = 0; fakeEndLog.length = 0; fakeState.failNextConnect = false; fakeState.activeClient = undefined })
 afterEach(() => { vi.restoreAllMocks(); vi.resetModules() })
 
 describe('SshSessionPool', () => {
@@ -162,6 +167,23 @@ describe('SshSessionPool', () => {
     expect(results).toHaveLength(2)
     expect(fakeConnectLog).toHaveLength(1)
     expect(pool.size).toBe(1)
+    await pool.close()
+  })
+
+  it('handles a transport error after ready and reconnects without an unhandled error', async () => {
+    const pool = new SshSessionPool({ idleMs: 10_000 })
+    await pool.exec(device(), 'before-disconnect')
+    const firstClient = fakeState.activeClient
+    expect(firstClient).toBeDefined()
+
+    // A real ssh2 Client emits `error` when an established socket dies. The
+    // pool must consume it, reject any waiters and remove the dead entry.
+    firstClient!.failTransport(new Error('socket closed'))
+    expect(pool.size).toBe(0)
+
+    const result = await pool.exec(device(), 'after-disconnect')
+    expect(result.stdout).toContain('out:after-disconnect')
+    expect(fakeConnectLog).toHaveLength(2)
     await pool.close()
   })
 

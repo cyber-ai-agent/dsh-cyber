@@ -48,6 +48,10 @@ interface PoolEntry {
   /** First connection attempt for a fresh entry; later commands wait on it. */
   connecting: Promise<void> | undefined
   running: Promise<void>
+  /** Rejects commands that are active or queued when the transport dies. */
+  transportFailure: Promise<never>
+  failTransport: (error: SshError) => void
+  clientError: (error: Error) => void
 }
 
 /**
@@ -97,13 +101,16 @@ export class SshSessionPool {
     entry.running = new Promise<void>((resolve) => { release = resolve })
     await previous
     try {
-      const result = await execOnClient(entry.client, command, options.timeoutMs)
+      const result = await Promise.race([
+        execOnClient(entry.client, command, options.timeoutMs),
+        entry.transportFailure,
+      ])
       this.#touch(entry)
       return result
     } catch (error) {
       // Transport/auth/timeout loss poisons the pooled session: drop it so the
       // next command reconnects instead of failing on a dead handle.
-      if (error instanceof SshError && error.kind !== 'command-failed') this.#drop(key)
+      if (error instanceof SshError && error.kind !== 'command-failed') this.#drop(key, entry)
       throw error
     } finally {
       release()
@@ -120,11 +127,7 @@ export class SshSessionPool {
     if (this.#closed) return
     this.#closed = true
     const entries = [...this.#entries.values()]
-    this.#entries.clear()
-    for (const entry of entries) {
-      if (entry.idleTimer !== undefined) clearTimeout(entry.idleTimer)
-      entry.client.end()
-    }
+    for (const entry of entries) this.#drop(entry.key, entry)
   }
 
   #acquire(key: string, credential: SshDeviceCredential): Promise<PoolEntry> {
@@ -140,12 +143,34 @@ export class SshSessionPool {
       this.#touch(existing)
       return Promise.resolve(existing)
     }
-    const entry: PoolEntry = { key, client: new Client(), idleTimer: undefined, connecting: undefined, running: Promise.resolve() }
+    let failTransport!: (error: SshError) => void
+    const transportFailure = new Promise<never>((_resolve, reject) => { failTransport = reject })
+    // A connection can fail while no command is waiting on it. Consume the
+    // rejection here so a later command may still observe the same failure
+    // without creating an unhandled-rejection process event.
+    transportFailure.catch(() => undefined)
+    const entry: PoolEntry = {
+      key,
+      client: new Client(),
+      idleTimer: undefined,
+      connecting: undefined,
+      running: Promise.resolve(),
+      transportFailure,
+      failTransport,
+      clientError: () => undefined,
+    }
+    entry.clientError = (error: Error): void => {
+      entry.failTransport(new SshError('stream-lost', `SSH 连接中断，远端动作结果未知：${error.message}`))
+      this.#drop(key, entry)
+    }
+    // Keep a listener for the entire pooled lifetime. `connect()` temporarily
+    // adds its own handshake listener; removing that listener on `ready` must
+    // not leave the Node EventEmitter with no error consumer.
+    entry.client.on('error', entry.clientError)
     this.#entries.set(key, entry)
     const attempt = connect(entry.client, credential).catch((error) => {
       // A failed first attempt poisons nothing but the map entry itself.
-      this.#entries.delete(key)
-      entry.client.end()
+      this.#drop(key, entry)
       throw error
     })
     entry.connecting = attempt
@@ -158,16 +183,18 @@ export class SshSessionPool {
 
   #touch(entry: PoolEntry): void {
     if (entry.idleTimer !== undefined) clearTimeout(entry.idleTimer)
-    entry.idleTimer = setTimeout(() => { this.#drop(entry.key) }, this.#idleMs)
+    entry.idleTimer = setTimeout(() => { this.#drop(entry.key, entry) }, this.#idleMs)
     // An idle SSH transport must never keep the app process alive.
     entry.idleTimer.unref?.()
   }
 
-  #drop(key: string): void {
+  #drop(key: string, expected?: PoolEntry): void {
     const entry = this.#entries.get(key)
-    if (entry === undefined) return
+    if (entry === undefined || (expected !== undefined && entry !== expected)) return
     this.#entries.delete(key)
     if (entry.idleTimer !== undefined) clearTimeout(entry.idleTimer)
+    entry.client.off('error', entry.clientError)
+    entry.failTransport(new SshError('stream-lost', 'SSH 会话已关闭，远端动作结果未知'))
     try { entry.client.end() } catch { /* already closed */ }
   }
 }
@@ -209,32 +236,37 @@ function execOnClient(client: Client, command: string, timeoutMs = SSH_EXEC_TIME
       try { client.end() } catch { /* transport may already be gone */ }
       reject(new SshError('timeout', 'SSH 执行超时，远端动作结果未知；不得自动重试'))
     }), timeoutMs)
-    client.exec(command, { pty: false }, (error, stream) => {
-      if (error !== undefined && error !== null) {
-        clearTimeout(execTimer)
-        settle(() => reject(new SshError('command-failed', `SSH 无法启动命令：${error.message}`)))
-        return
-      }
-      if (stream === undefined) {
-        clearTimeout(execTimer)
-        settle(() => reject(new SshError('command-failed', 'SSH 未返回命令通道')))
-        return
-      }
-      let stdout = ''
-      let stderr = ''
-      stream.setEncoding('utf8')
-      stream.on('data', (chunk: string) => { stdout = cap(`${stdout}${chunk}`) })
-      stream.stderr.setEncoding('utf8')
-      stream.stderr.on('data', (chunk: string) => { stderr = cap(`${stderr}${chunk}`) })
-      stream.once('close', (code: number | null) => {
-        clearTimeout(execTimer)
-        settle(() => resolve({ code, stdout: sanitizeOutput(stdout), stderr: sanitizeOutput(stderr) }))
+    try {
+      client.exec(command, { pty: false }, (error, stream) => {
+        if (error !== undefined && error !== null) {
+          clearTimeout(execTimer)
+          settle(() => reject(new SshError('command-failed', `SSH 无法启动命令：${error.message}`)))
+          return
+        }
+        if (stream === undefined) {
+          clearTimeout(execTimer)
+          settle(() => reject(new SshError('command-failed', 'SSH 未返回命令通道')))
+          return
+        }
+        let stdout = ''
+        let stderr = ''
+        stream.setEncoding('utf8')
+        stream.on('data', (chunk: string) => { stdout = cap(`${stdout}${chunk}`) })
+        stream.stderr.setEncoding('utf8')
+        stream.stderr.on('data', (chunk: string) => { stderr = cap(`${stderr}${chunk}`) })
+        stream.once('close', (code: number | null) => {
+          clearTimeout(execTimer)
+          settle(() => resolve({ code, stdout: sanitizeOutput(stdout), stderr: sanitizeOutput(stderr) }))
+        })
+        stream.once('error', (streamError: Error) => {
+          clearTimeout(execTimer)
+          settle(() => reject(new SshError('stream-lost', `SSH 命令通道中断，远端动作结果未知：${streamError.message}`)))
+        })
       })
-      stream.once('error', (streamError: Error) => {
-        clearTimeout(execTimer)
-        settle(() => reject(new SshError('stream-lost', `SSH 命令通道中断，远端动作结果未知：${streamError.message}`)))
-      })
-    })
+    } catch (error) {
+      clearTimeout(execTimer)
+      settle(() => reject(new SshError('stream-lost', `SSH 传输不可用，远端动作结果未知：${error instanceof Error ? error.message : String(error)}`)))
+    }
   })
 }
 
