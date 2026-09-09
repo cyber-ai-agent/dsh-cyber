@@ -162,3 +162,45 @@ describe('SshSkillAdapter', () => {
     expect(exec).not.toHaveBeenCalled()
   })
 })
+
+describe('registry persona aggregation', () => {
+  it('folds the SSH adapter note into persona guidance together with recipes', async () => {
+    const { CharacterSkillAdapterRegistry } = await import('../src/skills/skill-adapter.js')
+    const { composeSkillRecipes } = await import('../src/services/character-profile-runtime.js')
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.registerRecipe({
+      descriptor: {
+        id: 'test.recipe', displayName: '会议纪要', summary: '整理会议事实。', adapterId: 'builtin.recipe',
+        risks: [], supportsScheduling: false, persistentApproval: 'forbidden', kind: 'recipe', recommendedByDefault: true,
+      },
+      instruction: '会议结束后整理决策、负责人和截止日期。',
+    })
+    registry.register(new SshSkillAdapter({
+      store: { getWorld: () => ({ id: 'world-1', workspaceId: 'workspace-1' }) },
+      integrations: {
+        listByType: () => [{
+          id: 'device-1', workspaceId: 'workspace-1', integrationId: 'builtin.ssh-device', displayName: '客厅主机',
+          config: { displayName: '客厅主机', host: '10.0.0.10' }, enabled: true, credentialConfigured: true, createdAt: '', updatedAt: '',
+        }],
+        secretsForConnection: () => ({ password: 'x' }),
+      } as never,
+      connectionGrantsFor: () => ['device-1'],
+    }))
+
+    const notes = registry.instructionsForCharacter({
+      worldId: 'world-1',
+      characterId: 'character-1',
+      workspaceId: 'workspace-1',
+      grantedSkillIds: ['device.ssh.command', 'test.recipe'],
+    })
+    expect(notes).toHaveLength(2)
+    expect(notes.join('\n')).toContain('客厅主机')
+    expect(notes.join('\n')).toContain('会议纪要')
+
+    // The persona composer accepts the aggregated instructions unchanged.
+    const persona = composeSkillRecipes('你是一位细心管家。', notes)
+    expect(persona).toContain('客厅主机')
+    expect(persona).toContain('会议纪要')
+    expect(persona).toContain('已授权')
+  })
+})
