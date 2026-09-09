@@ -282,13 +282,6 @@ export class EnvironmentService implements EnvironmentContextPort {
     if (tier !== undefined) {
       try {
         profile = await this.refreshLocal(tier)
-        // Presence discovery is the only probe allowed on the turn's critical
-        // path. A version refresh is still owed, but it must not hold up a
-        // queued follow-up or a second concurrent lane; publish it in the
-        // background and let the next boundary consume the result.
-        if (tier === 'fast' && profile.fullDirty) {
-          setTimeout(() => { void this.refreshLocal('full').catch(() => undefined) }, 0)
-        }
       } catch {
         // A failed probe keeps whatever the host already knew.
       }

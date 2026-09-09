@@ -73,7 +73,10 @@ function post(body: unknown): RequestInit {
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  // Environment version refreshes are allowed at a new lane boundary and can
+  // take a few seconds; queue correctness must not depend on a 1s filesystem
+  // and subprocess budget.
+  for (let attempt = 0; attempt < 500; attempt += 1) {
     if (predicate()) return
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
