@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -15,6 +15,10 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 async function openService(): Promise<IntegrationService> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-ssh-connections-'))
   roots.push(root)
+  return IntegrationService.open(root, createBuiltinIntegrationRegistry())
+}
+
+async function openServiceAt(root: string): Promise<IntegrationService> {
   return IntegrationService.open(root, createBuiltinIntegrationRegistry())
 }
 
@@ -114,6 +118,33 @@ describe('SSH multi-connection hub', () => {
     expect(service.secretsForConnection('workspace-1', keyDevice.id)).toEqual({ privateKey: expect.stringContaining('BEGIN OPENSSH') })
     expect(service.secretsForConnection('workspace-1', passwordDevice.id)).toEqual({ privateKey: 'key-material' })
     service.close()
+  })
+
+  it('keeps the persisted connections.json free of credential state and still reports it live', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-ssh-persist-'))
+    roots.push(root)
+    const service = await openServiceAt(root)
+    const connection = await service.save({
+      workspaceId: 'workspace-1', integrationId: SSH_DEVICE_INTEGRATION_ID,
+      config: { displayName: '文件设备', host: '10.0.0.77', username: 'root' }, enabled: true,
+      secrets: { password: 'persisted-secret-value' },
+    })
+    // Runtime projection is correct…
+    expect(service.getById('workspace-1', connection.id)?.credentialConfigured).toBe(true)
+    expect(service.getById('workspace-1', connection.id)?.secretsConfigured).toEqual({ privateKey: false, password: true })
+    service.close()
+
+    // …but the on-disk file never carries credential flags or plaintext.
+    const file = JSON.parse(await readFile(join(root, 'integrations', 'connections.json'), 'utf8')) as { items: Array<Record<string, unknown>> }
+    expect(file.items[0]).not.toHaveProperty('credentialConfigured')
+    expect(file.items[0]).not.toHaveProperty('secretsConfigured')
+    expect(JSON.stringify(file)).not.toContain('persisted-secret-value')
+
+    // Reopening recomputes the flags from the vault, not from the file.
+    const reopened = await openServiceAt(root)
+    expect(reopened.getById('workspace-1', connection.id)?.credentialConfigured).toBe(true)
+    expect(reopened.getById('workspace-1', connection.id)?.secretsConfigured).toEqual({ privateKey: false, password: true })
+    reopened.close()
   })
 
   it('tests a connection against a reachable SSH banner without sending credentials', async () => {

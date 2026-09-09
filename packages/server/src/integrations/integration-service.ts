@@ -288,7 +288,11 @@ export class IntegrationService {
 
   async #persist(): Promise<void> {
     const temporary = `${this.#path}.tmp-${randomUUID()}`
-    const items = [...this.#connections.values()].map((item) => ({ ...item, credentialConfigured: false, secretsConfigured: undefined }))
+    // The on-disk file never carries credential state: `credentialConfigured`
+    // and `secretsConfigured` are recomputed from the vault on every load and
+    // list, so writing a stale false (or true) here would only mislead. Keep
+    // the file about configuration only.
+    const items = [...this.#connections.values()].map(({ credentialConfigured: _configured, secretsConfigured: _secrets, ...rest }) => rest)
     try { await writeFile(temporary, JSON.stringify({ version: 1, items }), { encoding: 'utf8', flag: 'wx', mode: 0o600 }); await rename(temporary, this.#path) }
     catch (error) { await rm(temporary, { force: true }).catch(() => undefined); throw error }
   }
