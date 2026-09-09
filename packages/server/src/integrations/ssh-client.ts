@@ -45,8 +45,9 @@ interface PoolEntry {
   key: string
   client: Client
   idleTimer: NodeJS.Timeout | undefined
+  /** First connection attempt for a fresh entry; later commands wait on it. */
+  connecting: Promise<void> | undefined
   running: Promise<void>
-  release: (() => void) | undefined
 }
 
 /**
@@ -88,10 +89,13 @@ export class SshSessionPool {
     const key = SshSessionPool.fingerprint(credential)
     const entry = await this.#acquire(key, credential)
     // Serialize commands per transport so concurrent turns on the same device
-    // cannot interleave exec streams.
-    await entry.running
+    // cannot interleave exec streams. Every caller appends its own gate to
+    // `running` before awaiting the previous gate, so two first commands can
+    // never both pass the old resolved promise.
+    const previous = entry.running
     let release!: () => void
     entry.running = new Promise<void>((resolve) => { release = resolve })
+    await previous
     try {
       const result = await execOnClient(entry.client, command, options.timeoutMs)
       this.#touch(entry)
@@ -126,18 +130,29 @@ export class SshSessionPool {
   #acquire(key: string, credential: SshDeviceCredential): Promise<PoolEntry> {
     const existing = this.#entries.get(key)
     if (existing !== undefined) {
+      // A second concurrent first command arrives while the first connect is
+      // still in flight: ssh2 Client.exec throws "Not connected" if called
+      // before `ready`, so we must wait for the cached attempt, not return a
+      // half-connected entry.
+      if (existing.connecting !== undefined) {
+        return existing.connecting.then(() => { this.#touch(existing); return existing })
+      }
       this.#touch(existing)
       return Promise.resolve(existing)
     }
-    const entry: PoolEntry = { key, client: new Client(), idleTimer: undefined, running: Promise.resolve(), release: undefined }
+    const entry: PoolEntry = { key, client: new Client(), idleTimer: undefined, connecting: undefined, running: Promise.resolve() }
     this.#entries.set(key, entry)
-    return connect(entry.client, credential).then(() => {
-      this.#touch(entry)
-      return entry
-    }).catch((error) => {
+    const attempt = connect(entry.client, credential).catch((error) => {
+      // A failed first attempt poisons nothing but the map entry itself.
       this.#entries.delete(key)
       entry.client.end()
       throw error
+    })
+    entry.connecting = attempt
+    return attempt.then(() => {
+      entry.connecting = undefined
+      this.#touch(entry)
+      return entry
     })
   }
 

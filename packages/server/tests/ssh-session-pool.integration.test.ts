@@ -68,4 +68,29 @@ describe('SshSessionPool over a real ssh2 server', () => {
 
     await pool.close()
   })
+
+  it('does not call exec before the transport is ready when two first commands race', async () => {
+    const { port, stats } = await startSshServer()
+    const device = { host: '127.0.0.1', port, username: USER, password: PASSWORD }
+    const pool = new SshSessionPool({ idleMs: 5_000 })
+
+    // Two concurrent first commands on the same fresh key: the second must
+    // wait for the first connect attempt (ready) instead of calling
+    // ssh2 Client.exec on a not-yet-connected transport.
+    const results = await Promise.all([
+      pool.exec(device, 'one'),
+      pool.exec(device, 'two'),
+      pool.exec(device, 'three'),
+    ])
+    expect(results.map((result) => result.stdout.trim())).toEqual([
+      'conn#1:one',
+      'conn#1:two',
+      'conn#1:three',
+    ])
+    // One connection total, three serialized execs on it.
+    expect(stats.connections).toBe(1)
+    expect(stats.execs).toBe(3)
+
+    await pool.close()
+  })
 })
