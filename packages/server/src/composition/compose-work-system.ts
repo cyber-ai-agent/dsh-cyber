@@ -55,7 +55,9 @@ export function composeWorkSystem(options: {
     runtime: options.worldRuntime,
     classifier: options.intentClassifier ?? new ModelConversationTaskIntentClassifier({
       store: options.store,
-      call: new ModelJsonCall({ credentials: options.credentials, timeoutMs: 8_000, maxOutputTokens: 512, jsonResponseMode: 'prompt-only' }),
+      // 20s（ModelJsonCall 的默认预算）：远端思考型模型的非流式小调用常态 8s 内
+      // 回不完，8s 硬截止会把可判定消息误报为 model_call_timeout。
+      call: new ModelJsonCall({ credentials: options.credentials, timeoutMs: 20_000, maxOutputTokens: 512, jsonResponseMode: 'prompt-only' }),
     }),
   })
   return { work, taskIntent }
