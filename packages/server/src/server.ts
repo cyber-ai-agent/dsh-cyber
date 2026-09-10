@@ -95,6 +95,7 @@ import { createKnowledgeSearchPort } from './services/knowledge-search-port.js'
 import { KnowledgeWebImportService } from './services/knowledge-web-import-service.js'
 import { WorldKnowledgeLibraryService } from './services/world-knowledge-library-service.js'
 import { WorldKnowledgeRetrievalService } from './services/world-knowledge-retrieval-service.js'
+import { createWebSearchWiring } from './compose-web-search.js'
 import type { KnowledgeExtractionPort } from './services/knowledge-extraction.js'
 import { createWorldKnowledgeGraphRuntime } from './services/world-knowledge-graph-runtime.js'
 import { WorldKnowledgeRuntimeContextContributor, WorldRuntimeContextComposer } from './services/world-runtime-context-composer.js'
@@ -283,6 +284,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   })
   const sshSessions = new SshSessionPool()
 
+  const webSearch = await createWebSearchWiring(integrations, () => startedAddress?.origin)
   const worldManagementHost = createWorldManagementHost({ store, worldSettings, worldPackages, authority })
 
   const environments = createEnvironmentService(stateRoot, { devices: composeSshEnvironmentDeviceSource({ store, integrations }) })
@@ -310,7 +312,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     ...(options.knowledgeExtractionPort === undefined ? {} : { extractionPort: options.knowledgeExtractionPort }),
     publish: (worldId, payload) => publishKnowledgeChanged?.(worldId, payload),
   })
-  const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, request) } })
+  const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, request) }, resolveWebSearchPlan: webSearch.resolveWebSearchPlan })
   // World settings and the host-probed machine profile are rendered by the runtime into the cacheable prefix.
   const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings, runFileEvidence, environments)
   const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
@@ -467,6 +469,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
       if (integrationId === MCP_INTEGRATION_ID && mcpAdapter !== undefined) await refreshMcpCatalog(mcpAdapter, skillRegistry)
     },
   })
+  webSearch.register(router)
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerLocalTtsRoutes(router, localTtsAssets)
@@ -509,9 +512,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
       await dispatchHttpRequest(router, webRoot, request, response)
     })().catch((error: unknown) => writeError(response, error))
   })
-  httpServer.requestTimeout = 0
-  httpServer.headersTimeout = 10_000
-  httpServer.keepAliveTimeout = 5_000
+  httpServer.requestTimeout = 0; httpServer.headersTimeout = 10_000; httpServer.keepAliveTimeout = 5_000
   const voiceSocket = attachVoiceWebSocket({ server: httpServer, stateRoot, applicationAccess })
   const unsubscribe = orchestrator.subscribe((event) => {
     toolApprovals.capture(event)

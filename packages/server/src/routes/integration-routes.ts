@@ -1,4 +1,4 @@
-import type { JsonObject } from '@dsh-cyber/contracts'
+import type { IntegrationConnection, JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
@@ -7,7 +7,7 @@ import { writeJson } from '../http/response.js'
 import type { Router } from '../http/router.js'
 import type { IntegrationService } from '../integrations/integration-service.js'
 import { FIRECRAWL_INTEGRATION_ID } from '../integrations/firecrawl-provider.js'
-import { FIRECRAWL_SEARCH_SKILL } from '../skills/firecrawl-skill-adapter.js'
+import { WEB_SEARCH_DEFAULT_MARKER, WEB_SEARCH_INTEGRATION_ID } from '../integrations/web-search-provider.js'
 import { sshEnvironmentDeviceTarget } from '../composition/compose-environment.js'
 import type { EnvironmentService } from '../environments/environment-service.js'
 import type { EnvironmentProbeTier } from '../environments/environment-probe.js'
@@ -39,7 +39,9 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
   router.get(/^\/api\/workspaces\/([^/]+)\/integrations$/, ({ response, params }) => {
     const workspaceId = requireWorkspace(store, params[0]!)
     const descriptors = visibleDescriptors(store, integrations, workspaceId)
-    const allowed = new Set(descriptors.map((descriptor) => descriptor.id))
+    // The 联网搜索 cards take over the legacy Firecrawl item: its descriptor is
+    // no longer a rail entry, but its connections must still flow to the panel.
+    const allowed = new Set([...descriptors.map((descriptor) => descriptor.id), FIRECRAWL_INTEGRATION_ID])
     writeJson(response, 200, { descriptors, items: integrations.list(workspaceId).filter((item) => allowed.has(item.integrationId)) })
   })
 
@@ -86,6 +88,7 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
     } catch (error) {
       throw new HttpError(422, 'integration_config_invalid', error instanceof Error ? error.message : 'Integration configuration is invalid')
     }
+    await normalizeWebSearchDefault(integrations, workspaceId, connection)
     await onChanged?.(integrationId)
     writeJson(response, 200, { connection })
   })
@@ -108,6 +111,7 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
     } catch (error) {
       throw new HttpError(422, 'integration_config_invalid', error instanceof Error ? error.message : 'Integration configuration is invalid')
     }
+    await normalizeWebSearchDefault(integrations, workspaceId, connection)
     await onChanged?.(integrationId)
     writeJson(response, 200, { connection })
   })
@@ -162,14 +166,16 @@ function requireWorkspace(store: SqliteStore, workspaceId: string): string {
   return workspaceId
 }
 
+// The 联网搜索 main item took over the Firecrawl settings: the legacy
+// `builtin.firecrawl` type is no longer a rail item of its own. Its skill
+// (web.search.firecrawl) stays package-gated upstream; the credential home is
+// freely editable through the 联网搜索 card, with or without the recipe.
 function visibleDescriptors(store: SqliteStore, integrations: IntegrationService, workspaceId: string) {
-  return integrations.descriptors().filter((descriptor) => descriptor.id !== FIRECRAWL_INTEGRATION_ID || hasFirecrawlPackage(store, workspaceId))
+  return integrations.descriptors().filter((descriptor) => descriptor.id !== FIRECRAWL_INTEGRATION_ID)
 }
 
-function assertIntegrationAvailable(store: SqliteStore, workspaceId: string, integrationId: string): void {
-  if (integrationId === FIRECRAWL_INTEGRATION_ID && !hasFirecrawlPackage(store, workspaceId)) {
-    throw new HttpError(409, 'integration_requires_package', '请先安装对应插件，再配置这个外部连接')
-  }
+function assertIntegrationAvailable(_store: SqliteStore, _workspaceId: string, _integrationId: string): void {
+  // No package gate on connection CRUD anymore (see visibleDescriptors).
 }
 
 /** The connection must exist and belong to the integration the path names. */
@@ -181,6 +187,37 @@ function assertConnection(store: SqliteStore, integrations: IntegrationService, 
   }
 }
 
-function hasFirecrawlPackage(store: SqliteStore, workspaceId: string): boolean {
-  return store.listInstalledPackages(workspaceId).some((item) => item.status === 'active' && item.manifest.entrypoints?.some((entrypoint) => entrypoint.kind === 'skill' && entrypoint.id === FIRECRAWL_SEARCH_SKILL))
+/**
+ * 联网搜索 cards (one per catalog provider, plus the legacy Firecrawl
+ * connection they took over) share a single default marker. Marking one card
+ * default clears the marker on every sibling card so the built-in `web_search`
+ * selection stays unambiguous.
+ */
+async function normalizeWebSearchDefault(integrations: IntegrationService, workspaceId: string, saved: IntegrationConnection): Promise<void> {
+  if (saved.integrationId !== WEB_SEARCH_INTEGRATION_ID && saved.integrationId !== FIRECRAWL_INTEGRATION_ID) return
+  if (saved.config[WEB_SEARCH_DEFAULT_MARKER] !== true) return
+  for (const sibling of integrations.listByType(workspaceId, WEB_SEARCH_INTEGRATION_ID)) {
+    if (sibling.id === saved.id || sibling.config[WEB_SEARCH_DEFAULT_MARKER] !== true) continue
+    await integrations.save({
+      workspaceId,
+      integrationId: WEB_SEARCH_INTEGRATION_ID,
+      connectionId: sibling.id,
+      displayName: sibling.displayName,
+      config: { ...sibling.config, [WEB_SEARCH_DEFAULT_MARKER]: false },
+      enabled: sibling.enabled,
+    })
+  }
+  if (saved.integrationId === WEB_SEARCH_INTEGRATION_ID) {
+    const legacy = integrations.get(workspaceId, FIRECRAWL_INTEGRATION_ID)
+    if (legacy !== undefined && legacy.config[WEB_SEARCH_DEFAULT_MARKER] === true) {
+      await integrations.save({
+        workspaceId,
+        integrationId: FIRECRAWL_INTEGRATION_ID,
+        connectionId: legacy.id,
+        displayName: legacy.displayName,
+        config: { ...legacy.config, [WEB_SEARCH_DEFAULT_MARKER]: false },
+        enabled: legacy.enabled,
+      })
+    }
+  }
 }

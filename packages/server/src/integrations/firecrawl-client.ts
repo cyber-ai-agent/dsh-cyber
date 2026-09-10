@@ -138,6 +138,54 @@ async function readBoundedResponseText(response: Response, maxBytes: number): Pr
   return Buffer.concat(chunks).toString('utf8')
 }
 
+/**
+ * Run one web search against a Firecrawl endpoint with explicit credentials,
+ * independent of the `builtin.firecrawl` integration connection. This is the
+ * path the 连接中心「联网搜索」firecrawl provider uses: its key lives on a
+ * web-search connection, not the legacy Firecrawl skill connection.
+ */
+export async function firecrawlSearchDirect(input: {
+  baseUrl: string
+  apiKey: string
+  query: string
+  limit?: number
+  fetch?: typeof globalThis.fetch
+  timeoutMs?: number
+}): Promise<FirecrawlSearchItem[]> {
+  const query = normalizeQuery(input.query)
+  const limit = boundedPositive(input.limit, 5, 1, 20)
+  const fetchImpl = input.fetch ?? globalThis.fetch
+  const timeoutMs = boundedPositive(input.timeoutMs, DEFAULT_TIMEOUT_MS, 1_000, 120_000)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetchImpl(`${input.baseUrl}/v2/search`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, limit, sources: ['web'] }),
+      signal: controller.signal,
+    })
+    if (!response.ok) throw new FirecrawlClientError('http', firecrawlFailure(response.status), response.status)
+    const text = await readBoundedResponseText(response, DEFAULT_MAX_RESPONSE_BYTES)
+    let payload: unknown
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      throw new FirecrawlClientError('invalid-response', 'Firecrawl 返回了无法识别的 JSON')
+    }
+    return parseSearch(payload, limit)
+  } catch (error) {
+    if (error instanceof FirecrawlClientError) throw error
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new FirecrawlClientError('outcome-unknown', 'Firecrawl 请求超时，外部请求结果未知；不得自动重试')
+    }
+    if (isConnectionRefused(error)) throw new FirecrawlClientError('unreachable', 'Firecrawl 连接被拒绝，请求未发出')
+    throw new FirecrawlClientError('outcome-unknown', 'Firecrawl 请求连接中断，外部请求结果未知；不得自动重试')
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export type FirecrawlClientErrorKind = 'not-configured' | 'http' | 'too-large' | 'invalid-response' | 'outcome-unknown' | 'unreachable'
 
 export class FirecrawlClientError extends Error {
