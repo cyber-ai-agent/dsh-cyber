@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { EmployeeBlueprint, JsonObject } from '@dsh-cyber/contracts'
+import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 import { SqliteStore } from '@dsh-cyber/persistence'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -11,6 +12,7 @@ import type { McpClientConnection, McpClientFactory, McpToolDefinition } from '.
 import { MCP_INTEGRATION_ID } from '../src/integrations/mcp-provider.js'
 import { IntegrationService } from '../src/integrations/integration-service.js'
 import { CharacterSkillRuntime } from '../src/services/character-skill-runtime.js'
+import type { CharacterSkillAdapter } from '../src/skills/skill-adapter.js'
 import { CharacterSkillAdapterRegistry } from '../src/skills/skill-adapter.js'
 import { McpSkillAdapter, mcpSkillId } from '../src/skills/mcp-skill-adapter.js'
 import { SqliteSkillActionRepository } from '../src/skills/sqlite-skill-action-repository.js'
@@ -28,7 +30,7 @@ describe('MCP Skill Adapter V1', () => {
     const store = await SqliteStore.open(join(root, 'data', 'dsh-cyber.sqlite')); stores.push(store)
     const workspace = store.createWorkspace({ name: 'MCP 测试工作区' })
     const world = store.createWorld({ workspaceId: workspace.id, name: 'MCP 测试世界', templateId: 'personal-world' })
-    const skillId = mcpSkillId('github.create_issue')
+    const skillId = mcpSkillId('github', 'create_issue')
     const blueprint: EmployeeBlueprint = {
       schemaVersion: 1, id: 'test.mcp-worker', version: 1, worldTemplateId: 'personal-world',
       displayName: 'MCP 测试员', role: '测试员', summary: '验证 MCP 权限链', persona: '只执行明确批准的工具',
@@ -37,10 +39,11 @@ describe('MCP Skill Adapter V1', () => {
     store.saveBlueprint(blueprint)
     const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: world.id, blueprintId: blueprint.id, blueprintVersion: 1, skillGrants: [skillId] })
     const clients = new FakeMcpClientFactory([{
-      name: 'github.create_issue', description: 'Create an issue', inputSchema: { type: 'object', properties: { title: { type: 'string' } } },
+      endpoint: 'http://127.0.0.1:3900/mcp', bearer: 'private-bearer',
+      tools: [{ name: 'create_issue', description: 'Create an issue', inputSchema: { type: 'object', properties: { title: { type: 'string' } } } }],
     }])
     const integrations = await IntegrationService.open(root, createBuiltinIntegrationRegistry(clients))
-    await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'private-bearer' })
+    await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'private-bearer' })
     const adapter = new McpSkillAdapter({ store, integrations, clients })
     const registry = new CharacterSkillAdapterRegistry(); registry.register(adapter); await adapter.refresh(); registry.refresh(adapter)
     expect(registry.list()).toEqual([expect.objectContaining({ id: skillId, adapterId: 'builtin.mcp', risks: ['external-side-effect'] })])
@@ -72,10 +75,65 @@ describe('MCP Skill Adapter V1', () => {
     expect(clients.calls).toHaveLength(0)
     const result = await runtime.decideApproval(approval.id, 'approved', 'once', 'owner', new Date('2026-08-25T01:01:00.000Z'))
     expect(result.action).toMatchObject({ status: 'executed', detail: expect.stringContaining('原始结果未持久化') })
-    expect(clients.calls).toEqual([{ name: 'github.create_issue', args: { title: 'secret subject', body: 'secret body' } }])
+    expect(clients.calls).toEqual([{ endpoint: 'http://127.0.0.1:3900/mcp', name: 'create_issue', bearer: 'private-bearer', args: { title: 'secret subject', body: 'secret body' } }])
     expect(JSON.stringify(result.action)).not.toContain('secret body')
     expect(await readFile(join(root, 'integrations', 'connections.json'), 'utf8')).not.toContain('private-bearer')
     expect(await readFile(join(root, 'credentials', 'integration-credentials.json'), 'utf8')).not.toContain('secret subject')
+    integrations.close()
+  })
+
+  it('supports several MCP services: targeted commands, bare disambiguation and per-service credentials', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-multi-')); roots.push(root)
+    const store = await SqliteStore.open(join(root, 'data', 'dsh-cyber.sqlite')); stores.push(store)
+    const workspace = store.createWorkspace({ name: 'MCP 多服务工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: 'MCP 多服务世界', templateId: 'personal-world' })
+
+    const clients = new FakeMcpClientFactory([
+      { endpoint: 'http://127.0.0.1:3900/mcp', bearer: 'github-token', tools: [{ name: 'create_issue', description: 'Open a GitHub issue', inputSchema: { type: 'object' } }] },
+      { endpoint: 'http://127.0.0.1:3901/mcp', bearer: 'linear-token', tools: [
+        { name: 'create_issue', description: 'Open a Linear ticket', inputSchema: { type: 'object' } },
+        { name: 'sync_board', description: 'Synchronize a board', inputSchema: { type: 'object' } },
+      ] },
+    ])
+    const integrations = await IntegrationService.open(root, createBuiltinIntegrationRegistry(clients))
+    const github = await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'github-token' })
+    await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'linear', endpoint: 'http://127.0.0.1:3901/mcp' }, enabled: true, credential: 'linear-token' })
+
+    const blueprint: EmployeeBlueprint = {
+      schemaVersion: 1, id: 'test.mcp-multi', version: 1, worldTemplateId: 'personal-world',
+      displayName: 'MCP 多服务员', role: '测试员', summary: '验证多 MCP 服务', persona: '只执行明确批准的工具',
+      requestedSkills: [mcpSkillId('github', 'create_issue'), mcpSkillId('linear', 'create_issue'), mcpSkillId('linear', 'sync_board')],
+      requestedCapabilities: [], createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    store.saveBlueprint(blueprint)
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: world.id, blueprintId: blueprint.id, blueprintVersion: 1,
+      skillGrants: [mcpSkillId('github', 'create_issue'), mcpSkillId('linear', 'create_issue'), mcpSkillId('linear', 'sync_board')],
+    })
+
+    const adapter = new McpSkillAdapter({ store, integrations, clients })
+    await adapter.refresh()
+    expect(adapter.descriptorsFor(workspace.id)).toEqual([
+      expect.objectContaining({ id: 'mcp.github.create_issue' }),
+      expect.objectContaining({ id: 'mcp.linear.create_issue' }),
+      expect.objectContaining({ id: 'mcp.linear.sync_board' }),
+    ])
+
+    const granted = [mcpSkillId('github', 'create_issue'), mcpSkillId('linear', 'create_issue'), mcpSkillId('linear', 'sync_board')]
+    const context = { worldId: world.id, characterId: employee.id, grantedSkillIds: granted, now: new Date() }
+
+    // Bare `create_issue` is exposed by both granted services: ambiguous, no proposal.
+    expect(await adapter.propose({ ...context, prompt: '/mcp create_issue {"a":1}' })).toEqual([])
+    // Bare `sync_board` is unique to the linear service: resolves to it.
+    const [sync] = await adapter.propose({ ...context, prompt: '/mcp sync_board {"a":1}' })
+    expect(sync).toMatchObject({ skillId: 'mcp.linear.sync_board', target: 'mcp:linear.sync_board' })
+    // Targeted command drives the github service even though the tool name is shared.
+    const [githubIssue] = await adapter.propose({ ...context, prompt: '/mcp github.create_issue {"a":1}' })
+    expect(githubIssue).toMatchObject({ skillId: 'mcp.github.create_issue', target: 'mcp:github.create_issue' })
+
+    // Executing resolves each owning connection's endpoint and credential.
+    await adapter.execute({ ...githubIssue, worldId: world.id, characterId: employee.id } as unknown as CharacterSkillAction)
+    expect(clients.calls).toContainEqual({ endpoint: 'http://127.0.0.1:3900/mcp', name: 'create_issue', bearer: 'github-token', args: { a: 1 } })
     integrations.close()
   })
 
@@ -92,12 +150,17 @@ describe('MCP Skill Adapter V1', () => {
 })
 
 class FakeMcpClientFactory implements McpClientFactory {
-  readonly calls: Array<{ name: string; args: JsonObject }> = []
-  constructor(readonly tools: McpToolDefinition[]) {}
-  async connect(): Promise<McpClientConnection> {
+  readonly calls: Array<{ endpoint: string; name: string; args: JsonObject; bearer?: string }> = []
+  constructor(readonly services: Array<{ endpoint: string; bearer?: string; tools: McpToolDefinition[] }>) {}
+  async connect(endpoint: string, bearer?: string): Promise<McpClientConnection> {
+    const service = this.services.find((item) => item.endpoint === endpoint)
+    const tools = service?.tools ?? []
     return {
-      listTools: async () => this.tools,
-      callTool: async (name, args) => { this.calls.push({ name, args }); return { content: [{ type: 'text', text: 'sensitive remote result' }], structuredContent: { issueId: 42 } } },
+      listTools: async () => tools,
+      callTool: async (name, args) => {
+        this.calls.push({ endpoint, name, args, ...(bearer === undefined ? {} : { bearer }) })
+        return { content: [{ type: 'text', text: 'sensitive remote result' }], structuredContent: { issueId: 42 } }
+      },
       close: async () => undefined,
     }
   }

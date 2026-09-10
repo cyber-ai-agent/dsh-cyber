@@ -3097,17 +3097,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .integration-editor > footer .text-button.is-danger { margin-right: auto; color: var(--danger); }
 .integration-editor textarea { width: 100%; padding: 9px 11px; color: var(--text); background: var(--surface-0); border: 1px solid var(--border); border-radius: 8px; font: 500 12px/1.5 var(--font-mono); resize: vertical; }
 .integration-connection-list { display: grid; gap: 6px; max-height: 220px; overflow-y: auto; }
-.integration-connection-list button { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); color: var(--text); background: var(--surface-1); text-align: left; cursor: pointer; }
-.integration-connection-list button.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-1)); }
-.integration-connection-list strong { font-size: 13px; }
-.integration-connection-list small { color: var(--text-muted); font-size: 12px; }
+.integration-connection-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); color: var(--text); background: var(--surface-1); }
+.integration-connection-card.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-1)); }
+.integration-connection-card > button { display: grid; gap: 2px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.integration-connection-card strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.integration-connection-card small { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.integration-connection-card__enable { display: inline-flex; gap: 5px; align-items: center; color: var(--text-muted); font-size: 12px; cursor: pointer; user-select: none; }
+.integration-connection-card__enable input { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: var(--accent); }
 .integration-hub-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
 .integration-hub-workspace { display: grid; gap: 14px; min-width: 0; }
 .integration-hub-workspace > .integration-connection-list { max-height: none; }
-.integration-connection-list button.is-new-connection { border-style: dashed; color: var(--accent); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
-.integration-connection-list button.is-new-connection.is-active { border-style: solid; }
-.integration-connection-list button.is-new-connection strong { font-size: 13px; }
-.integration-connection-list button.is-new-connection small { flex: 1 1 100%; color: var(--text-muted); }
+.integration-connection-card.is-new-connection { border-style: dashed; color: var(--accent); }
 .integration-secret-clear { padding: 0; border: 0; color: var(--danger); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
 .integration-secret-clear:hover { color: var(--danger-strong, var(--danger)); }
 
