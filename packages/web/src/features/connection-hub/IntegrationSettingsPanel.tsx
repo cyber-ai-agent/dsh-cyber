@@ -8,6 +8,10 @@ import type {
 } from '@dsh-cyber/contracts'
 import { api } from '../../api.js'
 import { MachineProfilePanel } from '../machine-profile/MachineProfilePanel.js'
+import { WebSearchProviderCards } from './WebSearchProviderCards.js'
+
+/** The 联网搜索 type: its working area is the catalog-driven provider cards. */
+const WEB_SEARCH_TYPE_ID = 'builtin.web-search'
 
 export interface IntegrationSettingsPanelProps {
   workspaceId: string
@@ -177,7 +181,15 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
 
   const renderBody = () => (descriptor === undefined
     ? <div className="dialog-empty">当前没有可配置的外部连接。</div>
-    : <>
+    : descriptor.id === WEB_SEARCH_TYPE_ID
+      ? <WebSearchProviderCards
+        workspaceId={workspaceId}
+        connections={connections}
+        typeId={descriptor.id}
+        {...(initialSkillId === undefined ? {} : { initialSkillId })}
+        onSaved={load}
+      />
+      : <>
         {multiple ? <div className="integration-connection-list" role="list" aria-label={`${descriptor.displayName} 连接列表`}>
           <button type="button" className={isNew ? 'is-active is-new-connection' : 'is-new-connection'} onClick={() => void addConnection()}>
             <PlugsConnected size={15} /><strong>{isNew ? '添加设备' : '＋ 添加设备'}</strong><small>新建一个 {descriptor.displayName}</small>
@@ -239,6 +251,9 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
 
 function pickInitialType(descriptors: IntegrationDescriptor[], initialSkillId: string | undefined): string | undefined {
   if (initialSkillId === undefined) return descriptors[0]?.id
+  // The 联网搜索 cards took over the Firecrawl settings (and its skill's
+  // config entry), so a Firecrawl skill request preselects that main item.
+  if (initialSkillId === 'web.search.firecrawl') return WEB_SEARCH_TYPE_ID
   const match = descriptors.find((item) => item.skillIds.includes(initialSkillId))
   return match?.id ?? descriptors[0]?.id
 }

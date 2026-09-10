@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "version": "2026.09.10-1",
+  "providers": [
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "description": "DeepSeek 官方 Anthropic 兼容端点，驱动模型内置 web_search 工具；密钥只在对话搜索时注入 worker，不回显。",
+      "endpoint": "https://api.deepseek.com/anthropic/v1",
+      "obtain": {
+        "text": "前往 DeepSeek 开放平台创建 API Key",
+        "url": "https://platform.deepseek.com/api_keys"
+      },
+      "backend": "deepseek",
+      "dataEgress": ["搜索查询文本", "模型调用用量"]
+    },
+    {
+      "id": "firecrawl",
+      "name": "Firecrawl",
+      "description": "网页搜索与抓取服务。接管原「Firecrawl」连接：密钥只保存在本机加密凭据库，搜索由宿主进程执行，worker 不接触密钥。",
+      "endpoint": "https://api.firecrawl.dev",
+      "obtain": {
+        "text": "前往 Firecrawl 控制台注册并创建 API Key",
+        "url": "https://www.firecrawl.dev/app/sign-up"
+      },
+      "backend": "firecrawl",
+      "integrationId": "builtin.firecrawl",
+      "dataEgress": ["搜索查询文本"]
+    }
+  ]
+}

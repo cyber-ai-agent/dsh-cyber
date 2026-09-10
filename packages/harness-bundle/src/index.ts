@@ -9,10 +9,12 @@ import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { SessionSeq, type Session } from '@deepseek-ai/dsh-session'
 import type { ApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
 
+import { registerFirecrawlWebSearch } from './web-search-firecrawl.js'
+
 export { Config, type JsonRpcConfig }
 
 export const name = 'dsh-cyber-sdk-jsonrpc'
-export const inject = ['agents', 'approval', 'tools']
+export const inject = ['agents', 'approval', 'tools', 'web']
 
 interface NativeApprovalRequest extends Pick<ApprovalRequestEvent, 'toolName' | 'callId' | 'signal'> {
   agent: {
@@ -32,6 +34,9 @@ interface PendingApproval {
  * one-shot decision for that exact event id.
  */
 export function apply(ctx: Context, config: JsonRpcConfig): void {
+  // The 连接中心「联网搜索」Firecrawl backend. Dormant unless the host injects
+  // the loopback coordinates; the DSH `web` seam selects it via `searchProvider`.
+  registerFirecrawlWebSearch(ctx)
   const rootFiber = ctx.root.fiber
   const input = config.input ?? process.stdin
   const output = config.output ?? process.stdout

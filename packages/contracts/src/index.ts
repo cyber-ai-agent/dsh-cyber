@@ -441,6 +441,60 @@ export interface IntegrationHealth {
   latencyMs: number
 }
 
+/**
+ * One search backend the 连接中心「联网搜索」main item offers as a card. The
+ * cards are driven by the checked-in `catalog/web-search-providers.json` (the
+ * single extensibility point: add one JSON entry plus its backend wiring).
+ */
+export interface WebSearchProviderDescriptor {
+  /** Stable provider id (the `provider` config value on a 联网搜索 connection). */
+  id: string
+  /** 搜索服务商 display name. */
+  name: string
+  /** 服务说明. */
+  description: string
+  /** 服务地址 — fixed by the catalog, not user-editable. */
+  endpoint: string
+  /** 获取途径：API 密钥的申请入口。 */
+  obtain: { text: string; url: string }
+  /**
+   * How the DSH worker drives this backend: `deepseek` (built-in provider,
+   * key in the worker launch env) or `firecrawl` (host-loopback bridge, key
+   * stays host-side). Any other value is a catalog entry without worker
+   * wiring yet — its connections are kept but never selected.
+   */
+  backend: string
+  /** Which integration type stores this provider's key. Defaults to the 联网搜索 type; the Firecrawl card takes over the legacy `builtin.firecrawl` connection. */
+  integrationId?: string
+  dataEgress?: string[]
+}
+
+/** The checked-in 联网搜索 search-provider catalog. */
+export interface WebSearchProviderCatalog {
+  schemaVersion: 1
+  version: string
+  providers: WebSearchProviderDescriptor[]
+}
+
+export function webSearchProviderById(catalog: WebSearchProviderCatalog, providerId: string | undefined): WebSearchProviderDescriptor | undefined {
+  return catalog.providers.find((item) => item.id === providerId)
+}
+
+/**
+ * Launch-environment coordinates the DSH Cyber host hands to a worker so its
+ * Firecrawl 联网搜索 provider can call back into the host over loopback. The
+ * token is a per-launch capability (never persisted); the Firecrawl
+ * credential itself stays host-side.
+ */
+export const WEB_SEARCH_WORKER_ENV = {
+  loopbackOrigin: 'DSH_CYBER_LOOPBACK_ORIGIN',
+  workerToken: 'DSH_CYBER_WORKER_TOKEN',
+  workspaceId: 'DSH_CYBER_WORKSPACE_ID',
+} as const
+
+/** Header the worker sends to the host 联网搜索 bridge. */
+export const WEB_SEARCH_WORKER_TOKEN_HEADER = 'x-dsh-cyber-worker-token'
+
 export type PackageInstallTransactionStatus =
   | 'approved'
   | 'staged'
