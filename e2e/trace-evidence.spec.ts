@@ -6,6 +6,7 @@ import type { AgentTurnRequest } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
 import { normalizeHarnessTraceNotification } from '../packages/harness-adapter/lib/adapter.js'
 import { ToolTraceSubjects } from '../packages/harness-adapter/lib/tool-result-summary.js'
+import { attachAppConsoleRecorder } from './console-test-helpers.js'
 import { openTraceEntry } from './trace-test-helpers.js'
 
 let server: CyberServer
@@ -38,8 +39,7 @@ test.afterAll(async () => { await server.close(); await rm(stateRoot, { recursiv
 
 test('expands and reads raw event evidence, survives reload, and fits three viewports', async ({ page }, info) => {
   const consoleIssues: string[] = []
-  page.on('console', (message) => { if (message.type() === 'error' || message.type() === 'warning') consoleIssues.push(message.text()) })
-  page.on('pageerror', (error) => consoleIssues.push(error.message))
+  attachAppConsoleRecorder(page, consoleIssues)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(origin)
   await page.getByRole('button', { name: '创建我的世界' }).click()

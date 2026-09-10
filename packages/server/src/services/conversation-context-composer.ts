@@ -13,6 +13,7 @@ import type {
 import {
   composeContextEnvelope,
   composeContextLayer,
+  contextContentHash,
   derivePromptCachePolicy,
   estimateTextTokens,
   stableContextHash,
@@ -28,6 +29,7 @@ import {
   type MemoryContextLayers,
   type MemorySourceHydration,
 } from './employee-conversation-memory-service.js'
+import { ContextLayerCache, type ContextLayerCacheStats } from './context-layer-cache.js'
 
 /**
  * The one place that decides what a character turn actually sees.
@@ -169,10 +171,26 @@ export interface ComposedTurnContext {
 export class ConversationContextComposer {
   readonly #store: ContextComposerStore
   readonly #memory: ConversationMemoryLayersPort | undefined
+  readonly #layerCache: ContextLayerCache
 
-  constructor(store: ContextComposerStore, memory?: ConversationMemoryLayersPort) {
+  constructor(
+    store: ContextComposerStore,
+    memory?: ConversationMemoryLayersPort,
+    options: { layerCache?: ContextLayerCache } = {},
+  ) {
     this.#store = store
     this.#memory = memory
+    this.#layerCache = options.layerCache ?? new ContextLayerCache()
+  }
+
+  /**
+   * Runtime statistics for the non-durable layer cache.
+   *
+   * This is observability only: SQLite and the memory index remain the source
+   * of truth, and a restart simply starts with an empty cache.
+   */
+  layerCacheStats(): ContextLayerCacheStats {
+    return this.#layerCache.stats()
   }
 
   async compose(input: ComposeTurnContextInput): Promise<ComposedTurnContext> {
@@ -227,25 +245,32 @@ export class ConversationContextComposer {
     const composedMemory = trimmed === undefined || hydration === undefined
       ? trimmed
       : withHydratedSources(trimmed, hydration)
+    const cachedMemory = composedMemory === undefined
+      ? undefined
+      : {
+          ...composedMemory,
+          memoryIndex: this.#layerCache.canonical(composedMemory.memoryIndex),
+          retrievedMemories: this.#layerCache.canonical(composedMemory.retrievedMemories),
+        }
 
     // Retrieval is not lossless. When it produced nothing the old full replay
     // is still the only thing that can answer a question about an older turn,
     // so the composer keeps it rather than shipping a silent regression.
-    const memoryText = composedMemory === undefined
+    const memoryText = cachedMemory === undefined
       ? await this.#memory?.compose({
           employeeId: input.employee.id,
           conversationId: input.conversationId,
           prompt: input.prompt,
           budgetTokens,
         })
-      : renderMemory(composedMemory)
+      : renderMemory(cachedMemory)
 
     const plan = session === undefined
       ? undefined
       : this.#store.getLatestTaskCollaborationPlanForSession?.(session.id)
     const taskContext = plan === undefined || session === undefined
       ? undefined
-      : composeTaskContextLayer(session, plan, input.employee.id, composedMemory?.retrievedMemories)
+      : this.#layerCache.canonical(composeTaskContextLayer(session, plan, input.employee.id, cachedMemory?.retrievedMemories))
 
     const sections: string[] = []
     if (taskContext !== undefined) sections.push(taskContext.text)
@@ -259,63 +284,71 @@ export class ConversationContextComposer {
     // deterministic string upstream - followed by the world's stable rules.
     // Everything the envelope adds after them is dynamic by construction,
     // which is what makes the prefix worth a cache key at all.
-    const stableIdentity = composeContextLayer({
-      id: `identity:${input.employee.id}`,
-      kind: 'stable-identity',
-      text: input.persona,
-      ...(input.personaRevision === undefined ? {} : { revision: String(input.personaRevision) }),
-      sourceRefs: [
-        { kind: 'employee', id: input.employee.id },
-        {
-          kind: 'employee-revision',
-          id: input.employee.id,
-          revision: String(input.personaRevision ?? input.employee.currentRevision),
-        },
-      ],
-    })
+    const stableIdentity = this.#layerCache.getOrCreate(
+      `identity:${input.employee.worldId}:${input.employee.id}:${contextContentHash([input.personaRevision ?? input.employee.currentRevision, input.persona])}`,
+      () => composeContextLayer({
+        id: `identity:${input.employee.id}`,
+        kind: 'stable-identity',
+        text: input.persona,
+        ...(input.personaRevision === undefined ? {} : { revision: String(input.personaRevision) }),
+        sourceRefs: [
+          { kind: 'employee', id: input.employee.id },
+          {
+            kind: 'employee-revision',
+            id: input.employee.id,
+            revision: String(input.personaRevision ?? input.employee.currentRevision),
+          },
+        ],
+      }),
+    )
 
-    const worldContext = input.worldContext
-    const environment = input.environment
+    const worldContext = input.worldContext === undefined ? undefined : this.#layerCache.canonical(input.worldContext)
+    const worldDirectory = input.worldDirectory === undefined ? undefined : this.#layerCache.canonical(input.worldDirectory)
+    const environment = input.environment === undefined ? undefined : this.#layerCache.canonical(input.environment)
+    const recentConversation = recentHistory.length === 0
+      ? undefined
+      : this.#layerCache.canonical(composeRecentConversationLayer(input.conversationId, recentHistory, durableMessages))
+    const currentRequest = this.#layerCache.canonical(composeContextLayer({
+      id: `request:${input.workTurnId ?? input.conversationId}`,
+      kind: 'current-request',
+      text: input.prompt,
+      sourceRefs: [
+        { kind: 'request', id: input.workTurnId ?? input.conversationId },
+        { kind: 'session', id: input.conversationId },
+      ],
+    }))
     const envelope = composeContextEnvelope({
       stableIdentity,
       ...(worldContext === undefined ? {} : { worldContext }),
-      ...(input.worldDirectory === undefined ? {} : { worldDirectory: input.worldDirectory }),
+      ...(worldDirectory === undefined ? {} : { worldDirectory }),
       ...(environment === undefined ? {} : { environment }),
       promptCache: derivePromptCachePolicy({
-        stablePrefixHash: stableContextHash(stableIdentity, worldContext, input.worldDirectory, environment),
+        stablePrefixHash: stableContextHash(stableIdentity, worldContext, worldDirectory, environment),
         // Partitioned down to the character. Two characters whose prefixes are
         // byte-identical still never share one, because a cache partition is a
         // boundary and boundaries are not an optimisation.
         namespace: `${input.employee.worldId}/${input.employee.id}`,
         scope: 'employee',
-        stablePrefixTokens: stableIdentity.tokenEstimate + (worldContext?.tokenEstimate ?? 0) + (input.worldDirectory?.tokenEstimate ?? 0) + (environment?.tokenEstimate ?? 0),
+        stablePrefixTokens: stableIdentity.tokenEstimate + (worldContext?.tokenEstimate ?? 0) + (worldDirectory?.tokenEstimate ?? 0) + (environment?.tokenEstimate ?? 0),
         // A direct lane is the same character answering again tomorrow; a group
         // or task lane is assembled per collaboration and rarely reruns.
         retentionHint: lane === 'direct' ? 'long' : 'short',
       }),
       ...(taskContext === undefined ? {} : { taskContext }),
-      ...(composedMemory === undefined
+      ...(cachedMemory === undefined
         ? {}
-        : { memoryIndex: composedMemory.memoryIndex, retrievedMemories: composedMemory.retrievedMemories }),
-      ...(recentHistory.length === 0
+        : { memoryIndex: cachedMemory.memoryIndex, retrievedMemories: cachedMemory.retrievedMemories }),
+      ...(recentConversation === undefined
         ? {}
-        : { recentConversation: composeRecentConversationLayer(input.conversationId, recentHistory, durableMessages) }),
-      currentRequest: composeContextLayer({
-        id: `request:${input.workTurnId ?? input.conversationId}`,
-        kind: 'current-request',
-        text: input.prompt,
-        sourceRefs: [
-          { kind: 'request', id: input.workTurnId ?? input.conversationId },
-          { kind: 'session', id: input.conversationId },
-        ],
-      }),
+        : { recentConversation }),
+      currentRequest,
     })
 
     return {
       envelope,
       prompt,
       recentHistory,
-      memoryHits: composedMemory?.hits ?? [],
+      memoryHits: cachedMemory?.hits ?? [],
       coverage: {
         lane,
         memoryScopes,
