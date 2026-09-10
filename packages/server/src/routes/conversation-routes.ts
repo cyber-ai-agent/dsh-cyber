@@ -471,7 +471,11 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         requiredSkillIds: string[]
         targetEmployeeId: string
       } | undefined
-      if (delegation === undefined && groupTasks?.resolveDirectSkillDelegation !== undefined) {
+      // A queued turn must be accepted as a durable message first. Skill
+      // delegation is resolved at the visible send boundary; silently
+      // changing a queued recipient would make the user choice impossible to
+      // review while the role or grant can change before dispatch.
+      if (delegation === undefined && queueMode === undefined && groupTasks?.resolveDirectSkillDelegation !== undefined) {
         const decision = await groupTasks.resolveDirectSkillDelegation({
           workspaceId: world.workspaceId,
           worldId: world.id,
