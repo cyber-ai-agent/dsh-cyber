@@ -7,6 +7,7 @@ import { writeJson } from '../http/response.js'
 import type { Router } from '../http/router.js'
 import type { IntegrationService } from '../integrations/integration-service.js'
 import { FIRECRAWL_INTEGRATION_ID } from '../integrations/firecrawl-provider.js'
+import { MCP_INTEGRATION_ID, mcpServiceSlug } from '../integrations/mcp-provider.js'
 import { WEB_SEARCH_DEFAULT_MARKER, WEB_SEARCH_INTEGRATION_ID } from '../integrations/web-search-provider.js'
 import { sshEnvironmentDeviceTarget } from '../composition/compose-environment.js'
 import type { EnvironmentService } from '../environments/environment-service.js'
@@ -72,6 +73,7 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
     const workspaceId = requireWorkspace(store, params[0]!); const integrationId = params[1]!; const connectionId = params[2]!
     assertIntegrationAvailable(store, workspaceId, integrationId)
     const body = await readJson(request); const config = record(body.config) ?? {}
+    assertMcpServiceUnique(integrations, workspaceId, integrationId, config, connectionId)
     if (body.enabled !== undefined && typeof body.enabled !== 'boolean') throw new HttpError(422, 'integration_enabled_invalid', 'enabled must be boolean')
     if (body.clearCredential !== undefined && typeof body.clearCredential !== 'boolean') throw new HttpError(422, 'integration_clear_credential_invalid', 'clearCredential must be boolean')
     const existing = integrations.getById(workspaceId, connectionId)
@@ -97,6 +99,7 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
     const workspaceId = requireWorkspace(store, params[0]!); const integrationId = params[1]!
     assertIntegrationAvailable(store, workspaceId, integrationId)
     const body = await readJson(request); const config = record(body.config) ?? {}
+    assertMcpServiceUnique(integrations, workspaceId, integrationId, config)
     if (body.enabled !== undefined && typeof body.enabled !== 'boolean') throw new HttpError(422, 'integration_enabled_invalid', 'enabled must be boolean')
     if (body.clearCredential !== undefined && typeof body.clearCredential !== 'boolean') throw new HttpError(422, 'integration_clear_credential_invalid', 'clearCredential must be boolean')
     let connection
@@ -176,6 +179,26 @@ function visibleDescriptors(store: SqliteStore, integrations: IntegrationService
 
 function assertIntegrationAvailable(_store: SqliteStore, _workspaceId: string, _integrationId: string): void {
   // No package gate on connection CRUD anymore (see visibleDescriptors).
+}
+
+/**
+ * A workspace may configure several MCP services, but each `service` slug is
+ * the namespace for that service's skills (`mcp.<slug>.<tool>`) and `/mcp`
+ * commands, so two connections cannot share one. Checked before save, so a
+ * collision never writes-then-errors. `editingConnectionId` excludes the
+ * connection being edited from the sibling scan.
+ */
+function assertMcpServiceUnique(integrations: IntegrationService, workspaceId: string, integrationId: string, config: Record<string, unknown>, editingConnectionId?: string): void {
+  if (integrationId !== MCP_INTEGRATION_ID) return
+  let candidate
+  try { candidate = mcpServiceSlug(config as JsonObject) }
+  catch (error) { throw new HttpError(422, 'mcp_service_invalid', error instanceof Error ? error.message : 'MCP 服务标识无效') }
+  for (const sibling of integrations.listByType(workspaceId, MCP_INTEGRATION_ID)) {
+    if (sibling.id === editingConnectionId) continue
+    if (mcpServiceSlug(sibling.config) === candidate) {
+      throw new HttpError(409, 'mcp_service_duplicate', `MCP 服务标识「${candidate}」在本工作区已存在，请换一个不同的标识`)
+    }
+  }
 }
 
 /** The connection must exist and belong to the integration the path names. */
