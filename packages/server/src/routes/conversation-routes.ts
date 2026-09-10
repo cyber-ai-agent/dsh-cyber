@@ -462,11 +462,41 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         await conversationHub.restoreCanonicalDirect(sessionId)
       }
 
-      const delegation = detectDelegatedCollaboration({
+      let delegation = detectDelegatedCollaboration({
         prompt,
         initiator: character,
         characters: store.listEmployees(world.id),
       })
+      let skillDelegation: {
+        requiredSkillIds: string[]
+        targetEmployeeId: string
+      } | undefined
+      if (delegation === undefined && groupTasks?.resolveDirectSkillDelegation !== undefined) {
+        const decision = await groupTasks.resolveDirectSkillDelegation({
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          employeeId: character.id,
+          prompt,
+        })
+        if (decision.kind === 'choice') {
+          throw new HttpError(409, 'skill_delegation_choice_required', `${decision.candidateDisplayNames.join('、')}都具备所需能力，请先选择一个角色再交办。`)
+        }
+        if (decision.kind === 'unavailable') {
+          throw new HttpError(422, 'skill_delegation_unavailable', decision.guidance)
+        }
+        if (decision.kind === 'delegate') {
+          skillDelegation = {
+            requiredSkillIds: decision.requiredSkillIds,
+            targetEmployeeId: decision.targetEmployeeId,
+          }
+          delegation = {
+            initiatorId: character.id,
+            targetIds: [decision.targetEmployeeId],
+            purpose: prompt,
+            maxRounds: 1,
+          }
+        }
+      }
       if (delegation !== undefined && queueMode !== undefined) {
         throw new HttpError(422, 'delegation_queue_unsupported', '委派协作暂不支持排队，请先使用即时发送')
       }
@@ -551,6 +581,10 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           delegatedParticipantIds,
           delegatedPurpose: delegation.purpose,
           delegatedMaxRounds: delegation.maxRounds,
+          ...(skillDelegation === undefined ? {} : {
+            delegatedSkillIds: skillDelegation.requiredSkillIds,
+            delegatedSourceEmployeeId: character.id,
+          }),
           ...(sessionId === undefined ? {} : { delegatedDirectSessionId: sessionId }),
         }
         if (clientTurnId !== undefined) {

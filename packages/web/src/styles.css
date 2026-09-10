@@ -1361,12 +1361,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-inserts > header small, .composer-inserts__note { color: var(--text-muted); font-size: 12px; }
 .composer-inserts__note { margin: 0; line-height: 1.45; }
 .composer-inserts > div { display: grid; gap: 4px; }
-.composer-insert { min-height: 40px; display: grid; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: 8px; padding: 5px 6px 5px 9px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-0); }
+.composer-insert { min-height: 40px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 6px 5px 9px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-0); }
 .composer-insert > span { min-width: 0; display: grid; gap: 2px; }
 .composer-insert strong { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .composer-insert small { color: var(--text-muted); font-size: 12px; }
-.composer-insert button { width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-control); color: var(--text-muted); background: transparent; cursor: pointer; }
-.composer-insert button:hover, .composer-insert button:focus-visible { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.composer-insert__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.composer-insert__actions button { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 4px 8px; border-radius: var(--radius-control); font-size: 12px; line-height: 1.2; }
+.composer-insert__actions .secondary-button:hover, .composer-insert__actions .secondary-button:focus-visible { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 65%, var(--border)); }
+.composer-insert__actions .danger-button:hover, .composer-insert__actions .danger-button:focus-visible { color: var(--danger); }
+@media (max-width: 720px) {
+  .composer-insert { grid-template-columns: 1fr; align-items: stretch; }
+  .composer-insert__actions { justify-content: stretch; }
+  .composer-insert__actions button { flex: 1 1 0; min-height: 44px; }
+}
 
 :root[data-skin='maid-atelier'] .composer-zone::before {
   content: '';
