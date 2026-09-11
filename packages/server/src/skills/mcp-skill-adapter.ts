@@ -2,7 +2,7 @@ import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/
 import type { JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
-import { MCP_INTEGRATION_ID, mcpEndpoint, normalizeMcpServiceSlug } from '../integrations/mcp-provider.js'
+import { MCP_INTEGRATION_ID, mcpConnectSpecFor, normalizeMcpServiceSlug } from '../integrations/mcp-provider.js'
 import type { McpClientFactory, McpToolDefinition } from '../integrations/mcp-client.js'
 import type { IntegrationService } from '../integrations/integration-service.js'
 import { ServiceError } from '../services/service-error.js'
@@ -65,7 +65,9 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
         const service = mcpServiceSlugForConnection(connection)
         let client
         try {
-          client = await this.#clients.connect(mcpEndpoint(connection.config), this.#integrations.credentialForConnection(workspace.id, connection.id))
+          client = await this.#clients.connect(
+            mcpConnectSpecFor(connection.config, this.#integrations.credentialForConnection(workspace.id, connection.id)),
+          )
           const tools = (await client.listTools()).slice(0, 100)
           const discovered: DiscoveredTool[] = []
           for (const tool of tools) {
@@ -185,7 +187,9 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
     if (args === undefined) return { status: 'failed', detail: 'MCP 工具参数已过期或无法解密，未调用外部工具' }
     let client
     try {
-      client = await this.#clients.connect(mcpEndpoint(connection.config), this.#integrations.credentialForConnection(world.workspaceId, connectionId))
+      client = await this.#clients.connect(
+        mcpConnectSpecFor(connection.config, this.#integrations.credentialForConnection(world.workspaceId, connectionId)),
+      )
       const result = await client.callTool(toolName, args)
       return { status: 'executed', detail: summarizeMcpResult(discovered.service, toolName, result) }
     } finally {

@@ -3,6 +3,7 @@ import { Trash } from '@phosphor-icons/react'
 import type {
   IntegrationConnection,
   IntegrationDescriptor,
+  IntegrationFieldDescriptor,
   IntegrationHealth,
   JsonObject,
 } from '@dsh-cyber/contracts'
@@ -79,7 +80,7 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
   useEffect(() => {
     setConfig(Object.fromEntries((descriptor?.configFields ?? []).map((field) => [
       field.id,
-      connection?.config[field.id] ?? (field.kind === 'boolean' ? false : field.kind === 'number' ? '' : field.placeholder ?? ''),
+      connection?.config[field.id] ?? defaultConfigValue(field),
     ])) as JsonObject)
     setEnabled(connection?.enabled ?? true)
     setSecretInputs({})
@@ -136,7 +137,7 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
     setAddingNew(true)
     setConfig(Object.fromEntries((descriptor.configFields ?? []).map((field) => [
       field.id,
-      field.kind === 'boolean' ? false : field.kind === 'number' ? '' : field.placeholder ?? '',
+      defaultConfigValue(field),
     ])) as JsonObject)
     setEnabled(true)
     setSecretInputs({})
@@ -234,7 +235,7 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
               return <div key={item.id} className={active ? 'integration-connection-card is-active' : 'integration-connection-card'}>
                 {/* Second click on the open card collapses the editor below. */}
                 <button type="button" aria-expanded={active} onClick={() => { if (active) { setSelectedConnectionId(undefined); return } setAddingNew(false); setSelectedConnectionId(item.id) }}>
-                  <strong>{item.displayName}</strong><small>{`${String(item.config.service ?? item.config.host ?? item.config.endpoint ?? '')}${item.enabled ? '' : ' · 已停用'}`}</small>
+                  <strong>{item.displayName}</strong><small>{`${String(item.config.service ?? item.config.host ?? item.config.endpoint ?? item.config.command ?? '')}${item.enabled ? '' : ' · 已停用'}`}</small>
                 </button>
                 {/* Right edge carries the 启用连接 switch for quick on/off. */}
                 <label className="integration-connection-card__enable" title={item.enabled ? '点击停用该连接' : '点击启用该连接'}>
@@ -253,13 +254,27 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
                 header checkbox remains only for single-connection types without cards. */}
             {!multiple ? <label><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用连接</label> : null}
           </header>
-          {descriptor.configFields.map((field) => field.kind === 'boolean' ? (
-            <label className="dialog-field dialog-field--checkbox" key={field.id}><input type="checkbox" checked={config[field.id] === true} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.checked }))} /><span>{field.displayName}</span><small>{field.description}</small></label>
-          ) : field.id === 'displayName' ? (
-            <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type="text" value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.value }))} /><small>{field.description}</small></label>
-          ) : (
-            <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type={field.kind === 'number' ? 'number' : 'text'} value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: field.kind === 'number' ? Number(event.target.value) : event.target.value }))} /><small>{field.description}</small></label>
-          ))}
+          {descriptor.configFields.map((field) => {
+            // A field can be gated on a sibling select (e.g. MCP 远程地址 vs 本机启动命令):
+            // hidden fields keep their value in `config` state; the server drops
+            // whatever the active mode does not need.
+            if (field.visibleWhen !== undefined && !field.visibleWhen.equals.includes(String(config[field.visibleWhen.field] ?? ''))) return null
+            if (field.kind === 'select') {
+              return <label className="dialog-field" key={field.id}><span>{field.displayName}</span>
+                <select value={String(config[field.id] ?? '')} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.value }))}>
+                  {(field.options ?? []).map((option) => <option key={option} value={option}>{field.optionLabels?.[option] ?? option}</option>)}
+                </select>
+                <small>{field.description}</small>
+              </label>
+            }
+            return field.kind === 'boolean' ? (
+              <label className="dialog-field dialog-field--checkbox" key={field.id}><input type="checkbox" checked={config[field.id] === true} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.checked }))} /><span>{field.displayName}</span><small>{field.description}</small></label>
+            ) : field.id === 'displayName' ? (
+              <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type="text" value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.value }))} /><small>{field.description}</small></label>
+            ) : (
+              <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type={field.kind === 'number' ? 'number' : 'text'} value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: field.kind === 'number' ? Number(event.target.value) : event.target.value }))} /><small>{field.description}</small></label>
+            )
+          })}
           {(descriptor.secretFields ?? []).map((field) => {
             const stored = secretConfiguredFor(field.id)
             const cleared = clearedSecrets[field.id] === true
@@ -306,4 +321,14 @@ function pickInitialType(descriptors: IntegrationDescriptor[], initialSkillId: s
   if (initialSkillId === 'web.search.firecrawl') return WEB_SEARCH_TYPE_ID
   const match = descriptors.find((item) => item.skillIds.includes(initialSkillId))
   return match?.id ?? descriptors[0]?.id
+}
+
+/** Blank-form value for a field by kind; a select field opens on its first option. */
+function defaultConfigValue(field: IntegrationFieldDescriptor): string | boolean {
+  switch (field.kind) {
+    case 'boolean': return false
+    case 'number': return ''
+    case 'select': return field.options?.[0] ?? ''
+    default: return field.placeholder ?? ''
+  }
 }

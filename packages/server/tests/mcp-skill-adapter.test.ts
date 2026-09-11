@@ -8,7 +8,7 @@ import { SqliteStore } from '@dsh-cyber/persistence'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createBuiltinIntegrationRegistry } from '../src/integrations/builtin-integration-registry.js'
-import type { McpClientConnection, McpClientFactory, McpToolDefinition } from '../src/integrations/mcp-client.js'
+import type { McpClientConnection, McpClientFactory, McpConnectSpec, McpToolDefinition } from '../src/integrations/mcp-client.js'
 import { MCP_INTEGRATION_ID } from '../src/integrations/mcp-provider.js'
 import { IntegrationService } from '../src/integrations/integration-service.js'
 import { CharacterSkillRuntime } from '../src/services/character-skill-runtime.js'
@@ -39,11 +39,11 @@ describe('MCP Skill Adapter V1', () => {
     store.saveBlueprint(blueprint)
     const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: world.id, blueprintId: blueprint.id, blueprintVersion: 1, skillGrants: [skillId] })
     const clients = new FakeMcpClientFactory([{
-      endpoint: 'http://127.0.0.1:3900/mcp', bearer: 'private-bearer',
+      endpoint: 'http://127.0.0.1:3900/mcp',
       tools: [{ name: 'create_issue', description: 'Create an issue', inputSchema: { type: 'object', properties: { title: { type: 'string' } } } }],
     }])
     const integrations = await IntegrationService.open(root, createBuiltinIntegrationRegistry(clients))
-    await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'private-bearer' })
+    await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', mode: 'remote', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'private-bearer' })
     const adapter = new McpSkillAdapter({ store, integrations, clients })
     const registry = new CharacterSkillAdapterRegistry(); registry.register(adapter); await adapter.refresh(); registry.refresh(adapter)
     expect(registry.list()).toEqual([expect.objectContaining({ id: skillId, adapterId: 'builtin.mcp', risks: ['external-side-effect'] })])
@@ -75,7 +75,11 @@ describe('MCP Skill Adapter V1', () => {
     expect(clients.calls).toHaveLength(0)
     const result = await runtime.decideApproval(approval.id, 'approved', 'once', 'owner', new Date('2026-08-25T01:01:00.000Z'))
     expect(result.action).toMatchObject({ status: 'executed', detail: expect.stringContaining('原始结果未持久化') })
-    expect(clients.calls).toEqual([{ endpoint: 'http://127.0.0.1:3900/mcp', name: 'create_issue', bearer: 'private-bearer', args: { title: 'secret subject', body: 'secret body' } }])
+    expect(clients.calls).toEqual([{
+      spec: { kind: 'remote', endpoint: 'http://127.0.0.1:3900/mcp', bearerToken: 'private-bearer' },
+      name: 'create_issue',
+      args: { title: 'secret subject', body: 'secret body' },
+    }])
     expect(JSON.stringify(result.action)).not.toContain('secret body')
     expect(await readFile(join(root, 'integrations', 'connections.json'), 'utf8')).not.toContain('private-bearer')
     expect(await readFile(join(root, 'credentials', 'integration-credentials.json'), 'utf8')).not.toContain('secret subject')
@@ -89,15 +93,15 @@ describe('MCP Skill Adapter V1', () => {
     const world = store.createWorld({ workspaceId: workspace.id, name: 'MCP 多服务世界', templateId: 'personal-world' })
 
     const clients = new FakeMcpClientFactory([
-      { endpoint: 'http://127.0.0.1:3900/mcp', bearer: 'github-token', tools: [{ name: 'create_issue', description: 'Open a GitHub issue', inputSchema: { type: 'object' } }] },
-      { endpoint: 'http://127.0.0.1:3901/mcp', bearer: 'linear-token', tools: [
+      { endpoint: 'http://127.0.0.1:3900/mcp', tools: [{ name: 'create_issue', description: 'Open a GitHub issue', inputSchema: { type: 'object' } }] },
+      { endpoint: 'http://127.0.0.1:3901/mcp', tools: [
         { name: 'create_issue', description: 'Open a Linear ticket', inputSchema: { type: 'object' } },
         { name: 'sync_board', description: 'Synchronize a board', inputSchema: { type: 'object' } },
       ] },
     ])
     const integrations = await IntegrationService.open(root, createBuiltinIntegrationRegistry(clients))
-    const github = await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'github-token' })
-    await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'linear', endpoint: 'http://127.0.0.1:3901/mcp' }, enabled: true, credential: 'linear-token' })
+    const github = await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', mode: 'remote', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'github-token' })
+    await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'linear', mode: 'remote', endpoint: 'http://127.0.0.1:3901/mcp' }, enabled: true, credential: 'linear-token' })
 
     const blueprint: EmployeeBlueprint = {
       schemaVersion: 1, id: 'test.mcp-multi', version: 1, worldTemplateId: 'personal-world',
@@ -133,7 +137,61 @@ describe('MCP Skill Adapter V1', () => {
 
     // Executing resolves each owning connection's endpoint and credential.
     await adapter.execute({ ...githubIssue, worldId: world.id, characterId: employee.id } as unknown as CharacterSkillAction)
-    expect(clients.calls).toContainEqual({ endpoint: 'http://127.0.0.1:3900/mcp', name: 'create_issue', bearer: 'github-token', args: { a: 1 } })
+    expect(clients.calls).toContainEqual({
+      spec: { kind: 'remote', endpoint: 'http://127.0.0.1:3900/mcp', bearerToken: 'github-token' },
+      name: 'create_issue',
+      args: { a: 1 },
+    })
+    integrations.close()
+  })
+
+  it('discovers and executes through a launched local process spec without credentials', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mcp-local-')); roots.push(root)
+    const store = await SqliteStore.open(join(root, 'data', 'dsh-cyber.sqlite')); stores.push(store)
+    const workspace = store.createWorkspace({ name: 'MCP 本机模式工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: 'MCP 本机模式世界', templateId: 'personal-world' })
+    const skillId = mcpSkillId('playwright', 'browser_navigate')
+
+    const clients = new FakeMcpClientFactory([{
+      command: 'npx',
+      tools: [{ name: 'browser_navigate', description: 'Navigate the browser', inputSchema: { type: 'object' } }],
+    }])
+    const integrations = await IntegrationService.open(root, createBuiltinIntegrationRegistry(clients))
+    await integrations.save({
+      workspaceId: workspace.id,
+      integrationId: MCP_INTEGRATION_ID,
+      config: { service: 'playwright', mode: 'local', command: 'npx', args: '@playwright/mcp@latest --port 8931' },
+      enabled: true,
+    })
+    const adapter = new McpSkillAdapter({ store, integrations, clients })
+    await adapter.refresh()
+    expect(adapter.descriptorsFor(workspace.id)).toEqual([expect.objectContaining({ id: skillId })])
+
+    // A legacy two-segment grant was rewritten by schema v53 to this exact
+    // service-qualified id, so pre-multi-service characters keep working.
+    const blueprint: EmployeeBlueprint = {
+      schemaVersion: 1, id: 'test.mcp-local', version: 1, worldTemplateId: 'personal-world',
+      displayName: 'MCP 本机员', role: '测试员', summary: '验证本机 MCP', persona: '只执行明确批准的工具',
+      requestedSkills: [skillId], requestedCapabilities: [], createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    store.saveBlueprint(blueprint)
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: world.id, blueprintId: blueprint.id, blueprintVersion: 1,
+      skillGrants: [skillId],
+    })
+    const [proposal] = await adapter.propose({
+      worldId: world.id, characterId: employee.id, grantedSkillIds: [skillId], now: new Date(),
+      prompt: '/mcp playwright.browser_navigate {"url":"https://example.com"}',
+    })
+    expect(proposal).toMatchObject({ skillId, target: 'mcp:playwright.browser_navigate' })
+    const result = await adapter.execute({ ...proposal, worldId: world.id, characterId: employee.id } as unknown as CharacterSkillAction)
+    expect(result.status).toBe('executed')
+    // The local process is driven by command+args, never by a bearer credential.
+    expect(clients.calls).toEqual([{
+      spec: { kind: 'local', command: 'npx', args: ['@playwright/mcp@latest', '--port', '8931'] },
+      name: 'browser_navigate',
+      args: { url: 'https://example.com' },
+    }])
     integrations.close()
   })
 
@@ -149,16 +207,20 @@ describe('MCP Skill Adapter V1', () => {
   })
 })
 
+interface FakeService { endpoint?: string; command?: string; tools: McpToolDefinition[] }
+
 class FakeMcpClientFactory implements McpClientFactory {
-  readonly calls: Array<{ endpoint: string; name: string; args: JsonObject; bearer?: string }> = []
-  constructor(readonly services: Array<{ endpoint: string; bearer?: string; tools: McpToolDefinition[] }>) {}
-  async connect(endpoint: string, bearer?: string): Promise<McpClientConnection> {
-    const service = this.services.find((item) => item.endpoint === endpoint)
+  readonly calls: Array<{ spec: McpConnectSpec; name: string; args: JsonObject }> = []
+  constructor(readonly services: FakeService[]) {}
+  async connect(spec: McpConnectSpec): Promise<McpClientConnection> {
+    const service = this.services.find((item) =>
+      spec.kind === 'remote' ? item.endpoint === spec.endpoint : item.command === spec.command,
+    )
     const tools = service?.tools ?? []
     return {
       listTools: async () => tools,
       callTool: async (name, args) => {
-        this.calls.push({ endpoint, name, args, ...(bearer === undefined ? {} : { bearer }) })
+        this.calls.push({ spec, name, args })
         return { content: [{ type: 'text', text: 'sensitive remote result' }], structuredContent: { issueId: 42 } }
       },
       close: async () => undefined,

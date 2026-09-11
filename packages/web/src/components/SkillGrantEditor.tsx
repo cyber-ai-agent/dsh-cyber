@@ -100,6 +100,30 @@ function isLearnable(entry: SkillCatalogEntry): boolean {
 }
 
 function legacyUnavailableSkill(id: string): SkillCatalogEntry {
+  // A grantable MCP skill that no longer resolves to a catalog entry: the
+  // owning MCP connection is unconfigured or its process/endpoint is down, or
+  // the tool name changed. Keep it identifiable (service + tool) instead of
+  // dumping the raw id, and point at the 连接中心 for the fix.
+  if (id.startsWith('mcp.')) {
+    const tail = id.slice(4)
+    const dot = tail.indexOf('.')
+    const label = dot > 0 ? `${tail.slice(0, dot)} / ${tail.slice(dot + 1)}` : tail
+    return {
+      id,
+      displayName: `MCP 工具 · ${label}`,
+      summary: '这项 MCP 授权当前没有对应的目录项：对应 MCP 连接可能未配置、未启用或不可达，也可能工具已改名。可到顶部“连接中心”检查该连接；保留此授权不会自动生效，取消勾选即可撤销。',
+      adapterId: 'builtin.mcp',
+      risks: ['external-side-effect'],
+      supportsScheduling: false,
+      persistentApproval: 'forbidden',
+      kind: 'integration',
+      source: 'mcp',
+      scope: 'workspace',
+      globalKnown: false,
+      worldAvailable: false,
+      availability: 'unavailable',
+    }
+  }
   return {
     id,
     displayName: id,
