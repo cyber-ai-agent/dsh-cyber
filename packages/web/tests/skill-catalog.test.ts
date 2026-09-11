@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EmployeeBlueprint, EmployeeInstance, World } from '@dsh-cyber/contracts'
 import { RecruitmentDialog } from '../src/components/RecruitmentDialog.js'
 import { SkillGrantEditor } from '../src/components/SkillGrantEditor.js'
-import type { SkillCatalogEntry } from '../src/components/skill-catalog.js'
+import { normalizeSkillCatalogEntry, type SkillCatalogEntry } from '../src/components/skill-catalog.js'
 
 const world: World = {
   id: 'world-skill-catalog-test',
@@ -93,6 +93,98 @@ describe('world-scoped skill catalog UI', () => {
     await unmount(root, host)
   })
 
+  it('passes through the MCP service grouping metadata', () => {
+    const base = { id: 'mcp.github.create_issue', displayName: 'MCP · GitHub MCP / create_issue' }
+    expect(normalizeSkillCatalogEntry({ ...base, mcpService: { id: 'github', label: 'GitHub MCP' } })?.mcpService)
+      .toEqual({ id: 'github', label: 'GitHub MCP' })
+    expect(normalizeSkillCatalogEntry({ ...base, mcpService: { id: 'github' } })?.mcpService).toBeUndefined()
+    expect(normalizeSkillCatalogEntry({ ...base, mcpService: 'github' })?.mcpService).toBeUndefined()
+  })
+
+  it('collapses one MCP service tools into a single grant row', async () => {
+    const mcpCatalog: SkillCatalogEntry[] = [
+      mcpTool('mcp.playwright.browser_navigate', 'MCP · Playwright 浏览器 / browser_navigate', { id: 'playwright', label: 'Playwright 浏览器' }),
+      mcpTool('mcp.playwright.browser_click', 'MCP · Playwright 浏览器 / browser_click', { id: 'playwright', label: 'Playwright 浏览器' }),
+      mcpTool('mcp.github.create_issue', 'MCP · GitHub MCP / create_issue', { id: 'github', label: 'GitHub MCP' }),
+      skill('core.notes', '记录整理', true),
+    ]
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/catalog/blueprints?worldId=world-skill-catalog-test') return json({ items: [blueprint] })
+      if (path === '/api/worlds/world-skill-catalog-test/skill-catalog') return json({ items: mcpCatalog })
+      throw new Error(`unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const onChange = vi.fn()
+    const initial = ['mcp.github.create_issue', 'mcp.playwright.browser_click']
+    const { host, root } = await mount(createElement(SkillGrantEditor, { employee, value: initial, onChange }))
+    await flush()
+
+    // One row per MCP service plus the single non-MCP recommended skill.
+    const rows = Array.from(host.querySelectorAll('.skill-grant-row'))
+    expect(rows).toHaveLength(3)
+    expect(host.textContent).toContain('MCP · Playwright 浏览器')
+    expect(host.textContent).toContain('MCP · GitHub MCP')
+
+    const rowFor = (text: string): HTMLInputElement => {
+      const row = Array.from(host.querySelectorAll('.skill-grant-row')).find((item) => item.textContent?.includes(text))
+      const checkbox = row?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      if (checkbox === null || checkbox === undefined) throw new Error(`row not found: ${text}`)
+      return checkbox
+    }
+
+    // GitHub: fully granted → checked. Playwright: one of two granted → indeterminate.
+    expect(rowFor('MCP · GitHub MCP').checked).toBe(true)
+    const playwrightCheckbox = rowFor('MCP · Playwright 浏览器')
+    expect(playwrightCheckbox.checked).toBe(false)
+    expect(playwrightCheckbox.indeterminate).toBe(true)
+
+    // Checking the Playwright row grants every tool of the service at once.
+    await act(async () => { playwrightCheckbox.click() })
+    expect(onChange).toHaveBeenLastCalledWith([
+      'mcp.github.create_issue',
+      'mcp.playwright.browser_click',
+      'mcp.playwright.browser_navigate',
+    ])
+
+    // Unchecking the GitHub row revokes all of the service's grants.
+    const githubCheckbox = rowFor('MCP · GitHub MCP')
+    await act(async () => { githubCheckbox.click() })
+    expect(onChange).toHaveBeenLastCalledWith(['mcp.playwright.browser_click'])
+    await unmount(root, host)
+  })
+
+  it('keeps a dead MCP service revocable as one aggregated row', async () => {
+    const mcpCatalog: SkillCatalogEntry[] = [
+      mcpTool('mcp.github.create_issue', 'MCP · GitHub MCP / create_issue', { id: 'github', label: 'GitHub MCP' }),
+    ]
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/catalog/blueprints?worldId=world-skill-catalog-test') return json({ items: [blueprint] })
+      if (path === '/api/worlds/world-skill-catalog-test/skill-catalog') return json({ items: mcpCatalog })
+      throw new Error(`unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const onChange = vi.fn()
+    const { host, root } = await mount(createElement(SkillGrantEditor, {
+      employee,
+      value: ['mcp.dead.tool_one', 'mcp.dead.tool_two', 'mcp.github.create_issue'],
+      onChange,
+    }))
+    await flush()
+
+    // The unknown service renders exactly one aggregated row (not one per tool),
+    // checked because its stale grants remain; the live service row is untouched.
+    expect(host.textContent).toContain('MCP · dead')
+    expect(host.textContent).toContain('暂不可用')
+    const row = Array.from(host.querySelectorAll('.skill-grant-row')).find((item) => item.textContent?.includes('MCP · dead'))!
+    const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+    expect(checkbox.checked).toBe(true)
+    await act(async () => { checkbox.click() })
+    expect(onChange).toHaveBeenLastCalledWith(['mcp.github.create_issue'])
+    await unmount(root, host)
+  })
+
   it('uses recommended defaults during recruitment and preserves an explicit empty selection', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
@@ -148,6 +240,26 @@ function skill(id: string, displayName: string, recommendedByDefault: boolean): 
     globalKnown: true,
     worldAvailable: true,
     availability: 'available',
+  }
+}
+
+function mcpTool(id: string, displayName: string, service: { id: string; label: string }, available = true): SkillCatalogEntry {
+  return {
+    id,
+    displayName,
+    summary: 'MCP 工具说明。',
+    adapterId: 'builtin.mcp',
+    risks: ['external-side-effect'],
+    supportsScheduling: false,
+    persistentApproval: 'forbidden',
+    kind: 'integration',
+    recommendedByDefault: false,
+    mcpService: service,
+    source: 'mcp',
+    scope: 'workspace',
+    globalKnown: true,
+    worldAvailable: available,
+    availability: available ? 'available' : 'unavailable',
   }
 }
 

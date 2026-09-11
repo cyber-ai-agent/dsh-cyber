@@ -46,7 +46,16 @@ describe('MCP Skill Adapter V1', () => {
     await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', mode: 'remote', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'private-bearer' })
     const adapter = new McpSkillAdapter({ store, integrations, clients })
     const registry = new CharacterSkillAdapterRegistry(); registry.register(adapter); await adapter.refresh(); registry.refresh(adapter)
-    expect(registry.list()).toEqual([expect.objectContaining({ id: skillId, adapterId: 'builtin.mcp', risks: ['external-side-effect'] })])
+    expect(registry.list()).toEqual([expect.objectContaining({
+      id: skillId,
+      adapterId: 'builtin.mcp',
+      risks: ['external-side-effect'],
+      displayName: 'MCP · github / create_issue',
+      // Presentation metadata: the panel collapses this service's tools into
+      // one "MCP · <connection name>" row; unnamed connections fall back to
+      // the service slug.
+      mcpService: { id: 'github', label: 'github' },
+    })])
     const runtime = new CharacterSkillRuntime(store, { registry, actions: new SqliteSkillActionRepository(store) })
 
     const denied = await registry.propose({ worldId: world.id, characterId: employee.id, prompt: '/mcp github.create_issue {"title":"secret subject"}', grantedSkillIds: [], now: new Date() })
@@ -100,7 +109,7 @@ describe('MCP Skill Adapter V1', () => {
       ] },
     ])
     const integrations = await IntegrationService.open(root, createBuiltinIntegrationRegistry(clients))
-    const github = await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', mode: 'remote', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'github-token' })
+    const github = await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', mode: 'remote', endpoint: 'http://127.0.0.1:3900/mcp', displayName: 'GitHub MCP' }, enabled: true, credential: 'github-token' })
     await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'linear', mode: 'remote', endpoint: 'http://127.0.0.1:3901/mcp' }, enabled: true, credential: 'linear-token' })
 
     const blueprint: EmployeeBlueprint = {
@@ -118,9 +127,9 @@ describe('MCP Skill Adapter V1', () => {
     const adapter = new McpSkillAdapter({ store, integrations, clients })
     await adapter.refresh()
     expect(adapter.descriptorsFor(workspace.id)).toEqual([
-      expect.objectContaining({ id: 'mcp.github.create_issue' }),
-      expect.objectContaining({ id: 'mcp.linear.create_issue' }),
-      expect.objectContaining({ id: 'mcp.linear.sync_board' }),
+      expect.objectContaining({ id: 'mcp.github.create_issue', mcpService: { id: 'github', label: 'GitHub MCP' } }),
+      expect.objectContaining({ id: 'mcp.linear.create_issue', mcpService: { id: 'linear', label: 'linear' } }),
+      expect.objectContaining({ id: 'mcp.linear.sync_board', mcpService: { id: 'linear', label: 'linear' } }),
     ])
 
     const granted = [mcpSkillId('github', 'create_issue'), mcpSkillId('linear', 'create_issue'), mcpSkillId('linear', 'sync_board')]
@@ -160,12 +169,16 @@ describe('MCP Skill Adapter V1', () => {
     await integrations.save({
       workspaceId: workspace.id,
       integrationId: MCP_INTEGRATION_ID,
-      config: { service: 'playwright', mode: 'local', command: 'npx', args: '@playwright/mcp@latest --port 8931' },
+      config: { service: 'playwright', mode: 'local', command: 'npx', args: '@playwright/mcp@latest --port 8931', displayName: 'Playwright 浏览器' },
       enabled: true,
     })
     const adapter = new McpSkillAdapter({ store, integrations, clients })
     await adapter.refresh()
-    expect(adapter.descriptorsFor(workspace.id)).toEqual([expect.objectContaining({ id: skillId })])
+    expect(adapter.descriptorsFor(workspace.id)).toEqual([expect.objectContaining({
+      id: skillId,
+      displayName: 'MCP · Playwright 浏览器 / browser_navigate',
+      mcpService: { id: 'playwright', label: 'Playwright 浏览器' },
+    })])
 
     // A legacy two-segment grant was rewritten by schema v53 to this exact
     // service-qualified id, so pre-multi-service characters keep working.

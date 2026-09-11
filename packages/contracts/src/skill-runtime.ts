@@ -91,6 +91,14 @@ export interface CharacterSkillDescriptor {
   kind?: 'recipe' | 'integration'
   /** Safe recipes may be selected by default during recruitment. External integrations never are. */
   recommendedByDefault?: boolean
+  /**
+   * MCP discovery grouping: a tool-level skill descriptor belongs to exactly one
+   * MCP service (a connection). UI surfaces present one service-level entry
+   * ("MCP · <connection name>") whose grant covers every tool of the service.
+   * `id` is the stable service slug; `label` is the connection display name
+   * (falling back to the slug) used for presentation only.
+   */
+  mcpService?: { id: string; label: string }
 }
 
 /**

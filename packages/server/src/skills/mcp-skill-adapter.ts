@@ -10,7 +10,7 @@ import type { CharacterSkillActionProposal, CharacterSkillAdapter, CharacterSkil
 
 export const MCP_ADAPTER_ID = 'builtin.mcp'
 
-interface DiscoveredTool { workspaceId: string; connectionId: string; service: string; skillId: string; tool: McpToolDefinition }
+interface DiscoveredTool { workspaceId: string; connectionId: string; service: string; label: string; skillId: string; tool: McpToolDefinition }
 
 /**
  * MCP is only a transport behind DSH Cyber's capability broker. Discovery
@@ -21,6 +21,12 @@ interface DiscoveredTool { workspaceId: string; connectionId: string; service: s
  * slug, so a skill id is `mcp.<service>.<tool>` and the owning connection is
  * recorded on every discovered tool; execution resolves that connection's
  * credential rather than a single first-connection credential.
+ *
+ * Discovery stays tool-granular: grants, execution and the action ledger all
+ * name the exact tool. The descriptor's `mcpService` field is presentation
+ * metadata only — UI surfaces collapse one service's tool descriptors into a
+ * single "MCP · <connection name>" entry whose one checkbox grants every
+ * tool of that service.
  */
 export class McpSkillAdapter implements CharacterSkillAdapter {
   readonly id = MCP_ADAPTER_ID
@@ -37,14 +43,15 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
   get descriptors(): readonly CharacterSkillDescriptor[] {
     return [...this.#tools.entries()].map(([skillId, entries]) => ({
       id: skillId,
-      displayName: `MCP · ${entries[0]!.service} / ${entries[0]!.tool.name}`,
-      summary: safeToolDescription(entries[0]!.tool, entries[0]!.service),
+      displayName: `MCP · ${entries[0]!.label} / ${entries[0]!.tool.name}`,
+      summary: safeToolDescription(entries[0]!.tool, entries[0]!.label),
       adapterId: this.id,
       risks: ['external-side-effect'],
       supportsScheduling: false,
       persistentApproval: 'forbidden',
       kind: 'integration',
       recommendedByDefault: false,
+      mcpService: { id: entries[0]!.service, label: entries[0]!.label },
     }))
   }
 
@@ -63,6 +70,7 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
       for (const connection of this.#integrations.listByType(workspace.id, MCP_INTEGRATION_ID)) {
         if (!connection.enabled) continue
         const service = mcpServiceSlugForConnection(connection)
+        const label = mcpServiceLabelForConnection(connection)
         let client
         try {
           client = await this.#clients.connect(
@@ -76,7 +84,7 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
             if (discovered.some((entry) => entry.skillId === skillId)) {
               throw new Error(`MCP tool id collision: ${tool.name}`)
             }
-            discovered.push({ workspaceId: workspace.id, connectionId: connection.id, service, skillId, tool })
+            discovered.push({ workspaceId: workspace.id, connectionId: connection.id, service, label, skillId, tool })
           }
           // Only a fully validated catalog is published, so a connection never
           // ends up with half of its tools.
@@ -222,6 +230,19 @@ function mcpServiceSlugForConnection(connection: { config: JsonObject }): string
   const raw = connection.config.service
   if (raw === undefined) return 'default'
   return normalizeMcpServiceSlug(String(raw))
+}
+
+/**
+ * The display name of this MCP service on the "MCP · <connection name>" panel
+ * row. Prefer the user-configured connection name (`config.displayName`); fall
+ * back to the service slug. The connection-level `displayName` is not used:
+ * for unnamed connections it is the integration descriptor's generic name
+ * ("MCP 连接") and would label every service identically.
+ */
+function mcpServiceLabelForConnection(connection: { config: JsonObject }): string {
+  const configured = typeof connection.config.displayName === 'string' ? connection.config.displayName.trim() : ''
+  if (configured !== '') return configured.slice(0, 80)
+  return mcpServiceSlugForConnection(connection)
 }
 
 function normalizeToolName(toolName: string): string {

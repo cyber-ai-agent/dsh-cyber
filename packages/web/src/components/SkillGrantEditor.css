@@ -124,7 +124,59 @@
 .skill-grant-row__status--recommended { color: var(--accent-strong, #f0b63b) !important; }
 .skill-grant-row__status--granted { color: var(--success, #69c18d) !important; }
 .skill-grant-row__status--learnable { color: var(--text-soft, #d3d9dd) !important; }
+.skill-grant-row__status--partial { color: var(--warning, #d8a347) !important; }
 .skill-grant-row__status--unavailable { color: var(--danger, #dc7777) !important; }
+
+/* Aggregated MCP service row: one checkbox grants every tool of the service. */
+.skill-grant-row--mcp-service > input {
+  margin-top: 4px;
+}
+
+.skill-grant-row__tools {
+  margin-left: 2px;
+}
+
+.skill-grant-row__tools summary {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255,255,255,.055);
+  color: var(--world-muted, #aeb6c6);
+  font-size: 12px;
+  list-style: none;
+  user-select: none;
+}
+
+.skill-grant-row__tools summary::-webkit-details-marker {
+  display: none;
+}
+
+.skill-grant-row__tools ul {
+  margin: 6px 0 2px 4px;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  max-width: 320px;
+}
+
+.skill-grant-row__tools li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 200px;
+  font-size: 12px;
+  color: var(--world-muted, #aeb6c6);
+}
+
+.skill-grant-row__tools li code {
+  color: var(--text-soft, #d3d9dd);
+  font-size: 12px;
+}
+
+.skill-grant-row__tools li.is-granted em {
+  color: var(--success, #69c18d);
+}
 
 .skill-grant-editor__note {
   margin: 3px 2px 0;
