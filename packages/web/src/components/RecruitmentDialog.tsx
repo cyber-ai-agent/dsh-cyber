@@ -1,5 +1,5 @@
 import { Briefcase, Check, IdentificationCard, MagnifyingGlass, ShieldCheck, Sparkle, X } from '@phosphor-icons/react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentPermissionMode, EmployeeBlueprint, EmployeeInstance, World, WorldSnapshot } from '@dsh-cyber/contracts'
 import { api } from '../api.js'
 import { worldExperience } from '../world-experience.js'
@@ -10,6 +10,14 @@ import {
   worldSkillCatalogPath,
   type SkillCatalogEntry,
 } from './skill-catalog.js'
+import {
+  groupMcpServices,
+  mcpServiceChecked,
+  mcpServiceOfSkillId,
+  mcpServiceToggle,
+  orphanMcpServiceGroups,
+  type McpServiceGroup,
+} from './mcp-skill-grouping.js'
 import { RuntimePermissionSelector } from './RuntimePermissionSelector.js'
 import { useI18n } from '../i18n/runtime.js'
 
@@ -192,15 +200,69 @@ export function RecruitmentDialog({ blueprints, initialBlueprintId, employees, w
 
 function blueprintKey(blueprint: EmployeeBlueprint): string { return `${blueprint.id}@${blueprint.version}` }
 
-function SkillApprovalGroup({ requested, descriptors, selected, onChange }: { requested: string[]; descriptors: SkillCatalogEntry[]; selected: string[]; onChange(next: string[]): void }) {
+/**
+ * The template's requested skills, aggregated per MCP service: one "MCP ·
+ * <connection name>" row grants every tool of that service; non-MCP skills
+ * stay one row each. Requested MCP ids whose service no longer has a catalog
+ * entry collapse to a single "暂不可用" service row, revocable in one click.
+ */
+export function SkillApprovalGroup({ requested, descriptors, selected, onChange }: { requested: string[]; descriptors: SkillCatalogEntry[]; selected: string[]; onChange(next: string[]): void }) {
   const { t } = useI18n()
   const byId = new Map(descriptors.map((item) => [item.id, item]))
-  return <fieldset className="capability-approval-group"><legend>{t('workbench.recruitSkillsLegend', '角色技能')}</legend>{requested.length === 0 ? <span>{t('workbench.recruitNoSkills', '该角色模板未请求角色技能')}</span> : requested.map((skillId) => {
-    const descriptor = byId.get(skillId)
-    const available = descriptor !== undefined && descriptor.worldAvailable && descriptor.availability === 'available'
-    const granted = selected.includes(skillId)
-    return <label key={skillId} className={!available ? 'is-unavailable' : ''}><input type="checkbox" checked={granted} disabled={!available && !granted} onChange={(event) => onChange(event.target.checked ? [...new Set([...selected, skillId])] : selected.filter((value) => value !== skillId))}/><span><strong>{descriptor?.displayName ?? skillId}</strong><small>{descriptor?.summary ?? '当前世界暂不可用，创建时不会新增这项角色技能。'}</small><em>{!available ? '暂不可用' : granted ? '已启用' : '推荐'}</em></span></label>
-  })}</fieldset>
+  const mcpRequested = requested.filter((id) => mcpServiceOfSkillId(id) !== undefined)
+  const plainRequested = requested.filter((id) => mcpServiceOfSkillId(id) === undefined)
+  const groups = groupMcpServices(descriptors, selected, requested)
+  // The dialog is scoped to the template's requests: services the blueprint
+  // requested and that still have catalog tools.
+  const liveServiceRows = groups.filter((group) => group.tools.length > 0 && group.recommended)
+  // Held grants of a service whose catalog items are all gone: one revocable
+  // "暂不可用" row instead of one orphan row per tool.
+  const deadServiceRows = groups.filter((group) => group.tools.length === 0 && group.grantedIds.length > 0)
+  // Services the blueprint requested that no catalog knows at all (the
+  // connection was removed or discovery failed while this dialog is open).
+  const missingServiceRows = orphanMcpServiceGroups(mcpRequested, groups.map((group) => group.serviceId), selected)
+  return <fieldset className="capability-approval-group"><legend>{t('workbench.recruitSkillsLegend', '角色技能')}</legend>{requested.length === 0 ? <span>{t('workbench.recruitNoSkills', '该角色模板未请求角色技能')}</span> : <>
+    {[...liveServiceRows, ...deadServiceRows, ...missingServiceRows].map((group) => <McpServiceApprovalRow key={`service-${group.serviceId}`} group={group} requested={requested} selected={selected} onChange={onChange} />)}
+    {plainRequested.map((skillId) => {
+      const descriptor = byId.get(skillId)
+      const available = descriptor !== undefined && descriptor.worldAvailable && descriptor.availability === 'available'
+      const granted = selected.includes(skillId)
+      return <label key={skillId} className={!available ? 'is-unavailable' : ''}><input type="checkbox" checked={granted} disabled={!available && !granted} onChange={(event) => onChange(event.target.checked ? [...new Set([...selected, skillId])] : selected.filter((value) => value !== skillId))}/><span><strong>{descriptor?.displayName ?? skillId}</strong><small>{descriptor?.summary ?? '当前世界暂不可用，创建时不会新增这项角色技能。'}</small><em>{!available ? '暂不可用' : granted ? '已启用' : '推荐'}</em></span></label>
+    })}
+  </>}</fieldset>
+}
+
+function McpServiceApprovalRow({ group, requested, selected, onChange }: { group: McpServiceGroup; requested: string[]; selected: string[]; onChange(next: string[]): void }) {
+  const { t } = useI18n()
+  const { checked, indeterminate } = mcpServiceChecked(group, selected)
+  const available = group.learnable
+  const statusKey = !available ? 'unavailable' : checked ? 'granted' : indeterminate ? 'partial' : group.recommended ? 'recommended' : 'learnable'
+  const statusText = !available ? t('workbench.recruitMcpServiceUnavailable', '暂不可用') : checked ? t('workbench.recruitMcpServiceGranted', '已授权') : indeterminate ? t('workbench.recruitMcpServicePartial', '部分授权') : t('workbench.recruitMcpServiceRecommended', '推荐')
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (inputRef.current !== null) inputRef.current.indeterminate = indeterminate
+  }, [indeterminate])
+  const requestedSet = new Set(requested)
+  const requestedCount = group.requestedIds.length
+  const unavailable = !available
+  return <div className={`capability-service-row${checked ? ' is-granted' : ''}${unavailable ? ' is-unavailable' : ''}`} data-mcp-service={group.serviceId}>
+    <input ref={inputRef} type="checkbox" aria-label={t('workbench.recruitMcpServiceAria', 'MCP 服务 {name}', { name: group.label })} checked={checked} disabled={unavailable && group.grantedIds.length === 0} onChange={(event) => onChange(mcpServiceToggle(group, selected, event.target.checked))} />
+    <span>
+      <strong>{t('workbench.recruitMcpServiceLabel', 'MCP · {name}', { name: group.label })}</strong>
+      <small>{unavailable
+        ? t('workbench.recruitMcpServiceUnavailableHint', '该 MCP 服务当前不可用（连接未配置、已停用或不可达）。可到顶部“连接中心”检查该连接；取消勾选可撤销保留的授权。')
+        : t('workbench.recruitMcpServiceHint', '共 {count} 个工具。勾选即授权该 MCP 服务下的全部工具；每次外部调用前系统仍会针对具体动作请求确认。', { count: group.tools.length })}</small>
+      <span className="capability-service-row__meta">
+        <em className={`capability-service-row__status capability-service-row__status--${statusKey}`}>{statusText}</em>
+        <em>{t('workbench.recruitMcpServiceRisk', '涉及外部操作')}</em>
+        {requestedCount > 0 ? <em>{t('workbench.recruitMcpServiceRequested', '模板请求 {count} 个', { count: requestedCount })}</em> : null}
+        {group.tools.length > 0 ? <details className="capability-service-row__tools"><summary>{t('workbench.recruitMcpServiceTools', '{count} 个工具', { count: group.tools.length })}</summary><ul>{group.tools.map((tool) => {
+          const toolSelected = selected.includes(tool.id)
+          return <li key={tool.id} className={toolSelected ? 'is-granted' : ''}><code>{tool.name}</code><span>{requestedSet.has(tool.id) ? <em>{t('workbench.recruitMcpServiceToolRequested', '模板请求')}</em> : null}<em>{tool.available ? (toolSelected ? t('workbench.recruitMcpServiceToolGranted', '已授权') : t('workbench.recruitMcpServiceToolNotGranted', '未授权')) : t('workbench.recruitMcpServiceToolUnavailable', '暂不可用')}</em></span></li>
+        })}</ul></details> : null}
+      </span>
+    </span>
+  </div>
 }
 
 function defaultSkillGrants(blueprint: EmployeeBlueprint, descriptors: SkillCatalogEntry[]): string[] {

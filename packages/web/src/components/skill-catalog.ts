@@ -25,6 +25,9 @@ export function normalizeSkillCatalogEntry(value: unknown): SkillCatalogEntry | 
   const availability = value.availability === 'unavailable' || value.status === 'unavailable' ? 'unavailable' : 'available'
   const worldAvailable = typeof value.worldAvailable === 'boolean' ? value.worldAvailable : availability === 'available'
   const requiredWorldPermission = typeof value.requiredWorldPermission === 'string' ? value.requiredWorldPermission as SkillCatalogEntry['requiredWorldPermission'] : undefined
+  const mcpService = isRecord(value.mcpService) && typeof value.mcpService.id === 'string' && typeof value.mcpService.label === 'string'
+    ? { id: value.mcpService.id, label: value.mcpService.label }
+    : undefined
   return {
     id: value.id,
     displayName: typeof value.displayName === 'string' ? value.displayName : value.id,
@@ -37,6 +40,7 @@ export function normalizeSkillCatalogEntry(value: unknown): SkillCatalogEntry | 
     ...(requiredWorldPermission === undefined ? {} : { requiredWorldPermission }),
     ...(value.kind === 'integration' ? { kind: 'integration' as const } : value.kind === 'recipe' ? { kind: 'recipe' as const } : {}),
     recommendedByDefault: value.recommendedByDefault === true,
+    ...(mcpService === undefined ? {} : { mcpService }),
     source: value.source === 'plugin' || value.source === 'mcp' || value.source === 'other' ? value.source : 'builtin',
     scope: value.scope === 'workspace' || value.scope === 'world' ? value.scope : 'builtin',
     globalKnown: value.globalKnown !== false,

@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 52 as const
+export const CYBER_SCHEMA_VERSION = 53 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -389,7 +389,7 @@ export interface WorldPackageInstance {
   updatedAt: IsoTimestamp
 }
 
-export type IntegrationFieldKind = 'text' | 'url' | 'secret' | 'number' | 'boolean'
+export type IntegrationFieldKind = 'text' | 'url' | 'secret' | 'number' | 'boolean' | 'select'
 
 export interface IntegrationFieldDescriptor {
   id: string
@@ -400,6 +400,12 @@ export interface IntegrationFieldDescriptor {
   placeholder?: string
   /** Render the field as a multi-line editor (for example an SSH private key). */
   multiline?: boolean
+  /** For `select` fields: the allowed values, rendered as a choice list. */
+  options?: string[]
+  /** For `select` fields: display labels keyed by value; falls back to the value itself. */
+  optionLabels?: Record<string, string>
+  /** Only render the field while the named sibling config field holds one of these values. */
+  visibleWhen?: { field: string; equals: string[] }
 }
 
 /** Public, provider-neutral metadata. It never contains implementation callbacks or credentials. */

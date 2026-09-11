@@ -7,7 +7,10 @@ const sizes = new Map(await Promise.all(files.map(async (file) => [file, (await 
 
 const budgets = [
   { label: 'main JavaScript', pattern: /^index-.*\.js$/, maximum: 450 * 1024 },
-  { label: 'main CSS', pattern: /^index-.*\.css$/, maximum: 280 * 1024 },
+  // The aggregated MCP service rows (recruitment, skill grant editor,
+  // workshop picker) added ~2 KB of functional first-screen CSS; the
+  // workshop / skill editor stylesheets stay in their lazy chunks.
+  { label: 'main CSS', pattern: /^index-.*\.css$/, maximum: 290 * 1024 },
   { label: 'Task Workspace JavaScript', pattern: /^TaskWorkspace-.*\.js$/, maximum: 25 * 1024 },
   { label: 'Task Workspace CSS', pattern: /^TaskWorkspace-.*\.css$/, maximum: 10 * 1024 },
   { label: 'avatar creation provider JavaScript', pattern: /^avatar-creation-provider-.*\.js$/, maximum: 4 * 1024 },

@@ -2970,6 +2970,29 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .capability-approval-group label.is-unavailable { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 .capability-approval-group label > span > em { color: var(--accent-strong); font-size: 12px; font-style: normal; }
 .capability-approval-group label.is-unavailable > span > em { color: var(--danger); }
+/* Aggregated MCP service row inside the recruitment skill fieldset: one
+   checkbox grants every tool of the service; the tool list stays expandable. */
+.capability-service-row { min-height: 44px; display: flex; align-items: center; gap: 9px; padding: 6px 8px; border: 1px solid var(--border); color: var(--text-soft); background: var(--surface-1); }
+.capability-service-row > input { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 0; accent-color: var(--accent); }
+.capability-service-row > span { min-width: 0; display: grid; gap: 2px; }
+.capability-service-row strong { color: var(--text); font-size: 13px; }
+.capability-service-row small { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.capability-service-row.is-granted { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, var(--surface-1)); }
+.capability-service-row.is-unavailable { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.capability-service-row__meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.capability-service-row__meta em { padding: 2px 6px; border-radius: 6px; background: rgba(255, 255, 255, .055); color: var(--text-muted); font-size: 12px; font-style: normal; }
+.capability-service-row__status--granted { color: var(--success, #69c18d) !important; }
+.capability-service-row__status--partial { color: var(--warning, #d8a347) !important; }
+.capability-service-row__status--recommended, .capability-service-row__status--learnable { color: var(--accent-strong, #f0b63b) !important; }
+.capability-service-row__status--unavailable { color: var(--danger, #dc7777) !important; }
+.capability-service-row__tools { margin-left: 2px; }
+.capability-service-row__tools summary { cursor: pointer; padding: 2px 6px; border-radius: 6px; background: rgba(255, 255, 255, .055); color: var(--text-muted); font-size: 12px; list-style: none; user-select: none; }
+.capability-service-row__tools summary::-webkit-details-marker { display: none; }
+.capability-service-row__tools ul { margin: 6px 0 2px 4px; padding: 0; display: grid; gap: 3px; max-width: 340px; }
+.capability-service-row__tools li { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 220px; font-size: 12px; color: var(--text-muted); }
+.capability-service-row__tools li code { color: var(--text-soft); font-size: 12px; }
+.capability-service-row__tools li em { padding: 2px 6px; border-radius: 6px; background: rgba(255, 255, 255, .055); font-size: 12px; font-style: normal; }
+.capability-service-row__tools li.is-granted em { color: var(--success, #69c18d); }
 .permission-notice { display: flex; gap: 9px; padding: 10px; border: 1px solid var(--border); color: var(--text-muted); background: var(--surface-1); }
 .permission-notice svg { flex: 0 0 auto; color: var(--success); }
 .permission-notice p { margin: 0; font-size: 10px; line-height: 1.6; }
