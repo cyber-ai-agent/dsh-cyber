@@ -52,7 +52,7 @@ describe('World knowledge contracts', () => {
       document: { workspaceId: 'workspace-1', chunkCount: 0 },
       chunk: { worldId: 'world-1', documentId: 'document-1' },
     })
-    expect(CYBER_SCHEMA_VERSION).toBe(52)
+    expect(CYBER_SCHEMA_VERSION).toBe(53)
   })
 
   it('exports a source version whose completion watermark counts chunks, not sources', () => {
