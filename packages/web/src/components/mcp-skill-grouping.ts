@@ -31,10 +31,24 @@ export interface McpServiceGroup {
   grantedIds: string[]
   /** At least one catalog tool is available in the world. */
   learnable: boolean
-  /** At least one catalog tool is recommended by the character blueprint. */
+  /** The requested ids belonging to this service (catalog tools and missing ones alike). */
+  requestedIds: string[]
+  /** At least one requested id belongs to this service. */
   recommended: boolean
   /** Where the aggregated row renders. */
   placement: 'recommended' | 'learnable' | 'unavailable' | 'hidden'
+}
+
+/**
+ * The minimal item shape groupable into MCP services: any tool descriptor
+ * that may carry service metadata. Surfaces that gate availability (the
+ * world skill catalog) pass `available`; request-only surfaces (the
+ * workshop skill picker) omit it, where every item is grantable.
+ */
+export interface McpGroupItem {
+  id: string
+  mcpService?: { id: string; label: string } | undefined
+  available?: boolean | undefined
 }
 
 /** Whether a catalog entry is one MCP tool descriptor (groupable by service). */
@@ -57,41 +71,41 @@ export function mcpServiceOfSkillId(id: string): string | undefined {
 }
 
 /**
- * One group per MCP service seen in the catalog or in the character's grants.
+ * One group per MCP service seen in the items or in the current value.
  *
- * A grant whose service no longer has any catalog entry (connection removed or
+ * A value id whose service no longer has any item (connection removed or
  * discovery failed) still forms a group: the panel can keep showing the
- * service row as "暂不可用" so the stale grant stays revocable instead of
+ * service row as "暂不可用" so the stale entry stays revocable instead of
  * flooding one orphan row per tool.
  */
-export function groupMcpServices(
-  catalog: readonly SkillCatalogEntry[],
+export function groupMcpServicesFromItems(
+  items: readonly McpGroupItem[],
   value: readonly string[],
   requested: readonly string[],
 ): McpServiceGroup[] {
   const byService = new Map<string, { label?: string; tools: McpServiceTool[] }>()
-  for (const entry of catalog) {
-    if (entry.mcpService === undefined) continue
-    const bucket = byService.get(entry.mcpService.id) ?? { tools: [] }
-    bucket.label = entry.mcpService.label
+  for (const item of items) {
+    if (item.mcpService === undefined) continue
+    const bucket = byService.get(item.mcpService.id) ?? { tools: [] }
+    bucket.label = item.mcpService.label
     bucket.tools.push({
-      name: entry.id.slice(`mcp.${entry.mcpService.id}.`.length),
-      id: entry.id,
-      available: entry.worldAvailable && entry.availability === 'available',
+      name: item.id.slice(`mcp.${item.mcpService.id}.`.length),
+      id: item.id,
+      available: item.available !== false,
     })
-    byService.set(entry.mcpService.id, bucket)
+    byService.set(item.mcpService.id, bucket)
   }
   for (const id of value) {
     const service = mcpServiceOfSkillId(id)
     if (service !== undefined && !byService.has(service)) byService.set(service, { tools: [] })
   }
 
-  const requestedSet = new Set(requested)
   const groups: McpServiceGroup[] = []
   for (const [serviceId, bucket] of byService) {
     const grantedIds = [...new Set(value.filter((id) => mcpServiceOfSkillId(id) === serviceId))]
+    const requestedIds = requested.filter((id) => mcpServiceOfSkillId(id) === serviceId)
     const learnable = bucket.tools.some((tool) => tool.available)
-    const recommended = bucket.tools.some((tool) => requestedSet.has(tool.id))
+    const recommended = requestedIds.length > 0
     const placement: McpServiceGroup['placement'] = !learnable
       ? (grantedIds.length > 0 ? 'unavailable' : 'hidden')
       : (recommended ? 'recommended' : 'learnable')
@@ -101,11 +115,69 @@ export function groupMcpServices(
       tools: bucket.tools,
       grantedIds,
       learnable,
+      requestedIds,
       recommended,
       placement,
     })
   }
   return groups.sort((left, right) => left.label.localeCompare(right.label, 'zh-CN') || left.serviceId.localeCompare(right.serviceId))
+}
+
+/**
+ * One group per MCP service seen in the world skill catalog or in the
+ * character's grants, with world-availability gating baked in.
+ */
+export function groupMcpServices(
+  catalog: readonly SkillCatalogEntry[],
+  value: readonly string[],
+  requested: readonly string[],
+): McpServiceGroup[] {
+  return groupMcpServicesFromItems(
+    catalog.map((entry) => ({
+      id: entry.id,
+      mcpService: entry.mcpService,
+      available: entry.worldAvailable && entry.availability === 'available',
+    })),
+    value,
+    requested,
+  )
+}
+
+/**
+ * Services the blueprint requested that no longer have any catalog item
+ * (connection removed, disabled, or discovery failed). Surfaces scoped to the
+ * template's requests (the recruitment dialog) synthesize one unavailable
+ * service row per missing service instead of one orphan row per tool.
+ */
+export function orphanMcpServiceGroups(
+  requested: readonly string[],
+  knownServiceIds: readonly string[],
+  value: readonly string[],
+): McpServiceGroup[] {
+  const known = new Set(knownServiceIds)
+  const requestedByService = new Map<string, string[]>()
+  for (const id of requested) {
+    const service = mcpServiceOfSkillId(id)
+    if (service !== undefined && !known.has(service)) requestedByService.set(service, [...(requestedByService.get(service) ?? []), id])
+  }
+  if (requestedByService.size === 0) return []
+  const valueSet = new Set(value)
+  const groups: McpServiceGroup[] = [...requestedByService.entries()].map(([serviceId, requestedIds]) => ({
+    serviceId,
+    label: serviceId,
+    tools: [],
+    grantedIds: requestedIds.filter((id) => valueSet.has(id)),
+    learnable: false,
+    requestedIds,
+    recommended: true,
+    placement: 'unavailable' as const,
+  }))
+  return groups.sort((left, right) => left.serviceId.localeCompare(right.serviceId))
+}
+
+/** Add or remove a single skill id in a list of ids (deduped, order-stable). */
+export function toggleSkillIdInList(value: readonly string[], skillId: string, checked: boolean): string[] {
+  return checked ? [...new Set([...value, skillId])] : value.filter((id) => id !== skillId)
 }
 
 /** The grant list after the service row's checkbox changed: grant/revoke every tool of the service. */
