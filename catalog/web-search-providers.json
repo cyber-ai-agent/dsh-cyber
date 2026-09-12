@@ -17,7 +17,7 @@
     {
       "id": "firecrawl",
       "name": "Firecrawl",
-      "description": "网页搜索与抓取服务。接管原「Firecrawl」连接：密钥只保存在本机加密凭据库，搜索由宿主进程执行，worker 不接触密钥。",
+      "description": "「Firecrawl」联网搜索：密钥只保存在本机加密凭据库，搜索由宿主进程执行，worker 不接触密钥。",
       "endpoint": "https://api.firecrawl.dev",
       "obtain": {
         "text": "前往 Firecrawl 控制台注册并创建 API Key",
