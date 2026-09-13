@@ -59,7 +59,7 @@ export async function serveWebAsset(
     'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-store',
     'Content-Security-Policy': [
       "default-src 'self'",
-      "script-src 'self'",
+      "script-src 'self' 'wasm-unsafe-eval'",
       "worker-src 'self' blob:",
       "style-src 'self'",
       "img-src 'self' data: blob:",

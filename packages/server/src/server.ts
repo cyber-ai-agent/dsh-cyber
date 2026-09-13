@@ -284,18 +284,18 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   })
   const sshSessions = new SshSessionPool()
 
-  const webSearch = await createWebSearchWiring(integrations, () => startedAddress?.origin)
+  const connectionGrantsFor = createConnectionGrantsResolver(store); const webSearch = await createWebSearchWiring(integrations, () => startedAddress?.origin, connectionGrantsFor)
   const worldManagementHost = createWorldManagementHost({ store, worldSettings, worldPackages, authority })
 
   const environments = createEnvironmentService(stateRoot, { devices: composeSshEnvironmentDeviceSource({ store, integrations }) })
 
   const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry({
-    firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId) },
+    firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), connectionGrantsFor },
     browser: { store, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), publishScreenshot: (input) => worldArtifacts.publishBrowserScreenshot(input), ...(options.browserClientFactory === undefined ? {} : { clientFactory: options.browserClientFactory }), ...(options.browserPolicy === undefined ? {} : { policy: options.browserPolicy }) },
     worldManagement: worldManagementHost,
-    ssh: { store, integrations, sessions: sshSessions, connectionGrantsFor: createConnectionGrantsResolver(store), environment: environments },
+    ssh: { store, integrations, sessions: sshSessions, connectionGrantsFor, environment: environments },
   })
-  const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
+  const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients, connectionGrantsFor }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
   const skillCatalog = new SkillCatalogService({ store, registry: skillRegistry, worldPackages })
   // Production uses the derived World Catalog by default; tests and legacy embedders may inject a narrower port explicitly.

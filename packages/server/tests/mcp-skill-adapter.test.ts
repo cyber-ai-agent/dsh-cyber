@@ -43,8 +43,12 @@ describe('MCP Skill Adapter V1', () => {
       tools: [{ name: 'create_issue', description: 'Create an issue', inputSchema: { type: 'object', properties: { title: { type: 'string' } } } }],
     }])
     const integrations = await IntegrationService.open(root, createBuiltinIntegrationRegistry(clients))
-    await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', mode: 'remote', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'private-bearer' })
-    const adapter = new McpSkillAdapter({ store, integrations, clients })
+    const connection = await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', mode: 'remote', endpoint: 'http://127.0.0.1:3900/mcp' }, enabled: true, credential: 'private-bearer' })
+    store.reviseEmployee({ employeeId: employee.id, reason: 'grant MCP connection', connectionGrants: [connection.id] })
+    const ungrantedAdapter = new McpSkillAdapter({ store, integrations, clients, connectionGrantsFor: () => [] })
+    await ungrantedAdapter.refresh()
+    expect(await ungrantedAdapter.propose({ worldId: world.id, characterId: employee.id, prompt: '/mcp github.create_issue {"title":"blocked"}', grantedSkillIds: [skillId], now: new Date() })).toEqual([])
+    const adapter = new McpSkillAdapter({ store, integrations, clients, connectionGrantsFor: () => [connection.id] })
     const registry = new CharacterSkillAdapterRegistry(); registry.register(adapter); await adapter.refresh(); registry.refresh(adapter)
     expect(registry.list()).toEqual([expect.objectContaining({
       id: skillId,
@@ -110,7 +114,7 @@ describe('MCP Skill Adapter V1', () => {
     ])
     const integrations = await IntegrationService.open(root, createBuiltinIntegrationRegistry(clients))
     const github = await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'github', mode: 'remote', endpoint: 'http://127.0.0.1:3900/mcp', displayName: 'GitHub MCP' }, enabled: true, credential: 'github-token' })
-    await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'linear', mode: 'remote', endpoint: 'http://127.0.0.1:3901/mcp' }, enabled: true, credential: 'linear-token' })
+    const linear = await integrations.save({ workspaceId: workspace.id, integrationId: MCP_INTEGRATION_ID, config: { service: 'linear', mode: 'remote', endpoint: 'http://127.0.0.1:3901/mcp' }, enabled: true, credential: 'linear-token' })
 
     const blueprint: EmployeeBlueprint = {
       schemaVersion: 1, id: 'test.mcp-multi', version: 1, worldTemplateId: 'personal-world',
@@ -124,7 +128,7 @@ describe('MCP Skill Adapter V1', () => {
       skillGrants: [mcpSkillId('github', 'create_issue'), mcpSkillId('linear', 'create_issue'), mcpSkillId('linear', 'sync_board')],
     })
 
-    const adapter = new McpSkillAdapter({ store, integrations, clients })
+    const adapter = new McpSkillAdapter({ store, integrations, clients, connectionGrantsFor: () => [github.id, linear.id] })
     await adapter.refresh()
     expect(adapter.descriptorsFor(workspace.id)).toEqual([
       expect.objectContaining({ id: 'mcp.github.create_issue', mcpService: { id: 'github', label: 'GitHub MCP' } }),
@@ -166,13 +170,13 @@ describe('MCP Skill Adapter V1', () => {
       tools: [{ name: 'browser_navigate', description: 'Navigate the browser', inputSchema: { type: 'object' } }],
     }])
     const integrations = await IntegrationService.open(root, createBuiltinIntegrationRegistry(clients))
-    await integrations.save({
+    const connection = await integrations.save({
       workspaceId: workspace.id,
       integrationId: MCP_INTEGRATION_ID,
       config: { service: 'playwright', mode: 'local', command: 'npx', args: '@playwright/mcp@latest --port 8931', displayName: 'Playwright 浏览器' },
       enabled: true,
     })
-    const adapter = new McpSkillAdapter({ store, integrations, clients })
+    const adapter = new McpSkillAdapter({ store, integrations, clients, connectionGrantsFor: () => [connection.id] })
     await adapter.refresh()
     expect(adapter.descriptorsFor(workspace.id)).toEqual([expect.objectContaining({
       id: skillId,
@@ -190,7 +194,7 @@ describe('MCP Skill Adapter V1', () => {
     store.saveBlueprint(blueprint)
     const employee = store.recruitEmployee({
       workspaceId: workspace.id, worldId: world.id, blueprintId: blueprint.id, blueprintVersion: 1,
-      skillGrants: [skillId],
+      skillGrants: [skillId], connectionGrants: [connection.id],
     })
     const [proposal] = await adapter.propose({
       worldId: world.id, characterId: employee.id, grantedSkillIds: [skillId], now: new Date(),

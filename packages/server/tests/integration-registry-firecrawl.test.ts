@@ -80,11 +80,12 @@ describe('Integration Registry + Firecrawl', () => {
       success: true,
       data: { web: [{ title: '官方资料', url: 'https://example.com/source', description: '可追溯的公开摘要。' }] },
     }))
-    await service.save({ workspaceId: 'workspace-1', integrationId: FIRECRAWL_INTEGRATION_ID, config: {}, enabled: true, credential: 'fc-test' })
+    const connection = await service.save({ workspaceId: 'workspace-1', integrationId: FIRECRAWL_INTEGRATION_ID, config: {}, enabled: true, credential: 'fc-test' })
     const adapter = new FirecrawlSkillAdapter({
       store: { getWorld: () => ({ id: 'world-1', workspaceId: 'workspace-1', name: '世界', templateId: 'personal-world', status: 'active', createdAt: '2026-08-25T00:00:00.000Z', updatedAt: '2026-08-25T00:00:00.000Z' }) },
       integrations: service,
       listWorldPackages: async () => [{ manifest: { entrypoints: [{ id: 'web.search.firecrawl', kind: 'skill', path: 'skill.json' }] } } as never],
+      connectionGrantsFor: () => [connection.id],
       fetch: async () => Response.json({ success: true, data: { web: [{ title: '官方资料', url: 'https://example.com/source', description: '可追溯的公开摘要。' }] } }),
     })
     expect(adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt: '请联网搜索 DSH Cyber', grantedSkillIds: [], now: new Date() })).toEqual([])
@@ -111,6 +112,25 @@ describe('Integration Registry + Firecrawl', () => {
     })
     const proposal = adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt: '请联网搜索 边界测试', grantedSkillIds: ['web.search.firecrawl'], now: new Date() })[0]!
     expect(await adapter.execute(actionFrom(proposal))).toMatchObject({ status: 'waiting-for-integration', detail: expect.stringContaining('尚未安装联网搜索 Skill Recipe') })
+    expect(requests).toBe(0)
+    service.close()
+  })
+
+  it('keeps the Firecrawl request inside the host when the character lacks connection permission', async () => {
+    const root = await makeRoot()
+    let requests = 0
+    const service = await IntegrationService.open(root, createBuiltinIntegrationRegistry())
+    await service.save({ workspaceId: 'workspace-1', integrationId: FIRECRAWL_INTEGRATION_ID, config: {}, enabled: true, credential: 'fc-test' })
+    const adapter = new FirecrawlSkillAdapter({
+      store: { getWorld: () => ({ id: 'world-1', workspaceId: 'workspace-1', name: '世界', templateId: 'personal-world', status: 'active', createdAt: '2026-08-25T00:00:00.000Z', updatedAt: '2026-08-25T00:00:00.000Z' }) },
+      integrations: service,
+      listWorldPackages: async () => [{ manifest: { entrypoints: [{ id: 'web.search.firecrawl', kind: 'skill', path: 'skill.json' }] } } as never],
+      connectionGrantsFor: () => [],
+      fetch: async () => { requests += 1; return Response.json({ success: true, data: { web: [] } }) },
+    })
+    const proposal = adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt: '请联网搜索 权限边界', grantedSkillIds: ['web.search.firecrawl'], now: new Date() })[0]!
+    expect(await adapter.preflight(actionFrom(proposal))).toMatchObject({ ready: false, detail: expect.stringContaining('连接权限') })
+    expect(await adapter.execute(actionFrom(proposal))).toMatchObject({ status: 'failed', detail: expect.stringContaining('连接权限') })
     expect(requests).toBe(0)
     service.close()
   })
@@ -170,11 +190,12 @@ function actionFrom(proposal: ReturnType<FirecrawlSkillAdapter['propose']>[numbe
 async function grantedAdapter(): Promise<FirecrawlSkillAdapter> {
   const root = await makeRoot()
   const service = await IntegrationService.open(root, createBuiltinIntegrationRegistry(), async () => Response.json({ success: true, data: { web: [] } }))
-  await service.save({ workspaceId: 'workspace-1', integrationId: FIRECRAWL_INTEGRATION_ID, config: {}, enabled: true, credential: 'fc-test' })
+  const connection = await service.save({ workspaceId: 'workspace-1', integrationId: FIRECRAWL_INTEGRATION_ID, config: {}, enabled: true, credential: 'fc-test' })
   return new FirecrawlSkillAdapter({
     store: { getWorld: () => ({ id: 'world-1', workspaceId: 'workspace-1', name: '世界', templateId: 'personal-world', status: 'active', createdAt: '2026-08-25T00:00:00.000Z', updatedAt: '2026-08-25T00:00:00.000Z' }) },
     integrations: service,
     listWorldPackages: async () => [{ manifest: { entrypoints: [{ id: 'web.search.firecrawl', kind: 'skill', path: 'skill.json' }] } } as never],
+    connectionGrantsFor: () => [connection.id],
     fetch: async () => Response.json({ success: true, data: { web: [] } }),
   })
 }

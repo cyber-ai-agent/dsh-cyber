@@ -10,6 +10,15 @@ Skill Recipe 是经过宿主审核的声明式工作方法，只包含名称、�
 
 角色 Blueprint 只声明 `requestedSkills`。创建角色时，界面默认勾选安全 Recipe，用户可以取消；需要外部连接的 Skill 不会默认授权。运行时只把当前 revision 已授权的 Recipe 注入角色设定，不会加载完整目录。
 
+## 技能中心与引用模型
+
+顶部“技能中心”是当前世界的 Skill 汇总入口。它读取工作区 Skill Catalog 与当前世界的 World Package Instance，展示内置技能、技能包和 MCP 动态技能，并完成两类引用操作：
+
+- “加载到当前世界”创建一个 World Package Instance，世界持有包 ID 与版本引用；技能定义仍保留在唯一安装源中。
+- “引用到角色”写入角色 revision 的 `skillGrants`，角色只保存 Skill ID；Skill 定义、说明和后续兼容更新继续来自 Catalog。
+
+角色设置中的“技能”只处理 Skill 引用。连接凭据与连接选择进入“权限 → 连接权限”，两类状态各自保存、在执行边界同时校验。
+
 这一设计参考了开放 Agent Skills 生态的渐进加载方式，包括 [OpenAI Skills](https://github.com/openai/skills)、[Anthropic Skills](https://github.com/anthropics/skills) 和 [Microsoft Agent Skills](https://github.com/microsoft/skills)。DSH Cyber 只吸收可移植的声明式结构，不直接执行第三方 Skill 中携带的脚本。
 
 ## Integration Registry
@@ -29,7 +38,9 @@ Integration Registry 是 Firecrawl、Home Assistant、GitHub 和未来 MCP Trans
 
 ```text
 Blueprint requested Skill
+  → World Package Instance / builtin catalog reference
   → Character revision Skill Grant
+  → Character revision Connection Grant (连接型 Skill)
   → CharacterSkillRuntime proposal
   → durable Skill Action
   → Approval Request or exact Policy

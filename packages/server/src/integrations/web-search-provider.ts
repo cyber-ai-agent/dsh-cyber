@@ -30,7 +30,7 @@ const DESCRIPTOR: IntegrationDescriptor = {
   secretFields: [
     { id: 'apiKey', displayName: 'API 密钥', description: '仅在本机加密凭据库保存，保存后不回显。', kind: 'secret', required: true },
   ],
-  skillIds: [],
+  skillIds: ['web.search.firecrawl'],
   dataEgress: ['搜索查询文本'],
   allowsMultipleConnections: true,
 }

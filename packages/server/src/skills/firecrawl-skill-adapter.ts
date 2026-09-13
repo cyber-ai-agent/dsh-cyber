@@ -38,11 +38,13 @@ export class FirecrawlSkillAdapter implements CharacterSkillAdapter {
   readonly #integrations: IntegrationService
   readonly #client: FirecrawlClient
   readonly #listWorldPackages: (worldId: string) => Promise<InstalledPackage[]>
+  readonly #connectionGrantsFor: ((characterId: string) => readonly string[] | undefined) | undefined
 
-  constructor(options: { store: Pick<SqliteStore, 'getWorld'>; integrations: IntegrationService; listWorldPackages?: (worldId: string) => Promise<InstalledPackage[]>; fetch?: typeof globalThis.fetch; client?: FirecrawlClient }) {
+  constructor(options: { store: Pick<SqliteStore, 'getWorld'>; integrations: IntegrationService; listWorldPackages?: (worldId: string) => Promise<InstalledPackage[]>; connectionGrantsFor?: (characterId: string) => readonly string[] | undefined; fetch?: typeof globalThis.fetch; client?: FirecrawlClient }) {
     this.#store = options.store; this.#integrations = options.integrations
     this.#client = options.client ?? new FirecrawlClient({ integrations: options.integrations, ...(options.fetch === undefined ? {} : { fetch: options.fetch }) })
     this.#listWorldPackages = options.listWorldPackages ?? (async () => [])
+    this.#connectionGrantsFor = options.connectionGrantsFor
   }
 
   propose(context: CharacterSkillMatchContext): CharacterSkillActionProposal[] {
@@ -64,9 +66,10 @@ export class FirecrawlSkillAdapter implements CharacterSkillAdapter {
     if (!recipeInstalled) return { ready: false, detail: '当前世界尚未安装联网搜索 Skill Recipe' }
     const connection = this.#integrations.get(world.workspaceId, FIRECRAWL_INTEGRATION_ID)
     const credential = this.#integrations.credential(world.workspaceId, FIRECRAWL_INTEGRATION_ID)
-    return connection !== undefined && connection.enabled && Boolean(credential)
+    const granted = connection !== undefined && this.#connectionGrantsFor?.(action.characterId)?.includes(connection.id) === true
+    return connection !== undefined && connection.enabled && Boolean(credential) && granted
       ? { ready: true }
-      : { ready: false, detail: 'Firecrawl 连接尚未启用或缺少凭据' }
+      : { ready: false, detail: granted ? 'Firecrawl 连接尚未启用或缺少凭据' : '该角色尚未获得 Firecrawl 连接权限' }
   }
 
   async execute(action: CharacterSkillAction): Promise<CharacterSkillExecutionResult> {
@@ -79,6 +82,7 @@ export class FirecrawlSkillAdapter implements CharacterSkillAdapter {
     const connection = this.#integrations.get(world.workspaceId, FIRECRAWL_INTEGRATION_ID)
     const credential = this.#integrations.credential(world.workspaceId, FIRECRAWL_INTEGRATION_ID)
     if (connection === undefined || !connection.enabled || !credential) return { status: 'waiting-for-integration', detail: '已获得搜索授权，但 Firecrawl 连接尚未启用或缺少凭据' }
+    if (this.#connectionGrantsFor?.(action.characterId)?.includes(connection.id) !== true) return { status: 'failed', detail: '该角色尚未获得 Firecrawl 连接权限，搜索请求未发送' }
     try {
       const results = await this.#client.search({ workspaceId: world.workspaceId, query, limit: 5 })
       return { status: 'executed', detail: summarizeSearchResults(results) }

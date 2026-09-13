@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EmployeeInstance, IntegrationConnection, IntegrationDescriptor } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
@@ -11,21 +11,29 @@ interface ConnectionGrantEditorProps {
   onChange(next: string[]): void
 }
 
-interface DeviceRow {
+interface ConnectionRow {
   id: string
   displayName: string
-  host: string
+  detail: string
   enabled: boolean
   credentialConfigured: boolean
+  credentialRequired: boolean
 }
 
+interface ConnectionGroup {
+  descriptor: IntegrationDescriptor
+  rows: ConnectionRow[]
+}
+
+const WEB_SEARCH_TYPE_ID = 'builtin.web-search'
+const LEGACY_FIRECRAWL_TYPE_ID = 'builtin.firecrawl'
+
 /**
- * Second half of the skill+connection authorization pair. Where the role's
- * 技能与工具 tab grants which skills exist, this list grants which concrete
- * hub connections (SSH devices, future API endpoints) the character may
- * actually drive. Only connection types that declare
- * `allowsMultipleConnections` expose device-level grants; single-connection
- * types keep their own whole-connection flow.
+ * Second half of the skill+connection authorization pair. The role's 技能 tab
+ * grants which skills exist; this list grants which concrete
+ * hub connections the character may drive. Every provider category exposes a
+ * parent checkbox and every concrete connection remains independently
+ * selectable, including web-search providers and MCP services.
  */
 export function ConnectionGrantEditor({ employee, value, onChange }: ConnectionGrantEditorProps) {
   const [descriptors, setDescriptors] = useState<IntegrationDescriptor[]>([])
@@ -52,42 +60,32 @@ export function ConnectionGrantEditor({ employee, value, onChange }: ConnectionG
     return () => { cancelled = true }
   }, [employee.workspaceId])
 
-  const deviceTypes = useMemo(
-    () => descriptors.filter((descriptor) => descriptor.allowsMultipleConnections === true && descriptor.skillIds.length > 0),
-    [descriptors],
-  )
-  const typeById = useMemo(() => new Map(descriptors.map((item) => [item.id, item])), [descriptors])
-  const deviceIds = useMemo(() => new Set(items.filter((item) => typeById.get(item.integrationId)?.allowsMultipleConnections === true).map((item) => item.id)), [items, typeById])
+  const groups = useMemo<ConnectionGroup[]>(() => descriptors.map((descriptor) => ({
+    descriptor,
+    rows: items.filter((item) => item.integrationId === descriptor.id
+      || (descriptor.id === WEB_SEARCH_TYPE_ID && item.integrationId === LEGACY_FIRECRAWL_TYPE_ID))
+      .map((item) => toConnectionRow(item, descriptor)),
+  })), [descriptors, items])
+  const connectionIds = useMemo(() => new Set(groups.flatMap((group) => group.rows.map((row) => row.id))), [groups])
+  const selectableIds = useMemo(() => [...connectionIds], [connectionIds])
   // Grants whose device was deleted from the hub stay visible so the user can
   // revoke them explicitly instead of leaving a silent dangling grant.
-  const revoked = useMemo(() => value.filter((id) => !deviceIds.has(id)), [deviceIds, value])
-
-  const groups = deviceTypes.map((descriptor) => {
-    const rows: DeviceRow[] = items
-      .filter((item) => item.integrationId === descriptor.id)
-      .map((item) => ({
-        id: item.id,
-        displayName: item.displayName,
-        host: String(item.config.host ?? item.config.endpoint ?? ''),
-        enabled: item.enabled,
-        credentialConfigured: item.credentialConfigured,
-      }))
-    return { descriptor, rows }
-  })
+  const revoked = useMemo(() => value.filter((id) => !connectionIds.has(id)), [connectionIds, value])
 
   if (loading) return <div className="dialog-empty" role="status">正在读取本工作区的连接…</div>
-  if (error !== undefined) return <div className="permission-notice permission-notice--warning" role="alert"><p>{error}</p><small>连接授权不会因此失效；请稍后重试或前往“连接中心”查看。</small></div>
+  if (error !== undefined) return <div className="permission-notice permission-notice--warning" role="alert"><p>{error}</p><small>已保存的连接权限保持生效；请稍后重试或前往“连接中心”查看。</small></div>
   if (groups.length === 0 && revoked.length === 0) {
-    return <div className="connection-grant-editor connection-grant-editor--empty"><header><div><h4>连接授权</h4><span>0 项</span></div></header><p>当前还没有可勾选的设备连接。请先在顶部“连接中心”添加 SSH 设备后，再回来勾选这台角色可以操作的设备。</p></div>
+    return <div className="connection-grant-editor connection-grant-editor--empty"><header><div><h4>连接权限</h4><span>0 项</span></div></header><p>连接中心暂无可授权连接。请先配置搜索服务、设备或 MCP 服务。</p></div>
   }
 
   return <div className="connection-grant-editor">
     <section className="connection-grant-group" aria-labelledby="connection-grant-title">
-      <header><div><h4 id="connection-grant-title">连接授权</h4><span>{value.filter((id) => deviceIds.has(id)).length} 项</span></div></header>
-      <p className="connection-grant-editor__note">技能授权决定角色“能做什么”，这里的连接授权决定“能用哪台设备”。角色需要同时在“技能与工具”里拥有对应技能并在此勾选设备，设备操作才会被允许。</p>
+      <header><div><h4 id="connection-grant-title">连接权限</h4><span>{value.filter((id) => connectionIds.has(id)).length} / {connectionIds.size} 项</span></div></header>
+      <p className="connection-grant-editor__note">技能决定角色可以执行的工作，连接权限决定角色可以使用的搜索服务、设备与 MCP 服务。两项同时满足后，具体高风险动作仍会请求确认。</p>
+      <GrantCheckbox label="全部连接" detail="一次选择连接中心当前列出的所有类目与子项。" ids={selectableIds} value={value} onChange={onChange} className="connection-grant-row--all" />
       {groups.map(({ descriptor, rows }) => <div key={descriptor.id} className="connection-grant-type">
-        <div className="connection-grant-type__title">{descriptor.displayName}{rows.length === 0 ? <em>暂无设备</em> : null}</div>
-        {rows.length === 0 ? <p className="connection-grant-group__empty">这个类型还没有添加设备。</p> : rows.map((row) => <ConnectionGrantRow key={row.id} row={row} granted={value.includes(row.id)} onChange={(checked) => onGrantChange(row.id, checked, value, onChange)} />)}
+        <GrantCheckbox label={descriptor.displayName} detail={descriptor.summary} ids={rows.map((row) => row.id)} value={value} onChange={onChange} className="connection-grant-type__title" disabled={rows.length === 0} />
+        {rows.length === 0 ? <p className="connection-grant-group__empty">当前类目还没有连接子项。</p> : rows.map((row) => <ConnectionGrantRow key={row.id} row={row} granted={value.includes(row.id)} onChange={(checked) => onGrantChange(row.id, checked, value, onChange)} />)}
       </div>)}
     </section>
     {revoked.length > 0 ? <section className="connection-grant-group" aria-labelledby="connection-grant-revoked-title">
@@ -105,18 +103,57 @@ export function ConnectionGrantEditor({ employee, value, onChange }: ConnectionG
   </div>
 }
 
-function ConnectionGrantRow({ row, granted, onChange }: { row: DeviceRow; granted: boolean; onChange(checked: boolean): void }) {
-  const usable = row.enabled && row.credentialConfigured
-  const status = !row.enabled ? '已停用' : !row.credentialConfigured ? '缺少凭据' : granted ? '已授权' : '可授权'
+function ConnectionGrantRow({ row, granted, onChange }: { row: ConnectionRow; granted: boolean; onChange(checked: boolean): void }) {
+  const usable = row.enabled && (!row.credentialRequired || row.credentialConfigured)
+  const status = !row.enabled ? '已停用' : row.credentialRequired && !row.credentialConfigured ? '缺少凭据' : granted ? '已授权' : '可授权'
   const statusClass = granted ? 'granted' : usable ? 'available' : 'disabled'
   return <label className={`connection-grant-row${granted ? ' is-granted' : ''}${usable ? '' : ' is-unusable'}`}>
     <input type="checkbox" checked={granted} onChange={(event) => onChange(event.target.checked)} />
     <span>
       <strong>{row.displayName}</strong>
-      <small>{row.host || '未填写地址'}</small>
+      <small>{row.detail}</small>
       <span className="connection-grant-row__meta"><em className={`connection-grant-row__status connection-grant-row__status--${statusClass}`}>{status}</em></span>
     </span>
   </label>
+}
+
+function GrantCheckbox({ label, detail, ids, value, onChange, className, disabled = false }: {
+  label: string
+  detail: string
+  ids: string[]
+  value: string[]
+  onChange(next: string[]): void
+  className?: string
+  disabled?: boolean
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const selected = ids.filter((id) => value.includes(id)).length
+  const checked = ids.length > 0 && selected === ids.length
+  useEffect(() => { if (inputRef.current !== null) inputRef.current.indeterminate = selected > 0 && !checked }, [checked, selected])
+  return <label className={`connection-grant-row connection-grant-selector${checked ? ' is-granted' : ''}${className === undefined ? '' : ` ${className}`}`}>
+    <input ref={inputRef} type="checkbox" checked={checked} disabled={disabled || ids.length === 0} onChange={(event) => onChange(toggleMany(ids, event.target.checked, value))} />
+    <span><strong>{label}</strong><small>{detail}</small><span className="connection-grant-row__meta"><em>{selected} / {ids.length} 已选择</em></span></span>
+  </label>
+}
+
+function toConnectionRow(item: IntegrationConnection, descriptor: IntegrationDescriptor): ConnectionRow {
+  const endpoint = String(item.config.host ?? item.config.endpoint ?? item.config.baseUrl ?? item.config.provider ?? item.config.service ?? '')
+  const credentialRequired = item.integrationId === 'builtin.ssh-device'
+    || item.integrationId === LEGACY_FIRECRAWL_TYPE_ID
+    || descriptor.secretFields.some((field) => field.required)
+  return {
+    id: item.id,
+    displayName: item.displayName,
+    detail: endpoint || '已配置连接',
+    enabled: item.enabled,
+    credentialConfigured: item.credentialConfigured,
+    credentialRequired,
+  }
+}
+
+function toggleMany(ids: string[], checked: boolean, value: string[]): string[] {
+  const targets = new Set(ids)
+  return checked ? [...new Set([...value, ...ids])] : value.filter((id) => !targets.has(id))
 }
 
 function onGrantChange(connectionId: string, checked: boolean, value: string[], onChange: (next: string[]) => void): void {

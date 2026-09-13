@@ -632,6 +632,7 @@ describe('Cyber local server', () => {
     expect(shell.status).toBe(200)
     expect(await shell.text()).toContain('DSH Cyber')
     expect(shell.headers.get('content-security-policy')).toContain("script-src 'self'")
+    expect(shell.headers.get('content-security-policy')).toContain("'wasm-unsafe-eval'")
 
     const { workspace, world } = await createWorld(origin)
     const employee = await recruit(origin, world.id, 'cyber-company.software-engineer')

@@ -27,7 +27,8 @@ describe('WorldSettingsDialog permission layers', () => {
       onClose: () => undefined,
       onSave: async () => undefined,
     }))
-    expect(markup).toContain('技能与工具')
+    expect(markup).toContain('技能与权限体系')
+    expect(markup).toContain('技能中心汇总当前世界加载的 Skill')
     expect(markup).toContain('回复偏好语言')
     expect(markup).toContain('简体中文（默认）')
     expect(markup).toContain('会话皮肤')
