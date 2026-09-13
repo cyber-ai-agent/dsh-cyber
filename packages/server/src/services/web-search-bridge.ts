@@ -44,11 +44,12 @@ const UNKNOWN_FALLBACK: WebSearchProviderDescriptor = {
  * marked default, else the first candidate with a configured key, else the
  * first candidate. No candidates at all means web_search is hidden.
  */
-export function activeWebSearch(integrations: IntegrationService, workspaceId: string, catalog: WebSearchProviderCatalog): ActiveWebSearch | undefined {
+export function activeWebSearch(integrations: IntegrationService, workspaceId: string, catalog: WebSearchProviderCatalog, grantedConnectionIds?: readonly string[]): ActiveWebSearch | undefined {
   interface Candidate { connection: IntegrationConnection; provider: WebSearchProviderDescriptor }
   const candidates: Candidate[] = []
+  const granted = grantedConnectionIds === undefined ? undefined : new Set(grantedConnectionIds)
   for (const item of integrations.listByType(workspaceId, WEB_SEARCH_INTEGRATION_ID)) {
-    if (!item.enabled) continue
+    if (!item.enabled || granted?.has(item.id) === false) continue
     const providerId = typeof item.config.provider === 'string' && item.config.provider ? item.config.provider : WEB_SEARCH_FALLBACK_PROVIDER
     const provider = catalogProvider(catalog, providerId, UNKNOWN_FALLBACK)
     // A catalog entry that declares another integration type (Firecrawl) keeps
@@ -60,7 +61,7 @@ export function activeWebSearch(integrations: IntegrationService, workspaceId: s
     candidates.push({ connection: item, provider })
   }
   const legacy = integrations.get(workspaceId, FIRECRAWL_INTEGRATION_ID)
-  if (legacy !== undefined && legacy.enabled) {
+  if (legacy !== undefined && legacy.enabled && granted?.has(legacy.id) !== false) {
     candidates.push({ connection: legacy, provider: catalogProvider(catalog, 'firecrawl', FIRECRAWL_FALLBACK) })
   }
   if (candidates.length === 0) return undefined
@@ -95,10 +96,10 @@ export interface WebSearchBridge {
  * adapter generation. Model-profile web-search (managed deepseek) outranks
  * this; the router only consults it when the route carries no `webSearch`.
  */
-export function resolveWebSearchPlan(bridge: WebSearchBridge, workspaceId: string, route: { webSearch?: unknown } | undefined): WorkerWebSearchPlan | undefined {
-  if (route?.webSearch !== undefined) return undefined
-  const active = activeWebSearch(bridge.integrations, workspaceId, bridge.catalog())
+export function resolveWebSearchPlan(bridge: WebSearchBridge, workspaceId: string, route: { webSearch?: unknown } | undefined, grantedConnectionIds?: readonly string[]): WorkerWebSearchPlan | undefined {
+  const active = activeWebSearch(bridge.integrations, workspaceId, bridge.catalog(), grantedConnectionIds)
   if (active === undefined) return { kind: 'disabled' }
+  if (route?.webSearch !== undefined) return undefined
   const apiKey = bridge.integrations.credentialForConnection(workspaceId, active.connection.id)
   if (apiKey === undefined || apiKey.trim() === '') return { kind: 'disabled' }
   if (active.provider.backend === 'deepseek') {

@@ -583,17 +583,17 @@ export function WorldSettingsDialog({
                   <ShieldCheck size={17} />
                 </span>
                 <div>
-                  <h4>{t('worldSettings.permissionsTitle', '技能与工具体系')}</h4>
-                  <small>{t('worldSettings.permissionsSubtitle', '管理当前世界中角色能够调用的外部工具与系统权限')}</small>
+                  <h4>{t('worldSettings.permissionsTitle', '技能与权限体系')}</h4>
+                  <small>{t('worldSettings.permissionsSubtitle', '技能中心管理 Skill 引用，角色权限管理对话档位与外部连接')}</small>
                 </div>
               </header>
               <div className="world-settings-card__body">
                 <div className="setting-help">
                   <Info size={16} />
                   <div>
-                    <strong>{t('worldSettings.permissionsHelpTitle', '技能与外部动作权限隔离设计：')}</strong>
+                    <strong>{t('worldSettings.permissionsHelpTitle', '技能引用与连接权限分层：')}</strong>
                     <p style={{ margin: '4px 0 0', lineHeight: 1.6 }}>
-                      {t('worldSettings.permissionsHelpDesc', '浏览器、外部网络连接、系统命令与第三方能力均属于角色的专属技能与工具。请在右侧「档案 → 技能与工具」中为具体角色单独授权与配置审批策略。')}
+                      {t('worldSettings.permissionsHelpDesc', '技能中心汇总当前世界加载的 Skill，并按角色保存引用；角色设置中的「权限」负责对话权限与连接权限。')}
                     </p>
                   </div>
                 </div>

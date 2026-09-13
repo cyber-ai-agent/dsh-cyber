@@ -34,10 +34,11 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
   readonly #store: Pick<SqliteStore, 'getWorld' | 'listWorkspaces'>
   readonly #integrations: IntegrationService
   readonly #clients: McpClientFactory
+  readonly #connectionGrantsFor: ((characterId: string) => readonly string[] | undefined) | undefined
   #tools = new Map<string, DiscoveredTool[]>()
 
-  constructor(options: { store: Pick<SqliteStore, 'getWorld' | 'listWorkspaces'>; integrations: IntegrationService; clients: McpClientFactory }) {
-    this.#store = options.store; this.#integrations = options.integrations; this.#clients = options.clients
+  constructor(options: { store: Pick<SqliteStore, 'getWorld' | 'listWorkspaces'>; integrations: IntegrationService; clients: McpClientFactory; connectionGrantsFor?: (characterId: string) => readonly string[] | undefined }) {
+    this.#store = options.store; this.#integrations = options.integrations; this.#clients = options.clients; this.#connectionGrantsFor = options.connectionGrantsFor
   }
 
   get descriptors(): readonly CharacterSkillDescriptor[] {
@@ -118,7 +119,7 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
     const world = this.#store.getWorld(context.worldId)
     if (world === undefined) return []
     const workspaceId = world.workspaceId
-    const candidates = this.#resolveCandidates(workspaceId, command.qualifier, context.grantedSkillIds)
+    const candidates = this.#resolveCandidates(workspaceId, context.characterId, command.qualifier, context.grantedSkillIds)
     if (candidates.length === 0) return []
     // A bare tool name that several granted services expose is ambiguous: the
     // caller must qualify it with the service (`/mcp <service>.<tool>`).
@@ -144,9 +145,10 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
   }
 
   /** Resolve a `/mcp` command qualifier to the discovered tools it may drive. */
-  #resolveCandidates(workspaceId: string, qualifier: string, grantedSkillIds: readonly string[]): DiscoveredTool[] {
+  #resolveCandidates(workspaceId: string, characterId: string, qualifier: string, grantedSkillIds: readonly string[]): DiscoveredTool[] {
     const dotIndex = qualifier.indexOf('.')
-    const inWorkspace = (entry: DiscoveredTool): boolean => entry.workspaceId === workspaceId
+    const allowedConnections = new Set(this.#connectionGrantsFor?.(characterId) ?? [])
+    const inWorkspace = (entry: DiscoveredTool): boolean => entry.workspaceId === workspaceId && allowedConnections.has(entry.connectionId)
     if (dotIndex > 0) {
       // Targeted form: `/mcp <service>.<tool>`. The slug never contains a dot,
       // so the first dot cleanly splits service from (possibly dotted) tool.
@@ -177,9 +179,10 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
     const payloadRef = typeof action.parameters.payloadRef === 'string' ? action.parameters.payloadRef : ''
     const discovered = world === undefined ? undefined : this.#tools.get(action.skillId)?.find((entry) => entry.workspaceId === world.workspaceId && entry.connectionId === connectionId && entry.tool.name === toolName)
     const connection = world === undefined || !connectionId ? undefined : this.#integrations.getById(world.workspaceId, connectionId)
-    return world !== undefined && Boolean(toolName) && Boolean(connectionId) && Boolean(payloadRef) && connection?.enabled === true && discovered !== undefined
+    const granted = this.#connectionGrantsFor?.(action.characterId)?.includes(connectionId) === true
+    return world !== undefined && Boolean(toolName) && Boolean(connectionId) && Boolean(payloadRef) && connection?.enabled === true && discovered !== undefined && granted
       ? { ready: true }
-      : { ready: false, detail: '当前工作区的 MCP 连接、工具目录或加密参数不可用' }
+      : { ready: false, detail: granted ? '当前工作区的 MCP 连接、工具目录或加密参数不可用' : '该角色尚未获得这个 MCP 连接权限' }
   }
 
   async execute(action: CharacterSkillAction): Promise<CharacterSkillExecutionResult> {
@@ -191,6 +194,7 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
     const connection = this.#integrations.getById(world.workspaceId, connectionId)
     const discovered = this.#tools.get(action.skillId)?.find((entry) => entry.workspaceId === world.workspaceId && entry.connectionId === connectionId && entry.tool.name === toolName)
     if (connection === undefined || !connection.enabled || discovered === undefined) return { status: 'waiting-for-integration', detail: '当前工作区的 MCP 连接或工具目录不可用' }
+    if (this.#connectionGrantsFor?.(action.characterId)?.includes(connectionId) !== true) return { status: 'failed', detail: '该角色尚未获得这个 MCP 连接权限，工具调用未发送' }
     const args = this.#integrations.resolveMcpPayload(payloadRef)
     if (args === undefined) return { status: 'failed', detail: 'MCP 工具参数已过期或无法解密，未调用外部工具' }
     let client

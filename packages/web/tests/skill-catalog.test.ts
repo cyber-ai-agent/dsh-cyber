@@ -101,7 +101,7 @@ describe('world-scoped skill catalog UI', () => {
     expect(normalizeSkillCatalogEntry({ ...base, mcpService: 'github' })?.mcpService).toBeUndefined()
   })
 
-  it('collapses one MCP service tools into a single grant row', async () => {
+  it('renders every MCP tool as an independent Skill reference', async () => {
     const mcpCatalog: SkillCatalogEntry[] = [
       mcpTool('mcp.playwright.browser_navigate', 'MCP · Playwright 浏览器 / browser_navigate', { id: 'playwright', label: 'Playwright 浏览器' }),
       mcpTool('mcp.playwright.browser_click', 'MCP · Playwright 浏览器 / browser_click', { id: 'playwright', label: 'Playwright 浏览器' }),
@@ -120,11 +120,10 @@ describe('world-scoped skill catalog UI', () => {
     const { host, root } = await mount(createElement(SkillGrantEditor, { employee, value: initial, onChange }))
     await flush()
 
-    // One row per MCP service plus the single non-MCP recommended skill.
     const rows = Array.from(host.querySelectorAll('.skill-grant-row'))
-    expect(rows).toHaveLength(3)
-    expect(host.textContent).toContain('MCP · Playwright 浏览器')
-    expect(host.textContent).toContain('MCP · GitHub MCP')
+    expect(rows).toHaveLength(4)
+    expect(host.textContent).toContain('MCP · Playwright 浏览器 / browser_navigate')
+    expect(host.textContent).toContain('MCP · Playwright 浏览器 / browser_click')
 
     const rowFor = (text: string): HTMLInputElement => {
       const row = Array.from(host.querySelectorAll('.skill-grant-row')).find((item) => item.textContent?.includes(text))
@@ -133,28 +132,23 @@ describe('world-scoped skill catalog UI', () => {
       return checkbox
     }
 
-    // GitHub: fully granted → checked. Playwright: one of two granted → indeterminate.
-    expect(rowFor('MCP · GitHub MCP').checked).toBe(true)
-    const playwrightCheckbox = rowFor('MCP · Playwright 浏览器')
-    expect(playwrightCheckbox.checked).toBe(false)
-    expect(playwrightCheckbox.indeterminate).toBe(true)
-
-    // Checking the Playwright row grants every tool of the service at once.
-    await act(async () => { playwrightCheckbox.click() })
+    expect(rowFor('MCP · GitHub MCP / create_issue').checked).toBe(true)
+    const navigateCheckbox = rowFor('MCP · Playwright 浏览器 / browser_navigate')
+    expect(navigateCheckbox.checked).toBe(false)
+    await act(async () => { navigateCheckbox.click() })
     expect(onChange).toHaveBeenLastCalledWith([
       'mcp.github.create_issue',
       'mcp.playwright.browser_click',
       'mcp.playwright.browser_navigate',
     ])
 
-    // Unchecking the GitHub row revokes all of the service's grants.
-    const githubCheckbox = rowFor('MCP · GitHub MCP')
+    const githubCheckbox = rowFor('MCP · GitHub MCP / create_issue')
     await act(async () => { githubCheckbox.click() })
     expect(onChange).toHaveBeenLastCalledWith(['mcp.playwright.browser_click'])
     await unmount(root, host)
   })
 
-  it('keeps a dead MCP service revocable as one aggregated row', async () => {
+  it('keeps dead MCP Skill references individually revocable', async () => {
     const mcpCatalog: SkillCatalogEntry[] = [
       mcpTool('mcp.github.create_issue', 'MCP · GitHub MCP / create_issue', { id: 'github', label: 'GitHub MCP' }),
     ]
@@ -173,15 +167,14 @@ describe('world-scoped skill catalog UI', () => {
     }))
     await flush()
 
-    // The unknown service renders exactly one aggregated row (not one per tool),
-    // checked because its stale grants remain; the live service row is untouched.
-    expect(host.textContent).toContain('MCP · dead')
+    expect(host.textContent).toContain('MCP 工具 · dead / tool_one')
+    expect(host.textContent).toContain('MCP 工具 · dead / tool_two')
     expect(host.textContent).toContain('暂不可用')
-    const row = Array.from(host.querySelectorAll('.skill-grant-row')).find((item) => item.textContent?.includes('MCP · dead'))!
+    const row = Array.from(host.querySelectorAll('.skill-grant-row')).find((item) => item.textContent?.includes('dead / tool_one'))!
     const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!
     expect(checkbox.checked).toBe(true)
     await act(async () => { checkbox.click() })
-    expect(onChange).toHaveBeenLastCalledWith(['mcp.github.create_issue'])
+    expect(onChange).toHaveBeenLastCalledWith(['mcp.dead.tool_two', 'mcp.github.create_issue'])
     await unmount(root, host)
   })
 

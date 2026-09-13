@@ -87,6 +87,14 @@ describe('activeWebSearch', () => {
     expect(activeWebSearch(integrations, 'ws-1', TEST_CATALOG)?.connection.id).toBe('f')
   })
 
+  it('selects only a connection granted to the executing character', () => {
+    const first = webSearchConnection({ id: 'first', provider: 'deepseek', isDefault: true })
+    const second = webSearchConnection({ id: 'second', provider: 'deepseek' })
+    const integrations = stubIntegrations({ webSearch: [first, second], credentials: { first: 'sk-first', second: 'sk-second' } })
+    expect(activeWebSearch(integrations, 'ws-1', TEST_CATALOG, ['second'])?.connection.id).toBe('second')
+    expect(activeWebSearch(integrations, 'ws-1', TEST_CATALOG, [])).toBeUndefined()
+  })
+
   it('ignores disabled connections and disabled legacy connections', () => {
     const off = webSearchConnection({ id: 'a', provider: 'deepseek', enabled: false })
     const legacyOff = legacyFirecrawlConnection({ id: 'f', enabled: false })
@@ -106,7 +114,9 @@ describe('activeWebSearch', () => {
 
 describe('resolveWebSearchPlan', () => {
   it('defers to the model profile when it carries a managed webSearch', () => {
-    expect(resolveWebSearchPlan(bridge(stubIntegrations({})), 'ws-1', { webSearch: { baseURL: 'x', apiKeyEnv: 'y' } })).toBeUndefined()
+    const connection = webSearchConnection({ id: 'managed', provider: 'deepseek' })
+    expect(resolveWebSearchPlan(bridge(stubIntegrations({ webSearch: [connection] })), 'ws-1', { webSearch: { baseURL: 'x', apiKeyEnv: 'y' } }, ['managed'])).toBeUndefined()
+    expect(resolveWebSearchPlan(bridge(stubIntegrations({ webSearch: [connection] })), 'ws-1', { webSearch: { baseURL: 'x', apiKeyEnv: 'y' } }, [])).toEqual({ kind: 'disabled' })
   })
 
   it('returns disabled when no 联网搜索 backend is usable', () => {
