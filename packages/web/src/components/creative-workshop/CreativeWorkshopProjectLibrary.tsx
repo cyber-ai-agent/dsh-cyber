@@ -1,7 +1,7 @@
 import { Archive, ArrowCounterClockwise, ArrowRight, Copy, Cube, Plus, ShieldCheck, SlidersHorizontal, Sparkle, Trash, UsersThree, WarningCircle } from '@phosphor-icons/react'
 import { useRef, useState, type ReactNode } from 'react'
-import type { WorldTemplateManifest } from '@dsh-cyber/contracts'
-import type { CharacterSkillDescriptor, WorkshopProjectStatus, WorkshopProjectView } from '@dsh-cyber/contracts/creative-platform'
+import type { SkillCatalogEntry, WorldTemplateManifest } from '@dsh-cyber/contracts'
+import type { WorkshopProjectStatus, WorkshopProjectView } from '@dsh-cyber/contracts/creative-platform'
 
 import { useI18n } from '../../i18n/runtime.js'
 import { useDialogFocusTrap } from '../useDialogFocusTrap.js'
@@ -12,7 +12,7 @@ interface CreativeWorkshopProjectLibraryProps {
   projects: WorkshopProjectView[]
   templates?: WorldTemplateManifest[]
   selectedProject?: WorkshopProjectView
-  skills: CharacterSkillDescriptor[]
+  skills: SkillCatalogEntry[]
   notice?: string
   onSelect(project: WorkshopProjectView): void
   onCreate(templateId?: string): void
@@ -42,6 +42,7 @@ export function CreativeWorkshopProjectLibrary({
   const [pendingDeleteId, setPendingDeleteId] = useState<string>()
   const skillNames = new Map(skills.map((skill) => [skill.id, skill.displayName]))
   const serviceLabels = new Map(skills.filter((skill) => skill.mcpService !== undefined).map((skill) => [skill.mcpService!.id, skill.mcpService!.label]))
+  const skillPackages = new Map(skills.flatMap((skill) => skill.packageId === undefined ? [] : [[skill.id, { id: skill.packageId, label: skill.skillPackage?.displayName ?? `技能包 · ${skill.packageId}` }] as const]))
   const visibleProjects = projects.filter((project) => project.status === tab)
 
   // 1. 当没有项目时：呈现一体化、饱满充实、高审美的创作起航大厅 (Creative Workshop Hub)
@@ -294,7 +295,7 @@ export function CreativeWorkshopProjectLibrary({
                       {role.requestedSkillIds.length === 0 ? (
                         <span>{t('workshop.library.noExtraSkills', '未请求额外技能')}</span>
                       ) : (
-                        skillChipsForRole(role.requestedSkillIds, skillNames, serviceLabels)
+                        skillChipsForRole(role.requestedSkillIds, skillNames, serviceLabels, skillPackages)
                       )}
                     </div>
                   </article>
@@ -375,23 +376,31 @@ function formatDate(value: string, locale: string): string {
 }
 
 /**
- * Read-only skill chips for a project role: one chip per skill for non-MCP
- * ids, one chip per MCP service for tool ids (a single tool shows as
- * "MCP · <connection name> / <tool>", several collapse into a count).
+ * Read-only skill chips for a project role: one chip per standalone Skill,
+ * one chip per MCP service, and one chip per Skill package.
  */
 export function skillChipsForRole(
   requestedIds: readonly string[],
   skillNames: ReadonlyMap<string, string>,
   serviceLabels: ReadonlyMap<string, string>,
+  skillPackages: ReadonlyMap<string, { id: string; label: string }> = new Map(),
 ): ReactNode[] {
   const plainIds: string[] = []
   const toolsByService = new Map<string, string[]>()
+  const packageIds = new Map<string, string[]>()
   for (const skillId of requestedIds) {
     const service = mcpServiceOfSkillId(skillId)
-    if (service === undefined) plainIds.push(skillId)
-    else toolsByService.set(service, [...(toolsByService.get(service) ?? []), skillId])
+    const packageInfo = skillPackages.get(skillId)
+    if (service !== undefined) toolsByService.set(service, [...(toolsByService.get(service) ?? []), skillId])
+    else if (packageInfo !== undefined) {
+      packageIds.set(packageInfo.id, [...(packageIds.get(packageInfo.id) ?? []), skillId])
+    } else plainIds.push(skillId)
   }
   const chips: ReactNode[] = plainIds.map((skillId) => <code key={skillId}>{skillNames.get(skillId) ?? skillId}</code>)
+  for (const [packageId, memberIds] of [...packageIds.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const label = skillPackages.get(memberIds[0]!)?.label ?? packageId
+    chips.push(<code key={`skill-package-${packageId}`}>{memberIds.length === 1 ? label : `${label}（${memberIds.length} 项能力）`}</code>)
+  }
   for (const [service, toolIds] of [...toolsByService.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const label = serviceLabels.get(service) ?? service
     const title = toolIds.length === 1

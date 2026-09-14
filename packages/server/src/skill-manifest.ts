@@ -1,4 +1,4 @@
-import type { SkillCatalogSource } from '@dsh-cyber/contracts/skill-runtime'
+import type { SkillCatalogSource, SkillDependency } from '@dsh-cyber/contracts/skill-runtime'
 
 const SKILL_KEYS = new Set([
   'schemaVersion',
@@ -7,6 +7,7 @@ const SKILL_KEYS = new Set([
   'summary',
   'routingHints',
   'integrationId',
+  'dependencies',
   'dataEgress',
   'instructions',
 ])
@@ -23,6 +24,7 @@ export interface SkillManifest {
   summary: string
   routingHints?: string[]
   integrationId: string
+  dependencies?: SkillDependency[]
   dataEgress: string[]
   instructions: string
 }
@@ -51,6 +53,7 @@ export function parseSkillManifest(value: unknown, context: SkillManifestParseCo
     ? undefined
     : stringSet(input.routingHints, 'routingHints', 32, 80)
   const integrationId = text(input.integrationId, 'integrationId', 160, ID)
+  const dependencies = input.dependencies === undefined ? undefined : dependencySet(input.dependencies)
   const dataEgress = stringSet(input.dataEgress, 'dataEgress', MAX_EGRESS_ITEMS, MAX_EGRESS_LENGTH)
   const instructions = text(input.instructions, 'instructions', MAX_INSTRUCTIONS_LENGTH)
   return {
@@ -60,6 +63,7 @@ export function parseSkillManifest(value: unknown, context: SkillManifestParseCo
     summary,
     ...(routingHints === undefined ? {} : { routingHints }),
     integrationId,
+    ...(dependencies === undefined ? {} : { dependencies }),
     dataEgress,
     instructions,
   }
@@ -91,5 +95,25 @@ function stringSet(value: unknown, field: string, maximumItems: number, maximumL
   }
   const result = value.map((item, index) => text(item, `${field}[${index}]`, maximumLength))
   if (new Set(result).size !== result.length) throw new Error(`Skill manifest ${field} must be unique`)
+  return result
+}
+
+function dependencySet(value: unknown): SkillDependency[] {
+  if (!Array.isArray(value) || value.length > 64) throw new Error('Skill manifest dependencies must contain at most 64 items')
+  const result = value.map((item, index) => {
+    const dependency = object(item, `dependencies[${index}]`)
+    const keys = new Set(['kind', 'id', 'required'])
+    const unknown = Object.keys(dependency).find((key) => !keys.has(key))
+    if (unknown !== undefined) throw new Error(`Unknown skill dependency field: ${unknown}`)
+    const kind: SkillDependency['kind'] | undefined = dependency.kind === 'integration' || dependency.kind === 'skill' ? dependency.kind : undefined
+    if (kind === undefined) throw new Error(`Invalid skill dependency kind at index ${index}`)
+    const id = text(dependency.id, `dependencies[${index}].id`, 160, ID)
+    if (dependency.required !== undefined && typeof dependency.required !== 'boolean') {
+      throw new Error(`Skill dependency required must be boolean at index ${index}`)
+    }
+    return { kind, id, ...(dependency.required === undefined ? {} : { required: dependency.required }) }
+  })
+  const keys = result.map((item) => `${item.kind}:${item.id}`)
+  if (new Set(keys).size !== keys.length) throw new Error('Skill manifest dependencies must be unique')
   return result
 }

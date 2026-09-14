@@ -22,7 +22,10 @@ export function assertLocalRequest(request: IncomingMessage): void {
     const isBoundedKnowledgeImport = request.method === 'POST'
       && /^\/api\/worlds\/[^/]+\/knowledge\/library\/import$/.test(pathname)
       && contentType.startsWith('multipart/form-data;')
-    if (!contentType.startsWith('application/json') && !isBoundedKnowledgeImport) {
+    const isBoundedSkillPackageImport = request.method === 'POST'
+      && /^\/api\/workspaces\/[^/]+\/skill-authoring\/import$/.test(pathname)
+      && contentType.startsWith('multipart/form-data;')
+    if (!contentType.startsWith('application/json') && !isBoundedKnowledgeImport && !isBoundedSkillPackageImport) {
       throw new HttpError(415, 'json_required', 'Application JSON content type required')
     }
   }

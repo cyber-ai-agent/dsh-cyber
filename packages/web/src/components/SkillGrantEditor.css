@@ -79,7 +79,9 @@
 }
 
 .skill-grant-row.is-unavailable {
-  opacity: .72;
+  color: var(--text-soft);
+  border-color: color-mix(in srgb, var(--danger, #dc7777) 30%, var(--border-subtle, rgba(255,255,255,.09)));
+  background: color-mix(in srgb, var(--danger, #dc7777) 4%, rgba(255,255,255,.025));
 }
 
 .skill-grant-row > input {
@@ -176,6 +178,11 @@
 
 .skill-grant-row__tools li.is-granted em {
   color: var(--success, #69c18d);
+}
+
+.skill-grant-row__tools li span {
+  color: var(--world-muted, #aeb6c6);
+  font-size: 12px;
 }
 
 .skill-grant-editor__note {

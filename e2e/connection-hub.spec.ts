@@ -142,7 +142,7 @@ test('lets a role authorize a hub SSH device from 角色设置 连接授权 and 
   await openDockTab(dock, '角色')
   await dock.getByRole('article').filter({ hasText: displayName }).getByRole('button', { name: `管理${displayName}` }).click()
   const management = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${displayName}`) })
-  await management.getByRole('tab', { name: '技能与工具' }).click()
+  await management.getByRole('tab', { name: '权限' }).click()
   const deviceRow = management.locator('.connection-grant-row').filter({ hasText: '授权设备' })
   await expect(deviceRow).toBeVisible()
   const deviceCheckbox = deviceRow.getByRole('checkbox')
@@ -170,7 +170,7 @@ test('lets a role authorize a hub SSH device from 角色设置 连接授权 and 
     await page.screenshot({ path: join(screenshotRoot, `role-grant-${viewport.label}.png`) })
   }
 
-  await management.getByRole('button', { name: '保存能力与连接设置' }).click()
+  await management.getByRole('button', { name: '保存权限' }).click()
   await expect(management).toBeHidden()
 
   // The revision persisted the connection id; the device id comes from the hub API.
@@ -186,7 +186,7 @@ test('lets a role authorize a hub SSH device from 角色设置 连接授权 and 
   await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '角色')
   await page.getByRole('region', { name: '世界与角色侧边栏' }).getByRole('article').filter({ hasText: displayName }).getByRole('button', { name: `管理${displayName}` }).click()
   const refreshed = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${displayName}`) })
-  await refreshed.getByRole('tab', { name: '技能与工具' }).click()
+  await refreshed.getByRole('tab', { name: '权限' }).click()
   await expect(refreshed.locator('.connection-grant-row').filter({ hasText: '授权设备' }).getByRole('checkbox')).toBeChecked()
   await refreshed.getByRole('button', { name: '关闭角色设置' }).click()
   await writeConsole(info, consoleIssues)

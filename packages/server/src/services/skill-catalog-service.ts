@@ -10,6 +10,7 @@ import type {
   SkillCatalogEntry,
   SkillCatalogScope,
   SkillCatalogSource,
+  SkillDependency,
   SkillSettingsScope,
   SkillSettingsView,
 } from '@dsh-cyber/contracts'
@@ -38,6 +39,12 @@ export interface SkillCatalogServiceOptions {
 interface PackageSkillRecord extends InstalledSkillManifest {
   /** A package declaration is not executable without a matching host descriptor. */
   descriptor?: CharacterSkillDescriptor
+  packageInfo: {
+    id: string
+    version: string
+    displayName: string
+    summary: string
+  }
 }
 
 interface PackageSkillIndex {
@@ -223,6 +230,12 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
         for (const skill of skills) {
           const record: PackageSkillRecord = {
             ...skill,
+            packageInfo: {
+              id: installed.packageId,
+              version: installed.version,
+              displayName: installed.manifest.displayName,
+              summary: installed.manifest.summary,
+            },
             ...(descriptorById.get(skill.manifest.id) === undefined
               ? {}
               : { descriptor: descriptorById.get(skill.manifest.id)! }),
@@ -276,9 +289,11 @@ function mergeCatalog(input: {
     const base = descriptor ?? unboundPackageDescriptor(packageRecord)
     if (base === undefined) continue
     const routingHints = mergeRoutingHints(descriptor?.routingHints, packageRecord?.manifest.routingHints)
+    const dependencies = mergeDependencies(descriptor?.dependencies, packageRecord?.manifest.dependencies, packageRecord?.manifest.integrationId)
     const entry: SkillCatalogEntry = {
       ...cloneDescriptor(base),
       ...(routingHints === undefined ? {} : { routingHints }),
+      ...(dependencies.length === 0 ? {} : { dependencies }),
       source,
       scope,
       globalKnown,
@@ -287,6 +302,7 @@ function mergeCatalog(input: {
       ...(packageRecord === undefined ? {} : {
         packageId: packageRecord.packageId,
         packageVersion: packageRecord.packageVersion,
+        skillPackage: packageRecord.packageInfo,
       }),
     }
     entries.push(entry)
@@ -400,8 +416,29 @@ function cloneDescriptor(descriptor: CharacterSkillDescriptor): CharacterSkillDe
   return {
     ...descriptor,
     risks: [...descriptor.risks],
+    ...(descriptor.dependencies === undefined ? {} : { dependencies: descriptor.dependencies.map((dependency) => ({ ...dependency })) }),
     ...(descriptor.routingHints === undefined ? {} : { routingHints: [...descriptor.routingHints] }),
   }
+}
+
+function mergeDependencies(
+  descriptorDependencies: readonly SkillDependency[] | undefined,
+  packageDependencies: readonly SkillDependency[] | undefined,
+  legacyIntegrationId: string | undefined,
+): SkillDependency[] {
+  const result = new Map<string, SkillDependency>()
+  for (const dependency of [...(descriptorDependencies ?? []), ...(packageDependencies ?? [])]) {
+    const key = `${dependency.kind}:${dependency.id}`
+    const previous = result.get(key)
+    result.set(key, {
+      ...dependency,
+      ...(previous?.required === true || dependency.required === true ? { required: true } : {}),
+    })
+  }
+  if (result.size === 0 && descriptorDependencies === undefined && packageDependencies === undefined && legacyIntegrationId !== undefined && legacyIntegrationId !== 'builtin.recipe') {
+    result.set(`integration:${legacyIntegrationId}`, { kind: 'integration', id: legacyIntegrationId, required: true })
+  }
+  return [...result.values()]
 }
 
 function compareInstalledPackages(left: InstalledPackage, right: InstalledPackage): number {

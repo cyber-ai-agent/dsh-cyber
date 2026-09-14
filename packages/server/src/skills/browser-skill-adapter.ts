@@ -198,6 +198,7 @@ function descriptor(id: BrowserSkillId, displayName: string, summary: string): C
     routingHints: ['浏览器', '网页', '公开网页', 'Browser', 'browser', 'website'],
     adapterId: BROWSER_ADAPTER_ID,
     packageId: BROWSER_PACKAGE_ID,
+    dependencies: [],
     risks: ['external-side-effect'],
     supportsScheduling: false,
     persistentApproval: 'forbidden',

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SkillCatalogEntry, SkillSettingsView, World } from '@dsh-cyber/contracts'
 
 import { SkillCenterDialog } from '../src/features/skill-center/SkillCenterDialog.js'
+import { SkillListPanel } from '../src/features/skill-center/SkillListPanel.js'
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals() })
 
@@ -43,6 +44,9 @@ describe('SkillCenterDialog', () => {
 
     await clickButton('添加技能')
     expect(document.body.textContent).toContain('导入技能包')
+    expect(document.body.textContent).toContain('选择 ZIP 技能包')
+    expect(document.body.textContent).toContain('选择技能包文件夹')
+    expect(document.body.textContent).toContain('目录由宿主固定管理')
     expect(document.body.textContent).toContain('写入技能')
     await clickButton('写入技能')
     expect(document.body.textContent).toContain('AI 撰写技能')
@@ -54,12 +58,34 @@ describe('SkillCenterDialog', () => {
       `/api/workspaces/${world.workspaceId}/skills/coding/detail`,
     ]))
   })
+
+  it('shows one row for an MCP service and one row for a multi-entry Skill package', async () => {
+    const onSelect = vi.fn()
+    const host = document.createElement('div'); document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => { root.render(createElement(SkillListPanel, { catalog: groupedCatalog, loadingDetail: false, onSelect, onEdit: vi.fn() })) })
+    const rows = host.querySelectorAll('.skill-center__skill-rows > button')
+    expect(rows).toHaveLength(2)
+    expect(host.textContent).toContain('MCP · Playwright MCP')
+    expect(host.textContent).toContain('只读网页浏览')
+    expect(Array.from(host.querySelectorAll('.skill-center__source-rail button')).find((item) => item.textContent?.includes('MCP 技能'))?.textContent).toContain('1')
+    expect(Array.from(host.querySelectorAll('.skill-center__source-rail button')).find((item) => item.textContent?.includes('技能包'))?.textContent).toContain('1')
+    await act(async () => { (rows[0] as HTMLButtonElement).click() })
+    expect(onSelect).toHaveBeenCalledWith(expect.stringMatching(/^(mcp\.playwright|browser\.)/))
+    await act(async () => { root.unmount() })
+  })
 })
 
 const timestamp = '2026-09-14T00:00:00.000Z'
 const world = { id: 'world-1', workspaceId: 'workspace-1', name: '测试世界', templateId: 'personal-world', status: 'active', createdAt: timestamp, updatedAt: timestamp } as World
 const secondWorld = { ...world, id: 'world-2', name: '第二世界' }
 const catalog: SkillCatalogEntry[] = [skill('coding', '软件实现'), skill('testing', '测试验证')]
+const groupedCatalog: SkillCatalogEntry[] = [
+  { ...skill('mcp.playwright.browser_click', '工具点击'), source: 'mcp', mcpService: { id: 'playwright', label: 'Playwright MCP' }, adapterId: 'builtin.mcp', kind: 'integration' },
+  { ...skill('mcp.playwright.browser_open', '工具打开'), source: 'mcp', mcpService: { id: 'playwright', label: 'Playwright MCP' }, adapterId: 'builtin.mcp', kind: 'integration' },
+  { ...skill('browser.open', '浏览器打开网页'), source: 'plugin', packageId: 'official-browser', packageVersion: '1.0.1', skillPackage: { id: 'official-browser', version: '1.0.1', displayName: '只读网页浏览', summary: '浏览器能力包。' } },
+  { ...skill('browser.read', '浏览器读取网页'), source: 'plugin', packageId: 'official-browser', packageVersion: '1.0.1', skillPackage: { id: 'official-browser', version: '1.0.1', displayName: '只读网页浏览', summary: '浏览器能力包。' } },
+]
 const settings: SkillSettingsView = {
   global: { scope: 'workspace', scopeId: world.workspaceId, displayName: '全局', configured: false, inherited: false, skillIds: ['coding', 'testing'] },
   worlds: [world, secondWorld].map((item) => ({ scope: 'world', scopeId: item.id, displayName: item.name, configured: false, inherited: false, skillIds: ['coding', 'testing'] })),

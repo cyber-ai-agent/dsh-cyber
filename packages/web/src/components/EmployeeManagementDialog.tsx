@@ -188,7 +188,7 @@ export function EmployeeManagementDialog({ employee, profile, profileHistory = [
             {runtimePermissionMode === 'danger-full-access' ? <label className="host-access-dialog__confirm"><input type="checkbox" checked={confirmedFullAccess} onChange={(event) => setConfirmedFullAccess(event.target.checked)} /><span><strong>我确认允许这个角色默认完全访问</strong><small>确认会持久保存，并在刷新、切换和重启后继续生效。</small></span></label> : null}
             <div className="employee-settings-divider" role="separator" />
             <div className="settings-section__heading"><h3><PlugsConnected size={18} />连接权限</h3><p>按连接中心类目授权，可全选全部连接、全选一个类目，或指定具体搜索服务、设备和 MCP 服务。</p></div>
-            <ConnectionGrantEditor employee={employee} value={connections} onChange={setConnections} />
+            <ConnectionGrantEditor employee={employee} value={connections} skillIds={skills} onChange={setConnections} />
             <footer className="employee-settings-actions"><span>多人会话会采用参与角色中最保守的对话档位；连接权限按实际执行角色检查。</span><button className="primary-button" type="button" disabled={saving || (runtimePermissionMode === 'danger-full-access' && !confirmedFullAccess)} onClick={() => void onRevise({ reason: '更新角色权限', skillGrants: skills, capabilityGrants: splitList(capabilities), connectionGrants: connections, modelPolicy: currentRevision?.modelPolicy ?? {}, runtimePermissionMode, confirmedFullAccess })}>{saving ? '正在保存…' : '保存权限'}</button></footer>
           </section> : null}
 

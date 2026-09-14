@@ -1,8 +1,7 @@
 import { X } from '@phosphor-icons/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CreativeWorkshopDraftV1, ModelProfile, WorldTemplateManifest } from '@dsh-cyber/contracts'
+import type { CreativeWorkshopDraftV1, ModelProfile, SkillCatalogEntry, WorldTemplateManifest } from '@dsh-cyber/contracts'
 import type {
-  CharacterSkillDescriptor,
   EmbodimentPresetDescriptor,
   WorkshopProjectView,
 } from '@dsh-cyber/contracts/creative-platform'
@@ -37,7 +36,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
   const [projects, setProjects] = useState<WorkshopProjectView[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string>()
   const [templates, setTemplates] = useState<WorldTemplateManifest[]>([])
-  const [skills, setSkills] = useState<CharacterSkillDescriptor[]>([])
+  const [skills, setSkills] = useState<SkillCatalogEntry[]>([])
   const [presets, setPresets] = useState<EmbodimentPresetDescriptor[]>([])
   const [models, setModels] = useState<ModelProfile[]>([])
   const [draft, setDraft] = useState<WorkshopDraft>()
@@ -55,7 +54,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
     void Promise.all([
       api<{ items: WorldTemplateManifest[] }>('/api/catalog/world-templates'),
       api<{ items: EmbodimentPresetDescriptor[] }>('/api/catalog/embodiment-presets'),
-      api<{ items: CharacterSkillDescriptor[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/skill-catalog`),
+      api<{ items: SkillCatalogEntry[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/skill-catalog`),
       api<{ items: WorkshopProjectView[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`),
       api<{ draft?: CreativeWorkshopDraftV1 }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/draft`),
       api<{ items: ModelProfile[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/model-profiles`),

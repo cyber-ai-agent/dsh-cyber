@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
+import { attachAppConsoleRecorder } from './console-test-helpers.js'
 import { openDockTab } from './dock-test-helpers.js'
 
 let server: CyberServer | undefined
@@ -31,10 +32,7 @@ test.afterAll(async () => {
 
 test('uses real world Catalog, revision persistence, availability gates and an approval-backed SkillAction', async ({ page }) => {
   const consoleIssues: string[] = []
-  page.on('console', (message) => {
-    if (message.type() === 'error' || message.type() === 'warning') consoleIssues.push(`[console:${message.type()}] ${message.text()}`)
-  })
-  page.on('pageerror', (error) => consoleIssues.push(`[pageerror] ${error.message}`))
+  attachAppConsoleRecorder(page, consoleIssues)
   const current = requireServer()
   const workspace = current.store.listWorkspaces()[0]!
   const worldA = current.store.listWorlds(workspace.id)[0]!
@@ -70,7 +68,7 @@ test('uses real world Catalog, revision persistence, availability gates and an a
   await openDockTab(dock, '角色')
   await dock.getByRole('article').first().getByRole('button', { name: `管理${employee.displayName}` }).click()
   const management = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${employee.displayName}`) })
-  await management.getByRole('tab', { name: '技能与工具' }).click()
+  await management.getByRole('tab', { name: '技能' }).click()
   const firecrawlGrant = management.locator('.skill-grant-row').filter({ hasText: '联网搜索' }).getByRole('checkbox')
   await expect(firecrawlGrant).toBeVisible()
   await expect(firecrawlGrant).toBeEnabled()
@@ -91,7 +89,7 @@ test('uses real world Catalog, revision persistence, availability gates and an a
     }))).toEqual({ noHorizontalOverflow: true, readableText: true, usableControls: true })
     await page.screenshot({ path: join(screenshotRoot, `skill-catalog-${viewport.label}.png`), fullPage: false })
   }
-  await management.getByRole('button', { name: '保存能力与连接设置' }).click()
+  await management.getByRole('button', { name: '保存角色技能' }).click()
   await expect(management).toBeHidden()
 
   const savedRevision = current.store.getEmployeeRevision(employee.id, current.store.getEmployee(employee.id)!.currentRevision)
@@ -104,7 +102,7 @@ test('uses real world Catalog, revision persistence, availability gates and an a
   await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '角色')
   await page.getByRole('region', { name: '世界与角色侧边栏' }).getByRole('article').first().getByRole('button', { name: `管理${employee.displayName}` }).click()
   const refreshedManagement = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${employee.displayName}`) })
-  await refreshedManagement.getByRole('tab', { name: '技能与工具' }).click()
+  await refreshedManagement.getByRole('tab', { name: '技能' }).click()
   await expect(refreshedManagement.locator('.skill-grant-row').filter({ hasText: '联网搜索' }).getByRole('checkbox')).toBeChecked()
   await refreshedManagement.getByRole('button', { name: '关闭角色设置' }).click()
 

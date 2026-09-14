@@ -267,6 +267,22 @@ describe('SkillApprovalGroup (recruitment, service-level)', () => {
     }))
     expect(html).not.toContain('MCP · 文档检索')
   })
+
+  it('collapses requested entrypoints from one Skill package into one row', () => {
+    const packageItems: SkillCatalogEntry[] = [
+      { ...catalogEntry({ id: 'browser.open', displayName: '浏览器打开网页', source: 'plugin', adapterId: 'builtin.browser', kind: 'integration' }), packageId: 'official-browser', packageVersion: '1.0.1', skillPackage: { id: 'official-browser', version: '1.0.1', displayName: '只读网页浏览', summary: '只读浏览能力包。' } },
+      { ...catalogEntry({ id: 'browser.read', displayName: '浏览器读取网页', source: 'plugin', adapterId: 'builtin.browser', kind: 'integration' }), packageId: 'official-browser', packageVersion: '1.0.1', skillPackage: { id: 'official-browser', version: '1.0.1', displayName: '只读网页浏览', summary: '只读浏览能力包。' } },
+    ]
+    const html = renderToStaticMarkup(createElement(SkillApprovalGroup, {
+      requested: ['browser.open', 'browser.read'],
+      descriptors: packageItems,
+      selected: [],
+      onChange: vi.fn(),
+    }))
+    expect(html).toContain('只读网页浏览')
+    expect(html).toContain('查看组成（2 项）')
+    expect(html.match(/<strong>只读网页浏览<\/strong>/g)).toHaveLength(1)
+  })
 })
 
 describe('WorkshopSkillPicker (service-level requests)', () => {
@@ -295,7 +311,7 @@ describe('WorkshopSkillPicker (service-level requests)', () => {
       onChange: vi.fn(),
     }))
     expect(html).toContain('MCP · dead')
-    expect(html).toContain('取消勾选可移除对应的技能请求')
+    expect(html).toContain('取消勾选可移除保留的请求')
   })
 
   it('filters both the service rows and the flat rows by the search query', () => {

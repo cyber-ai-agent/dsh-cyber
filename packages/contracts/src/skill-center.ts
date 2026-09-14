@@ -1,6 +1,6 @@
 import type { CharacterSourceInput } from './character-generator.js'
 import type { CyberMarketPackage, IsoTimestamp } from './index.js'
-import type { SkillCatalogEntry } from './skill-runtime.js'
+import type { SkillCatalogEntry, SkillDependency } from './skill-runtime.js'
 
 export type SkillSettingsScope = 'workspace' | 'world'
 
@@ -53,6 +53,8 @@ export interface SkillAuthoringDraft {
   summary: string
   routingHints: string[]
   integrationId: 'builtin.recipe'
+  /** Connections or Skills needed by the authored declaration. */
+  dependencies?: SkillDependency[]
   dataEgress: []
   instructions: string
   sourceSummary: string

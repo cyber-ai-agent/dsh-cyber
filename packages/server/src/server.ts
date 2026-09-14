@@ -456,7 +456,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates, environments })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
-  composeGenerators({ store, credentials, skillCatalog, packageCatalog, marketplace: generatedMarketplace, overrides: options }).registerGeneratorRoutes(router)
+  composeGenerators({ store, credentials, skillCatalog, packageCatalog, packageManager, worldPackages, worldAccess, marketplace: generatedMarketplace, overrides: options }).registerGeneratorRoutes(router)
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
   registerModelHubRoutes(router, { store, credentials, modelCatalog, providerCatalog: modelHub.providerCatalog, balance: modelHub.balance, probe: modelHub.probe })

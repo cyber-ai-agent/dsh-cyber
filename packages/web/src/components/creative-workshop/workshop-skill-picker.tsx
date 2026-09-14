@@ -1,27 +1,27 @@
 import { useEffect, useMemo, useRef } from 'react'
-import type { CharacterSkillDescriptor } from '@dsh-cyber/contracts/creative-platform'
 import {
-  groupMcpServicesFromItems,
-  mcpServiceChecked,
-  mcpServiceToggle,
+  groupSearchText,
+  groupSkillItems,
+  skillEntityMemberLabel,
+  skillEntitySelectionState,
+  toggleSkillEntity,
   toggleSkillIdInList,
-  type McpServiceGroup,
-  type McpServiceTool,
-} from '../mcp-skill-grouping.js'
+  type SkillEntityDescriptor,
+  type SkillEntityGroup,
+} from '../skill-entity-grouping.js'
 import { useI18n } from '../../i18n/runtime.js'
 
 /**
- * The workshop's per-role skill picker with service-level MCP aggregation.
+ * The workshop's per-role Skill picker with service- and package-level aggregation.
  *
  * One "MCP · <connection name>" row stands for every tool of that service:
  * checking the row requests the whole service, unchecking removes the whole
  * service, and the expandable tool list still allows per-tool requests.
- * Non-MCP skills keep the flat one-row-per-skill layout. `value` is the
- * role's `requestedSkillIds` — requests only; grants are produced later by
- * the recruitment/revision flow.
+ * `value` is the role's `requestedSkillIds` — requests only; grants are
+ * produced later by the recruitment/revision flow.
  */
 export function WorkshopSkillPicker({ skills, value, query, onChange }: {
-  skills: CharacterSkillDescriptor[]
+  skills: SkillEntityDescriptor[]
   value: string[]
   query: string
   onChange(next: string[]): void
@@ -29,72 +29,67 @@ export function WorkshopSkillPicker({ skills, value, query, onChange }: {
   const { t } = useI18n()
   const trimmedQuery = query.trim().toLocaleLowerCase()
   const skillById = useMemo(() => new Map(skills.map((skill) => [skill.id, skill])), [skills])
-  const groups = useMemo(() => groupMcpServicesFromItems(skills, value, value), [skills, value])
-  const skillMatches = (skill: CharacterSkillDescriptor): boolean =>
-    trimmedQuery === '' || `${skill.displayName} ${skill.summary} ${skill.id}`.toLocaleLowerCase().includes(trimmedQuery)
-  const flatSkills = skills.filter((skill) => skill.mcpService === undefined && skillMatches(skill))
-  const serviceRows: { group: McpServiceGroup; tools: McpServiceTool[] }[] = []
-  for (const group of groups) {
-    const serviceMatches = trimmedQuery === '' || `MCP · ${group.label} ${group.serviceId}`.toLocaleLowerCase().includes(trimmedQuery)
-    const tools = serviceMatches
-      ? group.tools
-      : group.tools.filter((tool) => {
-        const descriptor = skillById.get(tool.id)
-        return descriptor !== undefined && skillMatches(descriptor)
-      })
-    // A dead service (tools gone, requests still held) stays revocable when
-    // not searching.
-    const deadOrphan = group.tools.length === 0 && group.grantedIds.length > 0
-    if (tools.length > 0 || (trimmedQuery === '' && deadOrphan)) serviceRows.push({ group, tools })
-  }
-  if (serviceRows.length === 0 && flatSkills.length === 0) {
+  const staleMcpItems = value
+    .filter((id) => !skillById.has(id) && id.startsWith('mcp.'))
+    .map((id): SkillEntityDescriptor => {
+      const tail = id.slice('mcp.'.length)
+      const dot = tail.indexOf('.')
+      const service = dot > 0 ? tail.slice(0, dot) : tail
+      return {
+        id,
+        displayName: `MCP 工具 · ${tail}`,
+        summary: '该 MCP 工具请求当前没有匹配的目录项。',
+        adapterId: 'builtin.mcp',
+        risks: ['external-side-effect'],
+        supportsScheduling: false,
+        persistentApproval: 'forbidden',
+        kind: 'integration',
+        mcpService: { id: service, label: service },
+        source: 'mcp',
+        worldAvailable: false,
+        availability: 'unavailable',
+      }
+    })
+  const groups = useMemo(() => groupSkillItems([...skills, ...staleMcpItems]), [skills, staleMcpItems])
+  const visibleGroups = groups.filter((group) => trimmedQuery === '' || groupSearchText(group).includes(trimmedQuery))
+  if (visibleGroups.length === 0) {
     return <div className="dialog-empty">{t('workshop.permissions.noMatches', '没有匹配的技能。')}</div>
   }
   return <div className="creative-workshop-skill-catalog">
-    {serviceRows.map(({ group, tools }) => <McpServicePickerRow key={`mcp-service-${group.serviceId}`} group={group} tools={tools} value={value} onChange={onChange} />)}
-    {flatSkills.map((skill) => {
-      const selected = value.includes(skill.id)
-      return <label key={skill.id} className={selected ? 'is-selected' : ''}>
-        <input type="checkbox" checked={selected} onChange={(event) => onChange(toggleSkillIdInList(value, skill.id, event.target.checked))} />
-        <span><strong>{skill.displayName}</strong><small>{skill.summary}</small><em>{skill.kind === 'integration' ? t('workshop.permissions.external', '外部连接') : t('workshop.permissions.method', '工作方法')} · {riskLabel(skill, t)}</em></span>
-      </label>
-    })}
+    {visibleGroups.map((group) => <SkillEntityPickerRow key={group.key} group={group} value={value} onChange={onChange} t={t} />)}
   </div>
 }
 
-function McpServicePickerRow({ group, tools, value, onChange }: {
-  group: McpServiceGroup
-  tools: McpServiceTool[]
+function SkillEntityPickerRow({ group, value, onChange, t }: {
+  group: SkillEntityGroup<SkillEntityDescriptor>
   value: string[]
   onChange(next: string[]): void
+  t: ReturnType<typeof useI18n>['t']
 }) {
-  const { t } = useI18n()
-  const { checked, indeterminate } = mcpServiceChecked(group, value)
+  const { checked, indeterminate, selectedCount } = skillEntitySelectionState(group, value)
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (inputRef.current !== null) inputRef.current.indeterminate = indeterminate
   }, [indeterminate])
-  const dead = group.tools.length === 0
-  return <div className={`creative-workshop-skill-catalog__mcp-service${checked ? ' is-selected' : ''}${dead ? ' is-unavailable' : ''}`}>
-    <input ref={inputRef} type="checkbox" aria-label={t('workshop.permissions.mcpServiceAria', 'MCP 服务 {name}', { name: group.label })} checked={checked} onChange={(event) => onChange(mcpServiceToggle(group, value, event.target.checked))} />
+  const dead = group.availableIds.length === 0
+  const isMcp = group.kind === 'mcp-service'
+  const isPackage = group.kind === 'skill-package'
+  const label = group.displayName
+  const countLabel = isMcp ? t('workshop.permissions.mcpServiceTools', '{count} 个工具', { count: group.entries.length }) : t('workshop.permissions.skillPackageMembers', '{count} 项能力', { count: group.entries.length })
+  return <div className={`creative-workshop-skill-catalog__entity${isMcp ? ' creative-workshop-skill-catalog__mcp-service' : ''}${checked || selectedCount > 0 ? ' is-selected' : ''}${dead ? ' is-unavailable' : ''}`}>
+    <input ref={inputRef} type="checkbox" aria-label={isMcp ? t('workshop.permissions.mcpServiceAria', 'MCP 服务 {name}', { name: group.mcpService?.label ?? label }) : isPackage ? t('workshop.permissions.skillPackageAria', '技能包 {name}', { name: label }) : t('workshop.permissions.skillAria', '技能 {name}', { name: label })} checked={checked} disabled={dead && selectedCount === 0} onChange={(event) => onChange(toggleSkillEntity(group, value, event.target.checked))} />
     <span>
-      <strong>{t('workshop.permissions.mcpServiceLabel', 'MCP · {name}', { name: group.label })}</strong>
+      <strong>{label}</strong>
       <small>{dead
-        ? t('workshop.permissions.mcpServiceDeadHint', '该 MCP 服务当前不可用（连接未配置、已停用或不可达）。取消勾选可移除对应的技能请求。')
-        : t('workshop.permissions.mcpServiceHint', '共 {count} 个工具 · 外部操作需审批。勾选即请求该 MCP 服务下的全部工具；授权仍由角色创建后的 Skill 授权决定。', { count: group.tools.length })}</small>
-      {dead ? null : <details className="creative-workshop-skill-catalog__mcp-tools"><summary>{t('workshop.permissions.mcpServiceTools', '{count} 个工具', { count: tools.length })}</summary><div>{tools.map((tool) => {
-        const selected = value.includes(tool.id)
-        return <label key={tool.id} className={selected ? 'is-selected' : ''}>
-          <input type="checkbox" checked={selected} onChange={(event) => onChange(toggleSkillIdInList(value, tool.id, event.target.checked))} />
-          <span><code>{tool.name}</code><em>{t('workshop.permissions.riskExternal', '外部操作需审批')}</em></span>
+        ? t('workshop.permissions.mcpServiceDeadHint', '该技能当前不可用。取消勾选可移除保留的请求。')
+        : isMcp ? t('workshop.permissions.mcpServiceHint', '共 {count} 个工具 · 外部操作需审批。勾选即请求该服务下的全部工具；授权仍由角色创建后的 Skill 授权决定。', { count: group.entries.length }) : isPackage ? t('workshop.permissions.skillPackageHint', '技能包中的多个入口归属于同一个 Skill，可整体请求并按入口查看。', {}) : t('workshop.permissions.skillHint', '这项 Skill 可直接请求，授权仍由角色创建后的 Skill 授权决定。', {})}</small>
+      {group.entries.length <= 1 ? null : <details className="creative-workshop-skill-catalog__mcp-tools"><summary>{countLabel}</summary><div>{group.entries.map((item) => {
+        const selected = value.includes(item.id)
+        return <label key={item.id} className={selected ? 'is-selected' : ''}>
+          <input type="checkbox" checked={selected} disabled={item.worldAvailable === false || item.availability === 'unavailable'} onChange={(event) => onChange(toggleSkillIdInList(value, item.id, event.target.checked))} />
+          <span><code>{skillEntityMemberLabel(group, item)}</code><em>{item.kind === 'integration' ? t('workshop.permissions.riskExternal', '外部操作需审批') : t('workshop.permissions.method', '工作方法')}</em></span>
         </label>
       })}</div></details>}
     </span>
   </div>
-}
-
-function riskLabel(skill: CharacterSkillDescriptor, t: ReturnType<typeof useI18n>['t']): string {
-  if (skill.risks.includes('external-side-effect')) return t('workshop.permissions.riskExternal', '外部操作需审批')
-  if (skill.risks.includes('write-local')) return t('workshop.permissions.riskWrite', '可写当前世界')
-  return t('workshop.permissions.riskRead', '只读')
 }

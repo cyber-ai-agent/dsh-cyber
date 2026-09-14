@@ -22,6 +22,22 @@ export type SkillAuthorizationSource = 'skill-grant' | 'world-authority'
 export type SkillActionExecutionState = 'approved-ready' | 'executing' | 'settled'
 export type PersistentApprovalCapability = 'forbidden' | 'exact-target'
 
+/** Declarative dependency kinds a Skill may require from the host. */
+export type SkillDependencyKind = 'integration' | 'skill'
+
+/**
+ * A provider-neutral dependency declaration.
+ *
+ * Integration ids are resolved by the host's Connection Hub. Skill ids allow
+ * a future Skill to compose another Skill without copying its implementation.
+ * `required` defaults to true when omitted by older declarations.
+ */
+export interface SkillDependency {
+  kind: SkillDependencyKind
+  id: string
+  required?: boolean
+}
+
 /**
  * Durable, provider-neutral representation of one concrete Skill side effect.
  *
@@ -79,6 +95,8 @@ export interface CharacterSkillDescriptor {
   adapterId: string
   /** Optional immutable package binding for integration capabilities. */
   packageId?: string
+  /** Host capabilities or connection types required by this Skill. */
+  dependencies?: SkillDependency[]
   risks: SkillActionRisk[]
   supportsScheduling: boolean
   /** Whether a one-time decision may create a reusable exact-target policy. */
@@ -133,4 +151,11 @@ export interface SkillCatalogEntry extends CharacterSkillDescriptor {
   availability: SkillCatalogAvailability
   packageId?: string
   packageVersion?: string
+  /** User-facing identity of the package that groups one or more entrypoints. */
+  skillPackage?: {
+    id: string
+    version: string
+    displayName: string
+    summary: string
+  }
 }

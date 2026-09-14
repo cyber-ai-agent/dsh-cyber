@@ -40,7 +40,25 @@ export async function compileSkillPackage(input: { sourceDirectory: string; pack
 }
 
 function skillMarkdown(skill: ReturnType<typeof parseSkillManifest>): string {
-  return [`# ${skill.displayName}`, '', skill.summary, '', '## 使用说明', '', skill.instructions, '', '## 触发提示', '', ...(skill.routingHints ?? []).map((item) => `- ${item}`), ''].join('\n')
+  return [
+    `# ${skill.displayName}`,
+    '',
+    skill.summary,
+    '',
+    '## 使用说明',
+    '',
+    skill.instructions,
+    '',
+    '## 依赖',
+    '',
+    ...(skill.dependencies ?? []).map((item) => `- ${item.kind}: ${item.id}${item.required === false ? '（可选）' : ''}`),
+    ...(skill.dependencies?.length === 0 || skill.dependencies === undefined ? ['- 无'] : []),
+    '',
+    '## 触发提示',
+    '',
+    ...(skill.routingHints ?? []).map((item) => `- ${item}`),
+    '',
+  ].join('\n')
 }
 function jsonBytes(value: unknown): Buffer { return Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8') }
 function sha256(value: Buffer): string { return createHash('sha256').update(value).digest('hex') }

@@ -1569,6 +1569,8 @@ export type {
   SkillCatalogScope,
   SkillCatalogSource,
   PersistentApprovalCapability,
+  SkillDependency,
+  SkillDependencyKind,
 } from './skill-runtime.js'
 
 export { parseModelStatsQuery, ModelStatsQueryError } from './model-stats-query.js'

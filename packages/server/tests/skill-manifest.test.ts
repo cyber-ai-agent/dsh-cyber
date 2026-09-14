@@ -42,6 +42,30 @@ describe('skill manifest', () => {
     })).toThrow()
   })
 
+  it('parses explicit integration and Skill dependencies', () => {
+    expect(parseSkillManifest({ ...valid, dependencies: [
+      { kind: 'integration', id: 'builtin.firecrawl', required: true },
+      { kind: 'skill', id: 'custom.normalize', required: false },
+    ] }, {
+      packageId: 'official-firecrawl-search',
+      entrypointId: valid.id,
+    }).dependencies).toEqual([
+      { kind: 'integration', id: 'builtin.firecrawl', required: true },
+      { kind: 'skill', id: 'custom.normalize', required: false },
+    ])
+  })
+
+  it.each([
+    ['unknown dependency field', [{ kind: 'integration', id: 'builtin.firecrawl', extra: true }]],
+    ['duplicate dependency', [{ kind: 'integration', id: 'builtin.firecrawl' }, { kind: 'integration', id: 'builtin.firecrawl' }]],
+    ['invalid dependency kind', [{ kind: 'connection', id: 'builtin.firecrawl' }]],
+  ])('rejects %s', (_name, dependencies) => {
+    expect(() => parseSkillManifest({ ...valid, dependencies }, {
+      packageId: 'official-firecrawl-search',
+      entrypointId: valid.id,
+    })).toThrow()
+  })
+
   it('validates a staged skill entrypoint before package activation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-skill-manifest-stage-'))
     try {
