@@ -19,6 +19,18 @@ Skill Recipe 是经过宿主审核的声明式工作方法，只包含名称、�
 
 角色设置中的“技能”只处理 Skill 引用。连接凭据与连接选择进入“权限 → 连接权限”，两类状态各自保存、在执行边界同时校验。
 
+### 管理中心结构
+
+技能中心沿用模型中心与连接中心的统一外壳，并保留可扩展的顶层栏目：
+
+- **技能列表**：按来源查看全部技能；选择技能后展示软件包文件树和有界文本内容。内置、官方和连接发现技能保持只读；技能中心生成的技能通过“编辑技能”发布不可变新版本。
+- **技能设置**：左侧选择全局或任一世界，右侧勾选 Skill；支持全部勾选。全局设置是各世界的默认集合，世界可以保存精确覆盖或恢复跟随全局。
+- **添加技能**：导入普通 `kind=skill` 软件包，或用默认模型把自然语言工作方法撰写/优化为声明式 Skill Recipe。
+
+技能范围保存在 SQLite `skill_scope_settings`。范围只保存 Skill ID 数组；Skill 定义、说明与文件仍来自宿主 Registry 或已安装包。旧数据缺少范围记录时继续采用原有可用集合，首次保存后进入显式范围模式。
+
+用户撰写的 Recipe 固定使用 `integrationId=builtin.recipe`、空 `dataEgress` 和 `skill:recipe` 包能力。发布产物包含 `skill.json`、`SKILL.md` 和来源审计文件；编辑会递增补丁版本并经过 PackageManager 预览、安装、世界实例化与回退边界。模型只生成待审草稿，包 ID、版本、能力、入口路径和数据外发声明由宿主确定。
+
 这一设计参考了开放 Agent Skills 生态的渐进加载方式，包括 [OpenAI Skills](https://github.com/openai/skills)、[Anthropic Skills](https://github.com/anthropics/skills) 和 [Microsoft Agent Skills](https://github.com/microsoft/skills)。DSH Cyber 只吸收可移植的声明式结构，不直接执行第三方 Skill 中携带的脚本。
 
 ## Integration Registry

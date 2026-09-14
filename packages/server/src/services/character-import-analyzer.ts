@@ -167,8 +167,8 @@ export class CharacterImportAnalyzer implements CharacterImportAnalyzerPort {
  * noun in the message differ; the validation is the same trust boundary.
  */
 export interface ImportSourceSubject {
-  /** Error code prefix: `character`, `world`, `skin` or `plugin`. */
-  code: 'character' | 'world' | 'skin' | 'plugin'
+  /** Error code prefix identifying the generator boundary. */
+  code: 'character' | 'world' | 'skin' | 'plugin' | 'skill'
   /** Noun used in user-facing messages. */
   noun: string
 }

@@ -17,6 +17,8 @@ export interface WorldSkillAvailabilityPort {
   isAvailable(input: WorldSkillAvailabilityInput): boolean | Promise<boolean>
   /** Optional batch seam so catalog providers can scan a World once per turn. */
   availableSkillIds?(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): readonly string[] | Promise<readonly string[]>
+  /** Package-authored declarative recipes loaded by the current World. */
+  instructionsForWorld?(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): readonly string[] | Promise<readonly string[]>
 }
 
 export async function unavailableWorldSkillIds(

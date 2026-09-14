@@ -11,7 +11,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator, type GroupTurnPlannerPort } from '@dsh-cyber/orchestration'
 import type { PackageManager, PackageRuntimePort } from '@dsh-cyber/package-runtime'
-import { SqliteStore, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
+import { SkillScopeSettingsRepository, SqliteStore, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
 import { dispatchHttpRequest } from './http/context.js'
 import { assertApplicationAccess } from './http/application-access-guard.js'
 import { writeError } from './http/errors.js'
@@ -114,7 +114,7 @@ import type { CharacterSkillActionRepository } from './skills/skill-action-repos
 import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import type { WorldSkillAvailabilityPort } from './services/world-skill-availability.js'
 import type { CreativeWorkshopDraftGeneratorPort } from './services/creative-workshop-draft-generator.js'
-import { composeGenerators, type CharacterImportAnalyzerPort, type PluginImportAnalyzerPort, type SkinImportAnalyzerPort, type WorldImportAnalyzerPort } from './composition/compose-generators.js'
+import { composeGenerators, type CharacterImportAnalyzerPort, type PluginImportAnalyzerPort, type SkillAuthoringAnalyzerPort, type SkinImportAnalyzerPort, type WorldImportAnalyzerPort } from './composition/compose-generators.js'
 import { composeCharacterGeneratorMarketplace } from './services/character-generator-marketplace.js'
 import { createWorldManagementHost } from './skills/world-management-host.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
@@ -154,8 +154,7 @@ export interface CyberServerOptions {
   worldImportAnalyzer?: WorldImportAnalyzerPort
   /** Skin Generator analyzer; tests and CI pass a deterministic stub. */
   skinImportAnalyzer?: SkinImportAnalyzerPort
-  /** Plugin Generator analyzer; tests and CI pass a deterministic stub. */
-  pluginImportAnalyzer?: PluginImportAnalyzerPort
+  /** Generator analyzers; tests and CI may pass deterministic stubs. */ pluginImportAnalyzer?: PluginImportAnalyzerPort; skillAuthoringAnalyzer?: SkillAuthoringAnalyzerPort
   /**
    * Decides the speaking roster of a group turn.
    *
@@ -297,7 +296,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   })
   const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients, connectionGrantsFor }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
-  const skillCatalog = new SkillCatalogService({ store, registry: skillRegistry, worldPackages })
+  const skillScopes = new SkillScopeSettingsRepository(store.database); const skillCatalog = new SkillCatalogService({ store, registry: skillRegistry, worldPackages, scopeSettings: skillScopes })
   // Production uses the derived World Catalog by default; tests and legacy embedders may inject a narrower port explicitly.
   const skillAvailability = options.skillAvailability ?? skillCatalog
 
