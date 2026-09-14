@@ -29,8 +29,27 @@ test('opens the connection hub from the top bar, adds an SSH device, and edits w
   await hubButton.click()
   const hub = page.getByRole('dialog', { name: '连接中心' })
   await expect(hub).toBeVisible()
-  // SSH type is listed; selecting it shows the editor
+  // SSH type is listed; selecting it shows a clean card list with no editor yet.
   await hub.getByRole('button', { name: /SSH 设备/ }).click()
+  const list = hub.locator('.integration-connection-list')
+  await expect(hub.locator('.integration-editor')).toBeHidden()
+  // Visual gate: the clean card-list state (no editor) at all three viewports.
+  const sshCleanRoot = join(process.cwd(), 'artifacts', 'connection-hub-clean-ssh')
+  const { mkdir } = await import('node:fs/promises')
+  await mkdir(sshCleanRoot, { recursive: true })
+  for (const viewport of [
+    { width: 1_440, height: 900, label: '1440x900' },
+    { width: 1_920, height: 1_080, label: '1920x1080' },
+    { width: 3_840, height: 2_160, label: '3840x2160' },
+  ]) {
+    await page.setViewportSize(viewport)
+    await expect(hub).toBeVisible()
+    await expect(hub.locator('.integration-editor')).toBeHidden()
+    await page.screenshot({ path: join(sshCleanRoot, `ssh-clean-${viewport.label}.png`) })
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  // Opening the add action reveals the editor below the list.
+  await list.getByRole('button', { name: /添加SSH 设备/ }).click()
   await expect(hub.getByRole('heading', { name: /SSH 设备/ })).toBeVisible()
   // Fill the add-connection form fields (device name, host, user) via labels.
   await hub.getByLabel('设备名称').fill('测试主机')
@@ -42,6 +61,30 @@ test('opens the connection hub from the top bar, adds an SSH device, and edits w
   await hub.getByLabel('登录密码').fill('passw0rd-demo')
   await hub.getByRole('button', { name: '添加连接' }).click()
   await expect(hub.getByRole('button', { name: /测试主机/ })).toBeVisible()
+  // A card click toggles the editor: first click opens it, second click collapses it.
+  await hub.getByRole('button', { name: /测试主机/ }).click()
+  await expect(hub.locator('.integration-editor')).toBeVisible()
+  // Reference shot: the open state (active card + editor below) for visual review.
+  const cardStateRoot = join(process.cwd(), 'artifacts', 'connection-hub-card-state')
+  const { mkdir: mkdirCardState } = await import('node:fs/promises')
+  await mkdirCardState(cardStateRoot, { recursive: true })
+  await page.screenshot({ path: join(cardStateRoot, 'card-expanded-1440x900.png') })
+  await hub.getByRole('button', { name: /测试主机/ }).click()
+  await expect(hub.locator('.integration-editor')).toBeHidden()
+  // The card's right-edge switch flips 启用/停用 and persists it to the server.
+  const card = hub.locator('.integration-connection-card').filter({ hasText: '测试主机' })
+  const cardToggle = card.locator('.integration-connection-card__enable input')
+  await cardToggle.uncheck()
+  await expect(cardToggle).toBeChecked({ checked: false })
+  await expect(card).toContainText('已停用')
+  await cardToggle.check()
+  await expect(cardToggle).toBeChecked()
+  await expect(card).not.toContainText('已停用')
+  // Layout guard: the 启用 switch sits on the card's right edge, right of the name.
+  const nameBox = await hub.getByRole('button', { name: /测试主机/ }).boundingBox()
+  const toggleBox = await cardToggle.boundingBox()
+  expect(nameBox).not.toBeNull(); expect(toggleBox).not.toBeNull()
+  expect(toggleBox!.x).toBeGreaterThan(nameBox!.x + nameBox!.width / 2)
   // Confirm the secrets stayed out of the page and API listing.
   expect(await page.locator('body').innerText()).not.toContain('BEGIN OPENSSH')
   expect(await page.locator('body').innerText()).not.toContain('passw0rd-demo')
@@ -85,6 +128,8 @@ test('lets a role authorize a hub SSH device from 角色设置 连接授权 and 
   await hubButton.click()
   const hub = page.getByRole('dialog', { name: '连接中心' })
   await hub.getByRole('button', { name: /SSH 设备/ }).click()
+  // The multi-connection list is clean by default; open the add editor first.
+  await hub.locator('.integration-connection-list').getByRole('button', { name: /添加SSH 设备/ }).click()
   await hub.getByLabel('设备名称').fill('授权设备')
   await hub.getByLabel('主机地址').fill('192.168.7.20')
   await hub.getByLabel('登录用户').fill('ops')
@@ -146,6 +191,76 @@ test('lets a role authorize a hub SSH device from 角色设置 连接授权 and 
   await refreshed.getByRole('button', { name: '关闭角色设置' }).click()
   await writeConsole(info, consoleIssues)
   expect(consoleIssues).toEqual([])
+})
+
+test('adds several MCP services under MCP 连接 and keeps the service slug unique per workspace', async ({ page }, info) => {
+  const consoleIssues: string[] = []; attachAppConsoleRecorder(page, consoleIssues)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(origin)
+  const hubButton = page.getByRole('button', { name: '连接中心', exact: true })
+  await expect(hubButton).toBeVisible()
+  await hubButton.click()
+  const hub = page.getByRole('dialog', { name: '连接中心' })
+  await expect(hub).toBeVisible()
+  // The MCP rail item is now a multi-connection type, labelled 「MCP 连接」.
+  await hub.locator('.integration-provider-list').getByRole('button', { name: /MCP 连接/ }).click()
+  const list = hub.locator('.integration-connection-list')
+  // The multi-connection list starts clean: no editor until a card or add is opened.
+  await expect(hub.locator('.integration-editor')).toBeHidden()
+  // Visual gate: the clean card-list state (no editor) at all three viewports.
+  const mcpCleanRoot = join(process.cwd(), 'artifacts', 'connection-hub-clean-mcp')
+  const { mkdir: mkdirMcp } = await import('node:fs/promises')
+  await mkdirMcp(mcpCleanRoot, { recursive: true })
+  for (const viewport of [
+    { width: 1_440, height: 900, label: '1440x900' },
+    { width: 1_920, height: 1_080, label: '1920x1080' },
+    { width: 3_840, height: 2_160, label: '3840x2160' },
+  ]) {
+    await page.setViewportSize(viewport)
+    await expect(hub).toBeVisible()
+    await expect(hub.locator('.integration-editor')).toBeHidden()
+    await page.screenshot({ path: join(mcpCleanRoot, `mcp-clean-${viewport.label}.png`) })
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  const addService = async (service: string, endpoint: string, name: string): Promise<void> => {
+    await list.getByRole('button', { name: /添加MCP 连接/ }).click()
+    await hub.getByLabel('服务标识').fill(service)
+    await hub.getByLabel('MCP 地址').fill(endpoint)
+    await hub.getByLabel('连接名称').fill(name)
+    await hub.getByRole('button', { name: '添加连接', exact: true }).click()
+  }
+
+  await addService('github', 'http://127.0.0.1:3900/mcp', 'GitHub MCP')
+  await expect(list.getByRole('button', { name: /GitHub MCP/ })).toBeVisible()
+  await addService('linear', 'http://127.0.0.1:3901/mcp', 'Linear MCP')
+  await expect(list.getByRole('button', { name: /Linear MCP/ })).toBeVisible()
+  await expect(list.getByRole('button', { name: /github/ })).toBeVisible()
+  await expect(list.getByRole('button', { name: /linear/ })).toBeVisible()
+
+  // A duplicate service slug is rejected at the boundary with a clear message.
+  await addService('github', 'http://127.0.0.1:3902/mcp', 'Dup MCP')
+  await expect(hub.getByText(/MCP 服务标识「github」/)).toBeVisible()
+  // Both saved services expose the 启用 switch on the card's right edge.
+  await expect(list.locator('.integration-connection-card__enable input')).toHaveCount(2)
+
+  // The two services stay out of the page's secrets: no token leaks.
+  expect(await page.locator('body').innerText()).not.toContain('mcp-secret-bearer')
+  for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 }]) {
+    await page.setViewportSize(size)
+    await expect(hub).toBeVisible()
+    const bounds = await hub.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(size.width)
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(size.height)
+    await page.screenshot({ path: info.outputPath(`connection-hub-mcp-${size.width}x${size.height}.png`) })
+  }
+  // The duplicate slug was rejected at the boundary: the only console noise is
+  // that expected 409. Anything else must stay clean.
+  await page.getByRole('button', { name: '关闭连接中心' }).click()
+  await writeConsole(info, consoleIssues)
+  expect(consoleIssues.filter((issue) => issue.includes('409 (Conflict)')).length).toBeGreaterThan(0)
+  expect(consoleIssues.filter((issue) => !issue.includes('409 (Conflict)'))).toEqual([])
 })
 
 async function getJson<T>(path: string): Promise<T> {

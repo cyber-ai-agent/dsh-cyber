@@ -125,7 +125,7 @@ export function EmployeeManagementDialog({ employee, profile, profileHistory = [
   const saveAbilities = async () => {
     if (!role.trim() || !persona.trim() || saving) return
     await onRevise({
-      reason: '更新角色能力与连接授权',
+      reason: '更新角色技能引用',
       persona: composeCharacterPersona(runtimeProfile()),
       skillGrants: skills,
       capabilityGrants: splitList(capabilities),
@@ -145,8 +145,8 @@ export function EmployeeManagementDialog({ employee, profile, profileHistory = [
         <nav className="employee-settings-nav" role="tablist" aria-label="角色设置栏目">
           <button type="button" role="tab" aria-selected={activeSection === 'profile'} className={activeSection === 'profile' ? 'is-active' : ''} onClick={() => setActiveSection('profile')}><IdentificationCard size={16} /><span>身份资料</span></button>
           <button type="button" role="tab" aria-selected={activeSection === 'behavior'} className={activeSection === 'behavior' ? 'is-active' : ''} onClick={() => setActiveSection('behavior')}><Sparkle size={16} /><span>行为方式</span></button>
-          <button type="button" role="tab" aria-selected={activeSection === 'abilities'} className={activeSection === 'abilities' ? 'is-active' : ''} onClick={() => setActiveSection('abilities')}><PuzzlePiece size={16} /><span>技能与工具</span></button>
-          <button type="button" role="tab" aria-selected={activeSection === 'permissions'} className={activeSection === 'permissions' ? 'is-active' : ''} onClick={() => setActiveSection('permissions')}><ShieldCheck size={16} /><span>对话权限</span></button>
+          <button type="button" role="tab" aria-selected={activeSection === 'abilities'} className={activeSection === 'abilities' ? 'is-active' : ''} onClick={() => setActiveSection('abilities')}><PuzzlePiece size={16} /><span>技能</span></button>
+          <button type="button" role="tab" aria-selected={activeSection === 'permissions'} className={activeSection === 'permissions' ? 'is-active' : ''} onClick={() => setActiveSection('permissions')}><ShieldCheck size={16} /><span>权限</span></button>
           <button type="button" role="tab" aria-selected={activeSection === 'advanced'} className={activeSection === 'advanced' ? 'is-active' : ''} onClick={() => setActiveSection('advanced')}><SlidersHorizontal size={16} /><span>高级设置</span></button>
         </nav>
 
@@ -177,19 +177,19 @@ export function EmployeeManagementDialog({ employee, profile, profileHistory = [
           </section> : null}
 
           {activeSection === 'abilities' ? <section className="employee-settings-panel" role="tabpanel">
-            <div className="settings-section__heading"><h3><PuzzlePiece size={18} />技能与工具</h3><p>选择这个角色可以使用的技能与工具。执行计划和外部操作前，系统仍会重新检查当前授权。</p></div>
+            <div className="settings-section__heading"><h3><PuzzlePiece size={18} />角色技能</h3><p>这里仅管理角色引用的 Skill。技能定义与世界加载状态统一来自技能中心，后续版本更新会沿用同一引用。</p></div>
             <SkillGrantEditor employee={employee} value={skills} onChange={setSkills} />
-            <div className="employee-settings-divider" role="separator" />
-            <div className="settings-section__heading"><h3><PlugsConnected size={18} />连接授权</h3><p>勾选这个角色可以驱动的外部连接（SSH 设备等）。技能 + 连接两重授权都满足时，外部操作才会执行。</p></div>
-            <ConnectionGrantEditor employee={employee} value={connections} onChange={setConnections} />
-            <footer className="employee-settings-actions"><span>高风险操作仍会单独请求确认。</span><button className="primary-button" type="button" disabled={!role.trim() || !persona.trim() || saving} onClick={() => void saveAbilities()}>{saving ? '正在保存…' : '保存能力与连接设置'}</button></footer>
+            <footer className="employee-settings-actions"><span>技能中心负责当前世界的技能包汇总与加载。</span><button className="primary-button" type="button" disabled={!role.trim() || !persona.trim() || saving} onClick={() => void saveAbilities()}>{saving ? '正在保存…' : '保存角色技能'}</button></footer>
           </section> : null}
 
           {activeSection === 'permissions' ? <section className="employee-settings-panel" role="tabpanel">
-            <div className="settings-section__heading"><h3><ShieldCheck size={18} />默认对话权限</h3><p>这个角色进入新私聊时自动使用所选档位；你仍可在输入区为单条消息临时调整。</p></div>
+            <div className="settings-section__heading"><h3><ShieldCheck size={18} />对话权限</h3><p>这个角色进入新私聊时自动使用所选档位；输入区仍可为当前消息调整。</p></div>
             <RuntimePermissionSelector value={runtimePermissionMode} onChange={(mode) => { setRuntimePermissionMode(mode); setConfirmedFullAccess(mode === 'danger-full-access' && currentRevision?.runtimePermissionMode === 'danger-full-access') }} />
             {runtimePermissionMode === 'danger-full-access' ? <label className="host-access-dialog__confirm"><input type="checkbox" checked={confirmedFullAccess} onChange={(event) => setConfirmedFullAccess(event.target.checked)} /><span><strong>我确认允许这个角色默认完全访问</strong><small>确认会持久保存，并在刷新、切换和重启后继续生效。</small></span></label> : null}
-            <footer className="employee-settings-actions"><span>多人会话会采用所有参与角色中最保守的默认档位。</span><button className="primary-button" type="button" disabled={saving || (runtimePermissionMode === 'danger-full-access' && !confirmedFullAccess)} onClick={() => void onRevise({ reason: '更新角色默认对话权限', skillGrants: skills, capabilityGrants: splitList(capabilities), connectionGrants: connections, modelPolicy: currentRevision?.modelPolicy ?? {}, runtimePermissionMode, confirmedFullAccess })}>{saving ? '正在保存…' : '保存对话权限'}</button></footer>
+            <div className="employee-settings-divider" role="separator" />
+            <div className="settings-section__heading"><h3><PlugsConnected size={18} />连接权限</h3><p>按连接中心类目授权，可全选全部连接、全选一个类目，或指定具体搜索服务、设备和 MCP 服务。</p></div>
+            <ConnectionGrantEditor employee={employee} value={connections} onChange={setConnections} />
+            <footer className="employee-settings-actions"><span>多人会话会采用参与角色中最保守的对话档位；连接权限按实际执行角色检查。</span><button className="primary-button" type="button" disabled={saving || (runtimePermissionMode === 'danger-full-access' && !confirmedFullAccess)} onClick={() => void onRevise({ reason: '更新角色权限', skillGrants: skills, capabilityGrants: splitList(capabilities), connectionGrants: connections, modelPolicy: currentRevision?.modelPolicy ?? {}, runtimePermissionMode, confirmedFullAccess })}>{saving ? '正在保存…' : '保存权限'}</button></footer>
           </section> : null}
 
           {activeSection === 'advanced' ? <section className="employee-settings-panel" role="tabpanel">

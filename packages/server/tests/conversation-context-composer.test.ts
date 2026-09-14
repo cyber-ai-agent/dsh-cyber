@@ -9,7 +9,7 @@ import type {
   EmployeeInstance,
   WorkSession,
 } from '@dsh-cyber/contracts'
-import { contextEnvelopeLayers } from '@dsh-cyber/contracts'
+import { composeContextLayer, contextEnvelopeLayers } from '@dsh-cyber/contracts'
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { ConversationContextComposer } from '../src/services/conversation-context-composer.js'
@@ -542,5 +542,46 @@ describe('ConversationContextComposer', () => {
     expect(groupResult.envelope.recentConversation?.text).toContain('群聊回答 beta-only')
     expect(groupResult.envelope.recentConversation?.text ?? '').not.toContain('alpha-only')
     expect(allLayerText(groupResult)).not.toContain('alpha-only')
+  })
+
+  it('reuses deterministic layers and invalidates the prefix when persona facts change', async () => {
+    const { store, workspace, world, employee, memory, composer } = await setup()
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '缓存测试',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    await exchange({ store, workspace, world, employee, session, memory, ask: '缓存一条事实', answer: '事实已记录。', runId: 'run-cache' })
+    const worldContext = composeContextLayer({ id: `world-context:${world.id}`, kind: 'world-context', text: '当前世界规则：只使用已验证事实。' })
+    const input = {
+      employee,
+      persona: '你只引用自己真实参与过的经历。',
+      personaRevision: employee.currentRevision,
+      worldContext,
+      conversationId: session.id,
+      prompt: '继续处理',
+      history: history(store, session.id, employee),
+      observedThroughSequence: 0,
+    }
+
+    const first = await composer.compose(input)
+    const afterFirst = composer.layerCacheStats()
+    const second = await composer.compose(input)
+    const afterSecond = composer.layerCacheStats()
+
+    expect(second.envelope.stableIdentity).toBe(first.envelope.stableIdentity)
+    expect(second.envelope.worldContext).toBe(first.envelope.worldContext)
+    expect(second.envelope.recentConversation).toBe(first.envelope.recentConversation)
+    expect(afterSecond.hits).toBeGreaterThan(afterFirst.hits)
+    expect(afterSecond.size).toBeLessThanOrEqual(afterSecond.maxEntries)
+
+    const changed = await composer.compose({ ...input, persona: '你只引用本轮真正完成的工作。' })
+    expect(changed.envelope.stableIdentity).not.toBe(first.envelope.stableIdentity)
+    expect(changed.envelope.stableContextHash).not.toBe(first.envelope.stableContextHash)
   })
 })

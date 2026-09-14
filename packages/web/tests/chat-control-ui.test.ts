@@ -348,7 +348,7 @@ describe('Chat control UI', () => {
     expect(html).not.toContain('另有 1 条')
   })
 
-  it('shows queued follow-ups above the composer and removes manual queue controls', () => {
+  it('shows queued follow-ups above the composer with edit, insert and delete controls', () => {
     const employee = { id: 'employee-a', displayName: '甲角色', role: '分析', avatarIndex: 0, currentActivity: '正在工作' } as CyberEmployee
     const world = { id: 'world-chat-control', workspaceId: 'workspace-chat-control', name: '控制测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
     const html = renderToStaticMarkup(createElement(ChatWorkbench, {
@@ -373,12 +373,17 @@ describe('Chat control UI', () => {
       onRecruit: vi.fn(),
       onStopTurn: vi.fn(async () => undefined),
       onCancelQueuedTurn: vi.fn(async () => undefined),
+      onEditQueuedTurn: vi.fn(async () => undefined),
+      onPromoteQueuedTurn: vi.fn(async () => undefined),
     }))
     expect(html).toContain('正在回复中')
     expect(html).toContain('插入对话')
     expect(html).toContain('下一条消息')
     expect(html).not.toContain('send-button--stop')
-    expect(html).toContain('撤销')
+    expect(html).toContain('编辑排队消息')
+    expect(html).toContain('插入')
+    expect(html).toContain('删除')
+    expect(html).not.toContain('撤销插入')
     expect(html).not.toContain('排队发送')
     expect(html).not.toContain('队列操作')
     expect(html).not.toContain('插入队列前方')

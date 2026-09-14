@@ -4,6 +4,8 @@ import { lstat, mkdir, open, readFile, readlink, rename, symlink, unlink } from 
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
+import type { WorkerWebSearchPlan } from './web-search.js'
+
 export const SUPPORTED_HARNESS_VERSION = '0.1.2-rc.1' as const
 export const WORKER_PROFILE_NAME = 'dsh-cyber-worker' as const
 
@@ -48,6 +50,7 @@ export async function ensureHarnessProfile(
   homeDir: string,
   profileName: string = WORKER_PROFILE_NAME,
   providerProfile?: HarnessProviderProfile,
+  webSearchPlan?: WorkerWebSearchPlan,
 ): Promise<HarnessProfilePaths> {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(profileName)) {
     throw new Error(`Invalid Harness profile name: ${JSON.stringify(profileName)}`)
@@ -75,11 +78,12 @@ export async function ensureHarnessProfile(
       2,
     )}\n`,
   )
+  const patch = workerProfilePatch(providerProfile, webSearchPlan)
   await writeTextAtomic(
     profilePatchPath,
-    providerProfile === undefined
+    patch.length === 0
       ? '# Machine-local DSH Cyber worker overrides. Bundle policy remains authoritative.\n[]\n'
-      : `${JSON.stringify(providerPatch(providerProfile), null, 2)}\n`,
+      : `${JSON.stringify(patch, null, 2)}\n`,
   )
   if (providerProfile !== undefined) {
     validateProviderProfile(providerProfile)
@@ -114,19 +118,48 @@ export async function ensureHarnessProfile(
   }
 }
 
-function providerPatch(providerProfile: HarnessProviderProfile): Array<Record<string, unknown>> {
-  const patch: Array<Record<string, unknown>> = [{
-    id: 'llm-pi-ai',
-    config: { providers: { [providerProfile.route]: providerRoute(providerProfile) } },
-  }]
-  if (providerProfile.webSearch !== undefined) {
+/**
+ * Build the worker's `cordis.patch.yml` rows. The managed model web-search
+ * (`providerProfile.webSearch`) keeps its historical shape (a `web-search-
+ * deepseek` row mirroring the settings document). Otherwise the host-resolved
+ * `webSearchPlan` selects the `web` seam's search provider, or hides
+ * `web_search` entirely when no backend is usable.
+ */
+function workerProfilePatch(
+  providerProfile: HarnessProviderProfile | undefined,
+  webSearchPlan: WorkerWebSearchPlan | undefined,
+): Array<Record<string, unknown>> {
+  const patch: Array<Record<string, unknown>> = []
+  if (providerProfile !== undefined) {
     patch.push({
-      id: 'web-search-deepseek',
-      config: {
-        apiKeyEnv: providerProfile.webSearch.apiKeyEnv,
-        baseURL: providerProfile.webSearch.baseURL,
-      },
+      id: 'llm-pi-ai',
+      config: { providers: { [providerProfile.route]: providerRoute(providerProfile) } },
     })
+    if (providerProfile.webSearch !== undefined) {
+      patch.push({
+        id: 'web-search-deepseek',
+        config: {
+          apiKeyEnv: providerProfile.webSearch.apiKeyEnv,
+          baseURL: providerProfile.webSearch.baseURL,
+        },
+      })
+      return patch
+    }
+  }
+  switch (webSearchPlan?.kind) {
+    case 'deepseek':
+      patch.push({
+        id: 'web-search-deepseek',
+        config: { apiKeyEnv: webSearchPlan.apiKeyEnv, baseURL: webSearchPlan.baseUrl },
+      })
+      patch.push({ id: 'web', config: { searchProvider: 'deepseek-official', fetchProvider: 'http' } })
+      break
+    case 'firecrawl':
+      patch.push({ id: 'web', config: { searchProvider: 'firecrawl', fetchProvider: 'http' } })
+      break
+    case 'disabled':
+      patch.push({ id: 'tool-web', config: { search: false, fetch: true, searchTimeoutMs: 60_000 } })
+      break
   }
   return patch
 }

@@ -5,11 +5,18 @@ import type { IntegrationProvider, IntegrationProviderContext } from './integrat
 export const FIRECRAWL_INTEGRATION_ID = 'builtin.firecrawl'
 export const FIRECRAWL_DEFAULT_BASE_URL = 'https://api.firecrawl.dev'
 
+// The 联网搜索 main item now owns the Firecrawl card; this type is hidden from
+// the hub rail but remains the credential home for the card (and for the
+// web.search.firecrawl skill / knowledge web import). `isDefault` marks this
+// connection as the workspace default web-search backend.
 const DESCRIPTOR: IntegrationDescriptor = {
   id: FIRECRAWL_INTEGRATION_ID,
   displayName: 'Firecrawl',
   summary: '受信任的网页搜索连接。查询内容会发送到所配置的 Firecrawl 服务。',
-  configFields: [{ id: 'baseUrl', displayName: '服务地址', description: 'Firecrawl 云端或自托管服务根地址。', kind: 'url', required: true, placeholder: FIRECRAWL_DEFAULT_BASE_URL }],
+  configFields: [
+    { id: 'baseUrl', displayName: '服务地址', description: 'Firecrawl 云端或自托管服务根地址。', kind: 'url', required: true, placeholder: FIRECRAWL_DEFAULT_BASE_URL },
+    { id: 'isDefault', displayName: '设为默认搜索服务商', description: '勾选后，对话中的联网搜索优先使用这家服务商。', kind: 'boolean', required: false },
+  ],
   secretFields: [{ id: 'apiKey', displayName: 'API 密钥', description: '仅在本机加密凭据库保存，保存后不回显。', kind: 'secret', required: true }],
   skillIds: ['web.search.firecrawl'],
   dataEgress: ['搜索查询文本', '用户明确提供的检索范围'],
@@ -20,7 +27,10 @@ export class FirecrawlIntegrationProvider implements IntegrationProvider {
 
   validateConfig(config: JsonObject): JsonObject {
     const baseUrl = typeof config.baseUrl === 'string' && config.baseUrl.trim() ? config.baseUrl.trim() : FIRECRAWL_DEFAULT_BASE_URL
-    return { baseUrl: normalizeIntegrationBaseUrl(baseUrl) }
+    return {
+      baseUrl: normalizeIntegrationBaseUrl(baseUrl),
+      isDefault: config.isDefault === true,
+    }
   }
 
   async testConnection(context: IntegrationProviderContext): Promise<IntegrationHealth> {
@@ -41,7 +51,7 @@ export class FirecrawlIntegrationProvider implements IntegrationProvider {
 }
 
 export function firecrawlBaseUrl(config: JsonObject): string {
-  const value = typeof config.baseUrl === 'string' ? config.baseUrl : FIRECRAWL_DEFAULT_BASE_URL
+  const value = typeof config.baseUrl === 'string' && config.baseUrl.trim() ? config.baseUrl.trim() : FIRECRAWL_DEFAULT_BASE_URL
   return normalizeIntegrationBaseUrl(value)
 }
 

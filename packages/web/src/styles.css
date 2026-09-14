@@ -1365,12 +1365,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-inserts > header small, .composer-inserts__note { color: var(--text-muted); font-size: 12px; }
 .composer-inserts__note { margin: 0; line-height: 1.45; }
 .composer-inserts > div { display: grid; gap: 4px; }
-.composer-insert { min-height: 40px; display: grid; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: 8px; padding: 5px 6px 5px 9px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-0); }
+.composer-insert { min-height: 40px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 6px 5px 9px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-0); }
 .composer-insert > span { min-width: 0; display: grid; gap: 2px; }
 .composer-insert strong { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .composer-insert small { color: var(--text-muted); font-size: 12px; }
-.composer-insert button { width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-control); color: var(--text-muted); background: transparent; cursor: pointer; }
-.composer-insert button:hover, .composer-insert button:focus-visible { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.composer-insert__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.composer-insert__actions button { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 4px 8px; border-radius: var(--radius-control); font-size: 12px; line-height: 1.2; }
+.composer-insert__actions .secondary-button:hover, .composer-insert__actions .secondary-button:focus-visible { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 65%, var(--border)); }
+.composer-insert__actions .danger-button:hover, .composer-insert__actions .danger-button:focus-visible { color: var(--danger); }
+@media (max-width: 720px) {
+  .composer-insert { grid-template-columns: 1fr; align-items: stretch; }
+  .composer-insert__actions { justify-content: stretch; }
+  .composer-insert__actions button { flex: 1 1 0; min-height: 44px; }
+}
 
 :root[data-skin='maid-atelier'] .composer-zone::before {
   content: '';
@@ -2994,6 +3001,29 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .capability-approval-group label.is-unavailable { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 .capability-approval-group label > span > em { color: var(--accent-strong); font-size: 12px; font-style: normal; }
 .capability-approval-group label.is-unavailable > span > em { color: var(--danger); }
+/* Aggregated MCP service row inside the recruitment skill fieldset: one
+   checkbox grants every tool of the service; the tool list stays expandable. */
+.capability-service-row { min-height: 44px; display: flex; align-items: center; gap: 9px; padding: 6px 8px; border: 1px solid var(--border); color: var(--text-soft); background: var(--surface-1); }
+.capability-service-row > input { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 0; accent-color: var(--accent); }
+.capability-service-row > span { min-width: 0; display: grid; gap: 2px; }
+.capability-service-row strong { color: var(--text); font-size: 13px; }
+.capability-service-row small { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.capability-service-row.is-granted { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, var(--surface-1)); }
+.capability-service-row.is-unavailable { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.capability-service-row__meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.capability-service-row__meta em { padding: 2px 6px; border-radius: 6px; background: rgba(255, 255, 255, .055); color: var(--text-muted); font-size: 12px; font-style: normal; }
+.capability-service-row__status--granted { color: var(--success, #69c18d) !important; }
+.capability-service-row__status--partial { color: var(--warning, #d8a347) !important; }
+.capability-service-row__status--recommended, .capability-service-row__status--learnable { color: var(--accent-strong, #f0b63b) !important; }
+.capability-service-row__status--unavailable { color: var(--danger, #dc7777) !important; }
+.capability-service-row__tools { margin-left: 2px; }
+.capability-service-row__tools summary { cursor: pointer; padding: 2px 6px; border-radius: 6px; background: rgba(255, 255, 255, .055); color: var(--text-muted); font-size: 12px; list-style: none; user-select: none; }
+.capability-service-row__tools summary::-webkit-details-marker { display: none; }
+.capability-service-row__tools ul { margin: 6px 0 2px 4px; padding: 0; display: grid; gap: 3px; max-width: 340px; }
+.capability-service-row__tools li { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 220px; font-size: 12px; color: var(--text-muted); }
+.capability-service-row__tools li code { color: var(--text-soft); font-size: 12px; }
+.capability-service-row__tools li em { padding: 2px 6px; border-radius: 6px; background: rgba(255, 255, 255, .055); font-size: 12px; font-style: normal; }
+.capability-service-row__tools li.is-granted em { color: var(--success, #69c18d); }
 .permission-notice { display: flex; gap: 9px; padding: 10px; border: 1px solid var(--border); color: var(--text-muted); background: var(--surface-1); }
 .permission-notice svg { flex: 0 0 auto; color: var(--success); }
 .permission-notice p { margin: 0; font-size: 10px; line-height: 1.6; }
@@ -3121,17 +3151,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .integration-editor > footer .text-button.is-danger { margin-right: auto; color: var(--danger); }
 .integration-editor textarea { width: 100%; padding: 9px 11px; color: var(--text); background: var(--surface-0); border: 1px solid var(--border); border-radius: 8px; font: 500 12px/1.5 var(--font-mono); resize: vertical; }
 .integration-connection-list { display: grid; gap: 6px; max-height: 220px; overflow-y: auto; }
-.integration-connection-list button { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); color: var(--text); background: var(--surface-1); text-align: left; cursor: pointer; }
-.integration-connection-list button.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-1)); }
-.integration-connection-list strong { font-size: 13px; }
-.integration-connection-list small { color: var(--text-muted); font-size: 12px; }
+.integration-connection-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); color: var(--text); background: var(--surface-1); }
+.integration-connection-card.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-1)); }
+.integration-connection-card > button { display: grid; gap: 2px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.integration-connection-card strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.integration-connection-card small { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.integration-connection-card__enable { display: inline-flex; gap: 5px; align-items: center; color: var(--text-muted); font-size: 12px; cursor: pointer; user-select: none; }
+.integration-connection-card__enable input { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: var(--accent); }
 .integration-hub-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
 .integration-hub-workspace { display: grid; gap: 14px; min-width: 0; }
 .integration-hub-workspace > .integration-connection-list { max-height: none; }
-.integration-connection-list button.is-new-connection { border-style: dashed; color: var(--accent); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
-.integration-connection-list button.is-new-connection.is-active { border-style: solid; }
-.integration-connection-list button.is-new-connection strong { font-size: 13px; }
-.integration-connection-list button.is-new-connection small { flex: 1 1 100%; color: var(--text-muted); }
+.integration-connection-card.is-new-connection { border-style: dashed; color: var(--accent); }
 .integration-secret-clear { padding: 0; border: 0; color: var(--danger); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
 .integration-secret-clear:hover { color: var(--danger-strong, var(--danger)); }
 
@@ -3145,6 +3175,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .connection-hub__glyph { color: var(--accent); font-size: 22px; font-weight: 700; }
 .connection-hub__loading { display: grid; flex: 1; place-items: center; color: var(--text-muted); font-size: 13px; }
 .connection-hub > .integration-hub-layout, .connection-hub > .integration-settings-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 22px 24px; }
+/* 字段说明是主要辅助文案，不得依赖浏览器 <small> 默认 0.83em（约 10.8px）；AGENTS 护栏要求 ≥12px。 */
+.connection-hub .dialog-field small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+
+/* 联网搜索：服务商卡片（目录来自 catalog/web-search-providers.json，不提供自由下拉） */
+.web-search-cards { display: grid; gap: 12px; }
+.web-search-card { display: grid; gap: 10px; padding: 16px 18px; border: 1px solid var(--border); background: var(--surface-1); }
+.web-search-card__header { display: flex; align-items: center; gap: 10px; }
+.web-search-card__header strong { font-size: 14px; }
+.web-search-card__badge { color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 500; }
+.web-search-card__status { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+.web-search-card__status.is-missing { color: var(--text-soft); }
+.web-search-card__meta { display: grid; gap: 4px; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
+.web-search-card__meta code { color: var(--text-soft); font: 12px var(--font-mono); overflow-wrap: anywhere; }
+.web-search-card__meta a { color: var(--accent); font-size: 12px; text-decoration: underline; }
+.web-search-card__edit { display: grid; gap: 10px; padding-top: 4px; }
+.web-search-card__actions { display: flex; align-items: center; gap: 10px; }
 .privacy-lock-card { display: grid; gap: 18px; padding: 20px; border: 1px solid var(--border); background: var(--surface-1); }
 .privacy-lock-card > header { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; align-items: center; }
 .privacy-lock-card > header > span { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface-0); }

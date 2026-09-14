@@ -5,6 +5,7 @@ import type { CharacterSkillDescriptor, EmbodimentPresetDescriptor } from '@dsh-
 
 import { createRoleDraft, type WorkshopDraft, type WorkshopRoleDraft } from './model.js'
 import { WorkshopJsonEditor } from './WorkshopJsonEditor.js'
+import { WorkshopSkillPicker } from './workshop-skill-picker.js'
 import { ModelPicker } from '../../features/models/ModelPicker.js'
 import { useI18n } from '../../i18n/runtime.js'
 
@@ -42,10 +43,6 @@ export function CreativeWorkshopEditor({
   const presetMap = useMemo(() => new Map(presets.map((preset) => [preset.id, preset])), [presets])
   const selected = draft.roles.find((role) => role.clientId === selectedRoleId) ?? draft.roles[0]
   const fallbackPreset = presets[0]
-  const visibleSkills = useMemo(() => {
-    const query = skillQuery.trim().toLocaleLowerCase()
-    return query === '' ? skills : skills.filter((skill) => `${skill.displayName} ${skill.summary} ${skill.id}`.toLocaleLowerCase().includes(query))
-  }, [skillQuery, skills])
 
   useEffect(() => {
     if (selected !== undefined) return
@@ -136,7 +133,7 @@ export function CreativeWorkshopEditor({
           {selected === undefined ? null : <>
             <label className="workshop-skill-search"><MagnifyingGlass size={17} /><input type="search" value={skillQuery} placeholder={t('workshop.permissions.skillsSearch', '搜索技能名称、用途或 ID')} aria-label={t('workshop.permissions.skillsSearchAria', '搜索角色技能')} onChange={(event) => setSkillQuery(event.target.value)} /></label>
             <div className="creative-workshop-permission-summary"><strong>{selected.displayName || t('workshop.permissions.currentRole', '当前角色')}</strong><span>{t('workshop.permissions.selectedSkills', '已选择 {count} 个技能', { count: selected.requestedSkillIds.length })}</span></div>
-            {skills.length === 0 ? <div className="dialog-empty">{t('workshop.permissions.noSkills', '当前宿主没有注册可用技能。')}</div> : visibleSkills.length === 0 ? <div className="dialog-empty">{t('workshop.permissions.noMatches', '没有匹配的技能。')}</div> : <div className="creative-workshop-skill-catalog">{visibleSkills.map((skill) => <label key={skill.id} className={selected.requestedSkillIds.includes(skill.id) ? 'is-selected' : ''}><input type="checkbox" checked={selected.requestedSkillIds.includes(skill.id)} onChange={(event) => updateSelected({ requestedSkillIds: event.target.checked ? [...selected.requestedSkillIds, skill.id] : selected.requestedSkillIds.filter((id) => id !== skill.id) })} /><span><strong>{skill.displayName}</strong><small>{skill.summary}</small><em>{skill.kind === 'integration' ? t('workshop.permissions.external', '外部连接') : t('workshop.permissions.method', '工作方法')} · {riskLabel(skill, t)}</em></span></label>)}</div>}
+            {skills.length === 0 ? <div className="dialog-empty">{t('workshop.permissions.noSkills', '当前宿主没有注册可用技能。')}</div> : <WorkshopSkillPicker skills={skills} value={selected.requestedSkillIds} query={skillQuery} onChange={(next) => updateSelected({ requestedSkillIds: next })} />}
             <p className="creative-workshop-permission-note">{t('workshop.permissions.note', '创建世界会保存这些能力请求。角色获得技能授权后才能执行；涉及外部副作用的具体动作仍需按审批策略确认。')}</p>
           </>}
         </section> : null}
@@ -225,10 +222,4 @@ function validateStep(step: number, draft: WorkshopDraft, t: ReturnType<typeof u
     if (incomplete !== undefined) return t('workshop.validation.roleNames', '请为每个角色填写名字')
   }
   return undefined
-}
-
-function riskLabel(skill: CharacterSkillDescriptor, t: ReturnType<typeof useI18n>['t']): string {
-  if (skill.risks.includes('external-side-effect')) return t('workshop.permissions.riskExternal', '外部操作需审批')
-  if (skill.risks.includes('write-local')) return t('workshop.permissions.riskWrite', '可写当前世界')
-  return t('workshop.permissions.riskRead', '只读')
 }

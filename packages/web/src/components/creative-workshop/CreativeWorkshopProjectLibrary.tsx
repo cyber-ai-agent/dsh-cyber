@@ -1,10 +1,11 @@
 import { Archive, ArrowCounterClockwise, ArrowRight, Copy, Cube, Plus, ShieldCheck, SlidersHorizontal, Sparkle, Trash, UsersThree, WarningCircle } from '@phosphor-icons/react'
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import type { WorldTemplateManifest } from '@dsh-cyber/contracts'
 import type { CharacterSkillDescriptor, WorkshopProjectStatus, WorkshopProjectView } from '@dsh-cyber/contracts/creative-platform'
 
 import { useI18n } from '../../i18n/runtime.js'
 import { useDialogFocusTrap } from '../useDialogFocusTrap.js'
+import { mcpServiceOfSkillId } from '../mcp-skill-grouping.js'
 import './CreativeWorkshopProjectLibrary.css'
 
 interface CreativeWorkshopProjectLibraryProps {
@@ -40,6 +41,7 @@ export function CreativeWorkshopProjectLibrary({
   const [tab, setTab] = useState<WorkshopProjectStatus>('active')
   const [pendingDeleteId, setPendingDeleteId] = useState<string>()
   const skillNames = new Map(skills.map((skill) => [skill.id, skill.displayName]))
+  const serviceLabels = new Map(skills.filter((skill) => skill.mcpService !== undefined).map((skill) => [skill.mcpService!.id, skill.mcpService!.label]))
   const visibleProjects = projects.filter((project) => project.status === tab)
 
   // 1. 当没有项目时：呈现一体化、饱满充实、高审美的创作起航大厅 (Creative Workshop Hub)
@@ -292,9 +294,7 @@ export function CreativeWorkshopProjectLibrary({
                       {role.requestedSkillIds.length === 0 ? (
                         <span>{t('workshop.library.noExtraSkills', '未请求额外技能')}</span>
                       ) : (
-                        role.requestedSkillIds.map((skillId) => (
-                          <code key={skillId}>{skillNames.get(skillId) ?? skillId}</code>
-                        ))
+                        skillChipsForRole(role.requestedSkillIds, skillNames, serviceLabels)
                       )}
                     </div>
                   </article>
@@ -372,4 +372,36 @@ function formatDate(value: string, locale: string): string {
   } catch {
     return String(value)
   }
+}
+
+/**
+ * Read-only skill chips for a project role: one chip per skill for non-MCP
+ * ids, one chip per MCP service for tool ids (a single tool shows as
+ * "MCP · <connection name> / <tool>", several collapse into a count).
+ */
+export function skillChipsForRole(
+  requestedIds: readonly string[],
+  skillNames: ReadonlyMap<string, string>,
+  serviceLabels: ReadonlyMap<string, string>,
+): ReactNode[] {
+  const plainIds: string[] = []
+  const toolsByService = new Map<string, string[]>()
+  for (const skillId of requestedIds) {
+    const service = mcpServiceOfSkillId(skillId)
+    if (service === undefined) plainIds.push(skillId)
+    else toolsByService.set(service, [...(toolsByService.get(service) ?? []), skillId])
+  }
+  const chips: ReactNode[] = plainIds.map((skillId) => <code key={skillId}>{skillNames.get(skillId) ?? skillId}</code>)
+  for (const [service, toolIds] of [...toolsByService.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const label = serviceLabels.get(service) ?? service
+    const title = toolIds.length === 1
+      ? `MCP · ${label} / ${toolNameOfToolId(toolIds[0]!, service)}`
+      : `MCP · ${label}（${toolIds.length} 个工具）`
+    chips.push(<code key={`mcp-service-${service}`}>{title}</code>)
+  }
+  return chips
+}
+
+function toolNameOfToolId(skillId: string, service: string): string {
+  return skillId.slice(`mcp.${service}.`.length)
 }

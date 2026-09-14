@@ -28,6 +28,7 @@ import {
   type HarnessProviderProfile,
   type HarnessProfilePaths,
 } from './profile.js'
+import { applyWebSearchPlanToEnvironment, type WorkerWebSearchPlan } from './web-search.js'
 
 export interface EmployeeTurnRequest {
   worldDirectory?: AgentTurnRequest['worldDirectory']
@@ -144,6 +145,12 @@ export interface HarnessAdapterOptions {
   provider?: string
   model?: string
   providerProfile?: HarnessProviderProfile
+  /**
+   * Host-resolved selection for the built-in `web_search` tool. Written into
+   * the worker profile and launch environment; undefined keeps the DSH
+   * bundle default (an embedded/test harness with no web-search backend).
+   */
+  webSearchPlan?: WorkerWebSearchPlan
   dshBinPath?: string
   /** Test/custom-runtime schema cost. Production uses the pinned real-worker value. */
   nativeToolSchemaTokens?: number
@@ -705,6 +712,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       join(resolve(this.#options.stateRoot), 'harness-home'),
       WORKER_PROFILE_NAME,
       this.#options.providerProfile,
+      this.#options.webSearchPlan,
     )
     return this.#profile
   }
@@ -718,6 +726,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         this.#options.providerProfile?.webSearch?.apiKeyEnv,
       ].filter((value): value is string => value !== undefined))],
     )
+    applyWebSearchPlanToEnvironment(environment, this.#options.webSearchPlan)
     const harness = new DeepSeekHarness({
       ...(this.#options.dshBinPath === undefined
         ? {}
@@ -1302,7 +1311,7 @@ function employeeSystemPrompt(employee: EmployeeInstance, revision: EmployeeRevi
     '角色最初创建时使用的模板或职位只是来源信息。除非当前 Persona 明确保留，否则不得恢复或推断旧模板身份。',
     '始终保持当前身份一致，维护属于自己的持续会话，不得冒充其他角色。',
     '协作提示中出现其他角色的发言时，请回应其实际内容，并清楚说明认同点或分歧点。',
-    '联网搜索不可用时，用简明中文说明原因，并引导用户前往“设置 → 模型 → 编辑当前模型 → 启用联网搜索”。不得编造搜索结果，也不得引导用户寻找不存在的隐藏页面。',
+    '联网搜索不可用时，用简明中文说明原因，并引导用户前往“连接中心 → 联网搜索”添加一家搜索服务商（或“设置 → 模型”里为当前模型启用联网搜索）。不得编造搜索结果，也不得引导用户寻找不存在的隐藏页面。',
     '基于当前身份、记忆和已授权能力，使用简洁中文给出有证据的回答。需要调用工具时，向用户提供可公开、安全、简短的中文推理摘要，说明目标、判断依据和工具调度结果；不得暴露隐藏思维链或凭据；可以解释经脱敏的工具参数、结果片段和变更证据，执行详情由轨迹展示。',
   ].join('\n\n')
 }

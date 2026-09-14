@@ -11,6 +11,8 @@ export interface GroupTaskRouterEmployee {
   revision: EmployeeRevision
   /** Number of currently active AgentRuns for this employee. */
   activeLoad?: number
+  /** Host capabilities resolved from the assigned model, such as image-generation. */
+  capabilityIds?: readonly string[]
 }
 
 export interface RoutedTaskStep {
@@ -34,6 +36,115 @@ export interface GroupTaskRoutingResult {
   requiredSkillIds: string[]
   steps: RoutedTaskStep[]
   coordinatorEmployeeId: string
+}
+
+export type DirectSkillDelegationDecision =
+  | { kind: 'none'; requiredSkillIds: [] }
+  | {
+      kind: 'delegate'
+      requiredSkillIds: string[]
+      targetEmployeeId: string
+      candidateEmployeeIds: string[]
+    }
+  | {
+      kind: 'choice'
+      requiredSkillIds: string[]
+      candidateEmployeeIds: string[]
+      candidateDisplayNames: string[]
+    }
+  | {
+      kind: 'unavailable'
+      requiredSkillIds: string[]
+      candidateEmployeeIds: []
+      guidance: string
+    }
+
+/**
+ * Resolves a direct request whose selected character does not hold a matched
+ * Skill. The resolver only uses world-visible catalog hints and current
+ * revision grants, so it can recommend a real character without handing an
+ * adapter or provider detail to the model.
+ */
+export function resolveDirectSkillDelegation(input: {
+  prompt: string
+  initiator: GroupTaskRouterEmployee
+  employees: readonly GroupTaskRouterEmployee[]
+  catalog: readonly SkillCatalogEntry[]
+}): DirectSkillDelegationDecision {
+  const prompt = normalize(input.prompt)
+  // A casual question can contain a catalog word such as “会话” or “搜索”
+  // without asking the host to perform a capability-backed action. Keep this
+  // preflight behind an explicit action cue so ordinary direct chat is never
+  // blocked by a missing optional Skill grant.
+  if (!/(?:生成|制作|执行|调用|使用|生图|生视频|搜索|浏览|访问|导出|上传|下载|运行|创建|修改|写入|配置|研究|分析|整理|查找|查询|处理|编程|开发)/iu.test(prompt)) {
+    return { kind: 'none', requiredSkillIds: [] }
+  }
+  const matched = input.catalog
+    // Direct fallback is for concrete host capabilities (image/video,
+    // browser, external search, and similar integrations). Built-in writing
+    // recipes are conversational guidance and should not block an ordinary
+    // task-intent turn merely because a role has not opted into that recipe.
+    .filter((skill) => skill.worldAvailable && skill.kind === 'integration')
+    .map((skill) => ({ skill, match: matchLocation(prompt, skill) }))
+    .filter((item): item is { skill: SkillCatalogEntry; match: SkillMatch } => item.match !== undefined)
+    .sort((left, right) => left.match.index - right.match.index || right.match.specificity - left.match.specificity || left.skill.id.localeCompare(right.skill.id))
+  const requiredSkillIds = [...new Set(matched.map((item) => item.skill.id))]
+  const mediaCapability = directMediaCapability(prompt)
+  const modelCapability = mediaCapability !== undefined && !matched.some(({ skill }) =>
+    (skill.routingHints ?? []).some((hint) => /(?:图|图片|图像|视频|image|video)/iu.test(hint)),
+  ) ? mediaCapability : undefined
+  if (modelCapability !== undefined && !requiredSkillIds.includes(modelCapability.id)) requiredSkillIds.push(modelCapability.id)
+  const missingSkillIds = requiredSkillIds.filter((skillId) => skillId === modelCapability?.id
+    ? !input.initiator.capabilityIds?.includes(skillId)
+    : !input.initiator.revision.skillGrants.includes(skillId))
+  if (missingSkillIds.length === 0) return { kind: 'none', requiredSkillIds: [] }
+
+  // A single direct request should have one capable executor for all matched
+  // capabilities. If several roles qualify, asking the owner is safer than
+  // silently choosing by load or display order.
+  const candidates = input.employees
+    .filter((item) => item.employee.id !== input.initiator.employee.id && item.employee.status !== 'archived')
+    .filter((item) => missingSkillIds.every((skillId) => skillId === modelCapability?.id
+      ? item.capabilityIds?.includes(skillId) === true
+      : item.revision.skillGrants.includes(skillId)))
+    .sort((left, right) => left.employee.id.localeCompare(right.employee.id))
+  if (candidates.length === 1) {
+    return {
+      kind: 'delegate',
+      requiredSkillIds: missingSkillIds,
+      targetEmployeeId: candidates[0]!.employee.id,
+      candidateEmployeeIds: [candidates[0]!.employee.id],
+    }
+  }
+  if (candidates.length > 1) {
+    return {
+      kind: 'choice',
+      requiredSkillIds: missingSkillIds,
+      candidateEmployeeIds: candidates.map((item) => item.employee.id),
+      candidateDisplayNames: candidates.map((item) => item.employee.displayName),
+    }
+  }
+
+  const labels = matched
+    .filter((item) => missingSkillIds.includes(item.skill.id))
+    .map((item) => item.skill.displayName)
+  if (modelCapability !== undefined && missingSkillIds.includes(modelCapability.id)) labels.push(modelCapability.label)
+  return {
+    kind: 'unavailable',
+    requiredSkillIds: missingSkillIds,
+    candidateEmployeeIds: [],
+    guidance: `当前角色没有${labels.length > 0 ? `“${labels.join('、')}”` : '所需'}能力。请在“档案 → 角色 → Skill 授权”中给一个角色授权；如果世界尚未启用该能力，请先在市场安装对应插件，也可以改派给已有能力的角色。`,
+  }
+}
+
+function directMediaCapability(prompt: string): { id: string; label: string } | undefined {
+  if (/(?:生视频|生成视频|视频生成|video generation|generate video)/iu.test(prompt)) {
+    return { id: 'video-generation', label: '视频生成' }
+  }
+  if (/(?:生图|生成图片|生成图像|图片生成|image generation|generate image)/iu.test(prompt)) {
+    return { id: 'image-generation', label: '图片生成' }
+  }
+  return undefined
 }
 
 /**

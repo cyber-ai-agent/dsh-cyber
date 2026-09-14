@@ -76,6 +76,7 @@ import type { ConversationPermissionMode } from './components/ConversationPermis
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
 import { ModelHubLauncher } from './features/model-hub/ModelHubLauncher.js'
 import { ConnectionHubLauncher } from './features/connection-hub/ConnectionHubLauncher.js'
+import { SkillCenterLauncher } from './features/skill-center/SkillCenterLauncher.js'
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
 import { WorldThemeSwitcher } from './components/WorldThemeSwitcher.js'
@@ -630,13 +631,46 @@ export default function App() {
     const worldId = activeWorldRef.current?.id
     if (worldId === undefined) return
     try {
-      await api(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue/${encodeURIComponent(turn.serverQueueId ?? turn.id)}`, { method: 'DELETE' })
+      if (!demoMode) {
+        await api(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue/${encodeURIComponent(turn.serverQueueId ?? turn.id)}`, { method: 'DELETE' })
+      }
       turnQueueRef.current.remove(turnId)
       patchPendingTurn(turnId, { status: 'cancelled' })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '撤销排队消息失败')
     }
-  }, [patchPendingTurn])
+  }, [demoMode, patchPendingTurn])
+
+  const editQueuedTurn = useCallback(async (turnId: string): Promise<void> => {
+    const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
+    if (turn === undefined || turn.status !== 'queued') return
+    const content = turn.content ?? turn.title
+    await cancelQueuedTurn(turnId)
+    setDraft(content)
+    setComposerFocusRequest((current) => current + 1)
+  }, [cancelQueuedTurn])
+
+  const promoteQueuedTurn = useCallback(async (turnId: string): Promise<void> => {
+    const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
+    if (turn === undefined || turn.status !== 'queued') return
+    const worldId = activeWorldRef.current?.id
+    if (worldId === undefined) return
+    try {
+      const nextPriority = (turn.priority ?? 0) + 1
+      if (demoMode) {
+        turnQueueRef.current.promote(turn.queueKey, turnId)
+        patchPendingTurn(turnId, { priority: nextPriority })
+        return
+      }
+      const result = await api<{ queueItem?: { priority?: number } }>(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue/${encodeURIComponent(turn.serverQueueId ?? turn.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ queueMode: 'next' }),
+      })
+      patchPendingTurn(turnId, { priority: result.queueItem?.priority ?? nextPriority })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '插入排队消息失败')
+    }
+  }, [demoMode, patchPendingTurn])
 
   const stopTurn = useCallback(async (turnId: string): Promise<void> => {
     const reply = Object.values(streamingReplies).find((item) => item.clientTurnId === turnId)
@@ -948,15 +982,23 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [activeWorld, demoMode, pendingTurns.length, refreshConversationTranscript])
 
-  useEffect(() => {
-    if (demoMode || activeWorld === undefined) return
-    const worldId = activeWorld.id
-    void api<{ items?: PendingChatTurn[] }>(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue`).then((result) => {
+  const refreshPendingTurns = useCallback(async (worldId: string): Promise<void> => {
+    if (demoMode) return
+    try {
+      const result = await api<{ items?: PendingChatTurn[] }>(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue`)
       if (activeWorldRef.current?.id !== worldId || !Array.isArray(result.items)) return
       setPendingTurns(result.items)
       pendingTurnsRef.current = result.items
-    }).catch(() => undefined)
-  }, [activeWorld, demoMode])
+    } catch {
+      // The live runtime stream and the next explicit action will reconcile
+      // the durable queue; a transient read must not interrupt the chat.
+    }
+  }, [demoMode])
+
+  useEffect(() => {
+    if (activeWorld === undefined) return
+    void refreshPendingTurns(activeWorld.id)
+  }, [activeWorld, refreshPendingTurns])
 
   // Authority changes are world-scoped facts. Reuse the shared /live stream so
   // another tab can update badges without reloading messages or dossiers.
@@ -2385,6 +2427,7 @@ export default function App() {
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />{t('app.market', '市场')}</button>
+          <SkillCenterLauncher world={activeWorld} worlds={worlds} onClosed={() => void loadWorld(activeWorld)} onOpenMarket={() => void openPackageMarket('plugin')} />
           <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} onClosed={() => void refreshModelProfiles()} />
           <ConnectionHubLauncher workspace={workspace} />
           <button type="button" onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" />{t('app.healthy', '良好')}</button>
@@ -2510,6 +2553,8 @@ export default function App() {
             onOpenPluginMarket={() => void openPackageMarket('plugin')}
             onOpenHistory={openMessageHistory}
             onCancelQueuedTurn={cancelQueuedTurn}
+            onEditQueuedTurn={editQueuedTurn}
+            onPromoteQueuedTurn={promoteQueuedTurn}
             onStopTurn={stopTurn}
             hasOlderMessages={messagePage.hasMore}
             loadingOlderMessages={messagePage.loading}

@@ -2463,6 +2463,72 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE employee_revisions ADD COLUMN connection_grants_json TEXT NOT NULL DEFAULT '[]';
     `,
   },
+  {
+    version: 53,
+    name: 'mcp-skill-grant-unification',
+    sql: `
+      -- Multi-service MCP namespaced every tool behind its connection's
+      -- service slug: a skill id is now \`mcp.<service>.<tool>\`, and both the
+      -- /mcp proposal path and the grant check resolve only that
+      -- service-qualified form. Grants written by the earlier single-service
+      -- adapter are two-segment \`mcp.<tool>\` (its lone connection always
+      -- backfilled to service \`default\`), so they stopped matching and the
+      -- profile panel kept showing them as orphaned "当前不可用" entries.
+      --
+      -- Only two-segment ids are rewritten: the legacy connection exposed
+      -- dot-free tool names (browser_*), so \`mcp.\` + a dot-free token is
+      -- unambiguously legacy and becomes \`mcp.default.<token>\`. Ids that
+      -- already carry a service segment (\`mcp.<service>.<tool>\`, three
+      -- segments or more) are the current form and stay byte-identical.
+      -- Historical revisions are rewritten too: a rollback to an older
+      -- revision must not resurrect the dead id. Execution and audit facts
+      -- (skill_actions, blueprints' requested skills) are deliberately left
+      -- alone — they record what ran, not what is grantable.
+      UPDATE employee_revisions
+      SET skill_grants_json = (
+          SELECT COALESCE(
+            json_group_array(
+              CASE
+                WHEN substr(je.value, 1, 4) = 'mcp.' AND instr(substr(je.value, 5), '.') = 0
+                THEN 'mcp.default.' || substr(je.value, 5)
+                ELSE je.value
+              END
+            ),
+            '[]'
+          )
+          FROM json_each(employee_revisions.skill_grants_json) AS je
+        )
+      WHERE EXISTS (
+          SELECT 1
+          FROM json_each(employee_revisions.skill_grants_json) AS je
+          WHERE substr(je.value, 1, 4) = 'mcp.' AND instr(substr(je.value, 5), '.') = 0
+        );
+    `,
+  },
+  {
+    version: 54,
+    name: 'skill-scope-settings',
+    sql: `
+      CREATE TABLE IF NOT EXISTS skill_scope_settings (
+        workspace_id TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (scope IN ('workspace', 'world')),
+        scope_id TEXT NOT NULL,
+        world_id TEXT,
+        skill_ids_json TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (workspace_id, scope, scope_id),
+        CHECK (
+          (scope = 'workspace' AND scope_id = workspace_id AND world_id IS NULL)
+          OR (scope = 'world' AND scope_id = world_id)
+        ),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id, world_id) REFERENCES worlds(workspace_id, id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS skill_scope_settings_workspace_scope_idx
+        ON skill_scope_settings(workspace_id, scope, scope_id);
+    `,
+  },
 ]
 
 /**

@@ -1,12 +1,19 @@
+import { readFile } from 'node:fs/promises'
+import { extname, resolve, sep } from 'node:path'
+
 import type {
   CharacterSkillDescriptor,
   InstalledPackage,
+  SkillDetailFile,
+  SkillDetailView,
   SkillCatalogAvailability,
   SkillCatalogEntry,
   SkillCatalogScope,
   SkillCatalogSource,
+  SkillSettingsScope,
+  SkillSettingsView,
 } from '@dsh-cyber/contracts'
-import type { SqliteStore } from '@dsh-cyber/persistence'
+import type { SkillScopeSettingsRepository, SqliteStore } from '@dsh-cyber/persistence'
 
 import {
   loadInstalledSkills,
@@ -17,14 +24,15 @@ import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import type { WorldSkillAvailabilityInput, WorldSkillAvailabilityPort } from './world-skill-availability.js'
 import type { WorldPackageInstanceService } from './world-package-instance-service.js'
 
-type CatalogStore = Pick<SqliteStore, 'getWorkspace' | 'getWorld' | 'listInstalledPackages'>
-type CatalogRegistry = Pick<CharacterSkillAdapterRegistry, 'list'>
-type CatalogWorldPackages = Pick<WorldPackageInstanceService, 'listRuntimePackages'>
+type CatalogStore = Pick<SqliteStore, 'getWorkspace' | 'getWorld' | 'listInstalledPackages'> & Partial<Pick<SqliteStore, 'listWorlds'>>
+type CatalogRegistry = Pick<CharacterSkillAdapterRegistry, 'list'> & Partial<Pick<CharacterSkillAdapterRegistry, 'recipeForSkill'>>
+type CatalogWorldPackages = Pick<WorldPackageInstanceService, 'listRuntimePackages'> & Partial<Pick<WorldPackageInstanceService, 'instantiate'>>
 
 export interface SkillCatalogServiceOptions {
   store: CatalogStore
   registry: CatalogRegistry
   worldPackages: CatalogWorldPackages
+  scopeSettings?: Pick<SkillScopeSettingsRepository, 'get' | 'save' | 'clear'>
 }
 
 interface PackageSkillRecord extends InstalledSkillManifest {
@@ -39,18 +47,20 @@ interface PackageSkillIndex {
 
 /**
  * Derives global/workspace discovery and World availability from existing
- * package and Registry authorities. Nothing is persisted here: the package
- * library and pinned World Package Instances remain the source of truth.
+ * package and Registry authorities. Catalog definitions remain derived from
+ * those sources; persistence stores only scope selections by stable Skill ID.
  */
 export class SkillCatalogService implements WorldSkillAvailabilityPort {
   readonly #store: CatalogStore
   readonly #registry: CatalogRegistry
   readonly #worldPackages: CatalogWorldPackages
+  readonly #scopeSettings: SkillCatalogServiceOptions['scopeSettings']
 
   constructor(options: SkillCatalogServiceOptions) {
     this.#store = options.store
     this.#registry = options.registry
     this.#worldPackages = options.worldPackages
+    this.#scopeSettings = options.scopeSettings
   }
 
   /** Workspace/global catalog. World-scoped package activation is not implied. */
@@ -79,15 +89,107 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
     const descriptors = this.#registry.list(world.workspaceId)
       .filter((descriptor) => descriptor.authorizationSource !== 'world-authority')
     const packages = this.#activeWorkspacePackages(world.workspaceId)
-    const runtimePackages = await this.#worldPackages.listRuntimePackages(worldId)
     const packageIndex = await this.#readPackageSkills(packages)
+    const selected = this.#effectiveScopeSkillIds(world.workspaceId, world.id)
+    let runtimePackages = await this.#worldPackages.listRuntimePackages(worldId)
+    if (selected !== undefined && this.#worldPackages.instantiate !== undefined) {
+      const activePackageIds = new Set(runtimePackages.map((item) => item.packageId))
+      const targets = [...new Set([...selected].flatMap((skillId) => {
+        const record = packageIndex.bySkillId.get(skillId)
+        return record === undefined || activePackageIds.has(record.packageId) ? [] : [`${record.packageId}\u0000${record.packageVersion}`]
+      }))]
+      await Promise.allSettled(targets.map((target) => {
+        const [packageId, version] = target.split('\u0000') as [string, string]
+        return this.#worldPackages.instantiate!({ worldId, packageId, version, actorId: 'skill-scope' })
+      }))
+      if (targets.length > 0) runtimePackages = await this.#worldPackages.listRuntimePackages(worldId)
+    }
     const worldPackageIndex = await this.#readPackageSkills(runtimePackages)
-    return mergeCatalog({
+    const items = mergeCatalog({
       descriptors,
       packageIndex,
       worldPackageIndex,
       worldScoped: true,
     })
+    return selected === undefined ? items : items.map((item) => selected.has(item.id)
+      ? item
+      : { ...item, worldAvailable: false, availability: 'unavailable' })
+  }
+
+  async listSettings(workspaceId: string): Promise<SkillSettingsView> {
+    const workspace = this.#store.getWorkspace(workspaceId)
+    if (workspace === undefined) throw new Error(`Workspace not found: ${workspaceId}`)
+    const catalog = await this.listWorkspace(workspaceId)
+    const global = this.#scopeSettings?.get(workspaceId, 'workspace', workspaceId)
+    const globalDefaults = catalog.filter((item) => item.worldAvailable).map((item) => item.id)
+    const worlds = await Promise.all((this.#store.listWorlds?.(workspaceId, true) ?? []).map(async (world) => {
+      const own = this.#scopeSettings?.get(workspaceId, 'world', world.id)
+      const skillIds = own?.skillIds ?? global?.skillIds ?? (await this.#listWorldBase(world.id)).filter((item) => item.worldAvailable).map((item) => item.id)
+      return { scope: 'world' as const, scopeId: world.id, displayName: world.name, configured: own !== undefined, inherited: own === undefined && global !== undefined, skillIds: [...skillIds] }
+    }))
+    return {
+      global: { scope: 'workspace', scopeId: workspaceId, displayName: '全局', configured: global !== undefined, inherited: false, skillIds: [...(global?.skillIds ?? globalDefaults)] },
+      worlds,
+    }
+  }
+
+  async saveSettings(input: { workspaceId: string; scope: SkillSettingsScope; scopeId: string; skillIds?: readonly string[]; inherit?: boolean }): Promise<SkillSettingsView> {
+    if (this.#scopeSettings === undefined) throw new Error('Skill scope settings are unavailable')
+    if (this.#store.getWorkspace(input.workspaceId) === undefined) throw new Error(`Workspace not found: ${input.workspaceId}`)
+    if (input.scope === 'workspace' && input.scopeId !== input.workspaceId) throw new Error('Global Skill scope id must match the workspace')
+    if (input.scope === 'world' && this.#store.getWorld(input.scopeId)?.workspaceId !== input.workspaceId) throw new Error('World Skill scope does not belong to the workspace')
+    if (input.inherit === true) {
+      if (input.scope !== 'world') throw new Error('Only a World Skill scope may inherit')
+      this.#scopeSettings.clear(input.workspaceId, input.scope, input.scopeId)
+      return this.listSettings(input.workspaceId)
+    }
+    const known = new Set((await this.listWorkspace(input.workspaceId)).map((item) => item.id))
+    const skillIds = [...new Set(input.skillIds ?? [])]
+    const unknown = skillIds.find((skillId) => !known.has(skillId))
+    if (unknown !== undefined) throw new Error(`Unknown Skill: ${unknown}`)
+    this.#scopeSettings.save({ workspaceId: input.workspaceId, scope: input.scope, scopeId: input.scopeId, skillIds })
+    const targetWorldIds = input.scope === 'workspace'
+      ? (this.#store.listWorlds?.(input.workspaceId, true) ?? []).filter((world) => world.status === 'active').map((world) => world.id)
+      : [input.scopeId]
+    await Promise.all(targetWorldIds.map((worldId) => this.listWorld(worldId)))
+    return this.listSettings(input.workspaceId)
+  }
+
+  async detailWorkspace(workspaceId: string, skillId: string): Promise<SkillDetailView> {
+    const entry = (await this.listWorkspace(workspaceId)).find((item) => item.id === skillId)
+    if (entry === undefined) throw new Error(`Skill not found: ${skillId}`)
+    const installed = this.#activeWorkspacePackages(workspaceId).find((item) => item.packageId === entry.packageId && item.version === entry.packageVersion)
+    if (installed !== undefined) {
+      const files = await readSkillFiles(installed)
+      return { entry, tree: files.map((file) => ({ path: file.path, kind: 'file' as const })), files, editable: installed.packageId.startsWith('generated.skill.'), packageId: installed.packageId, packageVersion: installed.version }
+    }
+    const recipe = this.#registry.recipeForSkill?.(skillId)
+    const content = recipe === undefined ? JSON.stringify(entry, null, 2) : skillMarkdown(entry, recipe.instruction)
+    const file: SkillDetailFile = { path: recipe === undefined ? 'descriptor.json' : 'SKILL.md', content, language: recipe === undefined ? 'json' : 'markdown', editable: false }
+    return { entry, tree: [{ path: file.path, kind: 'file' }], files: [file], editable: false }
+  }
+
+  async instructionsForWorld(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): Promise<string[]> {
+    const available = new Set(await this.availableSkillIds(input))
+    const manifests = await loadInstalledSkills(await this.#worldPackages.listRuntimePackages(input.worldId))
+    return manifests.filter((item) => available.has(item.manifest.id) && item.manifest.integrationId === 'builtin.recipe')
+      .map((item) => `${item.manifest.displayName}：${item.manifest.instructions.trim()}`)
+  }
+
+  #effectiveScopeSkillIds(workspaceId: string, worldId: string): Set<string> | undefined {
+    const world = this.#scopeSettings?.get(workspaceId, 'world', worldId)
+    if (world !== undefined) return new Set(world.skillIds)
+    const global = this.#scopeSettings?.get(workspaceId, 'workspace', workspaceId)
+    return global === undefined ? undefined : new Set(global.skillIds)
+  }
+
+  async #listWorldBase(worldId: string): Promise<SkillCatalogEntry[]> {
+    const world = this.#store.getWorld(worldId)
+    if (world === undefined) throw new Error(`World not found: ${worldId}`)
+    const descriptors = this.#registry.list(world.workspaceId).filter((descriptor) => descriptor.authorizationSource !== 'world-authority')
+    const packageIndex = await this.#readPackageSkills(this.#activeWorkspacePackages(world.workspaceId))
+    const worldPackageIndex = await this.#readPackageSkills(await this.#worldPackages.listRuntimePackages(worldId))
+    return mergeCatalog({ descriptors, packageIndex, worldPackageIndex, worldScoped: true })
   }
 
   async availableSkillIds(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): Promise<string[]> {
@@ -203,6 +305,7 @@ function isWorldAvailable(input: {
   source: SkillCatalogSource
 }): boolean {
   if (input.hasConflict) return false
+  if (isDeclarativeRecipe(input.worldPackage)) return true
   if (input.source === 'builtin' || input.source === 'mcp') return input.descriptor !== undefined
   if (!input.packageBound) return input.descriptor !== undefined
   if (input.worldPackage === undefined || input.descriptor === undefined) return false
@@ -216,6 +319,7 @@ function isWorkspaceAvailable(input: {
 }): boolean {
   if (input.hasConflict) return false
   if (input.packageRecord !== undefined) {
+    if (isDeclarativeRecipe(input.packageRecord)) return true
     const descriptor = input.packageRecord.descriptor
     return descriptor !== undefined && (descriptor.packageId === undefined || descriptor.packageId === input.packageRecord.packageId)
   }
@@ -244,13 +348,36 @@ function unboundPackageDescriptor(record: PackageSkillRecord | undefined): Chara
     displayName: record.manifest.displayName,
     summary: record.manifest.summary,
     ...(record.manifest.routingHints === undefined ? {} : { routingHints: [...record.manifest.routingHints] }),
-    adapterId: 'unbound.package',
+    adapterId: isDeclarativeRecipe(record) ? 'builtin.recipe' : 'unbound.package',
     risks: [],
     supportsScheduling: false,
     persistentApproval: 'forbidden',
-    kind: 'integration',
-    recommendedByDefault: false,
+    kind: isDeclarativeRecipe(record) ? 'recipe' : 'integration',
+    recommendedByDefault: isDeclarativeRecipe(record),
   }
+}
+
+function isDeclarativeRecipe(record: PackageSkillRecord | undefined): boolean {
+  return record?.manifest.integrationId === 'builtin.recipe'
+}
+
+async function readSkillFiles(installed: InstalledPackage): Promise<SkillDetailFile[]> {
+  const root = resolve(installed.installedPath)
+  const files: SkillDetailFile[] = []
+  for (const declared of installed.manifest.files) {
+    const extension = extname(declared.path).toLowerCase()
+    if (!['.md', '.json', '.txt'].includes(extension)) continue
+    const path = resolve(root, declared.path)
+    if (path !== root && !path.startsWith(`${root}${sep}`)) continue
+    const content = await readFile(path, 'utf8')
+    if (content.length > 64_000) continue
+    files.push({ path: declared.path, content, language: extension === '.md' ? 'markdown' : extension === '.json' ? 'json' : 'text', editable: installed.packageId.startsWith('generated.skill.') })
+  }
+  return files.sort((left, right) => left.path.localeCompare(right.path))
+}
+
+function skillMarkdown(entry: SkillCatalogEntry, instruction: string): string {
+  return [`# ${entry.displayName}`, '', entry.summary, '', '## 使用说明', '', instruction.trim(), '', '## Skill ID', '', `\`${entry.id}\``].join('\n')
 }
 
 /**

@@ -6,10 +6,12 @@ import {
   Copy,
   File as FileIcon,
   FilePlus,
+  PencilSimple,
   PaperPlaneRight,
   Paperclip,
   Stop,
   TerminalWindow,
+  Trash,
   UserCircle,
   X,
 } from '@phosphor-icons/react'
@@ -87,12 +89,14 @@ interface ChatWorkbenchProps {
   onChangePermissionMode?(mode: ConversationPermissionMode): void
   onRequestFullAccess?(): void
   onCancelQueuedTurn?(turnId: string): Promise<void>
+  onEditQueuedTurn?(turnId: string): Promise<void>
+  onPromoteQueuedTurn?(turnId: string): Promise<void>
   onStopTurn?(turnId: string): Promise<void>
   /** Stable queue identity used to reject late speech from another session. */
   speechConversationKey?: string
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onEditQueuedTurn, onPromoteQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -171,7 +175,9 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   }, [queueItems])
   const saturatedWaiting = queueItems.some((turn) => turn.status === 'queued' && turn.employeeIds.some((employeeId) => (runningLaneCounts.get(employeeId) ?? 0) >= 2))
   const activeTurn = useMemo(() => queueItems.find((turn) => turn.status === 'running' || turn.status === 'waiting-approval'), [queueItems])
-  const queuedTurns = useMemo(() => queueItems.filter((turn) => turn.status === 'queued').sort((left, right) => left.createdAt.localeCompare(right.createdAt)), [queueItems])
+  const queuedTurns = useMemo(() => queueItems
+    .filter((turn) => turn.status === 'queued')
+    .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0) || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)), [queueItems])
   const canStopCurrentTurn = activeTurn !== undefined && onStopTurn !== undefined
   const hasRunningTurn = queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping')
   const insertsNext = hasRunningTurn || queuedTurns.length > 0
@@ -647,7 +653,14 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {queuedTurns.length > 0 ? <section className="composer-inserts" aria-label="插入对话">
           <header><span>插入对话</span><small>当前回复结束后优先处理</small></header>
           {saturatedWaiting ? <p className="composer-inserts__note" role="status">角色通道已满，插入内容会在可用后立即继续。</p> : null}
-          <div>{queuedTurns.map((turn) => <article key={turn.id} className="composer-insert"><span><strong>{turn.content ?? turn.title}</strong><small>等待插入</small></span>{onCancelQueuedTurn === undefined ? null : <button type="button" onClick={() => void onCancelQueuedTurn(turn.id)} aria-label={`撤销插入：${turn.content ?? turn.title}`}><X size={15} /></button>}</article>)}</div>
+          <div>{queuedTurns.map((turn) => <article key={turn.id} className="composer-insert">
+            <span><strong>{turn.content ?? turn.title}</strong><small>等待插入</small></span>
+            <div className="composer-insert__actions" aria-label={`排队消息操作：${turn.content ?? turn.title}`}>
+              {onEditQueuedTurn === undefined ? null : <button type="button" className="secondary-button" onClick={() => void onEditQueuedTurn(turn.id)} aria-label={`编辑排队消息：${turn.content ?? turn.title}`} title="编辑排队消息"><PencilSimple size={14} />编辑排队消息</button>}
+              {onPromoteQueuedTurn === undefined ? null : <button type="button" className="secondary-button" onClick={() => void onPromoteQueuedTurn(turn.id)} aria-label={`插入排队消息：${turn.content ?? turn.title}`} title="插入"><ArrowUp size={14} />插入</button>}
+              {onCancelQueuedTurn === undefined ? null : <button type="button" className="danger-button" onClick={() => void onCancelQueuedTurn(turn.id)} aria-label={`删除排队消息：${turn.content ?? turn.title}`} title="删除"><Trash size={14} />删除</button>}
+            </div>
+          </article>)}</div>
         </section> : null}
         <div className="composer">
         {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} assetUrl={employee.avatarAssetUrl} rendererKind={employee.avatarProfile?.rendererKind} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}

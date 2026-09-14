@@ -6,7 +6,7 @@ import type {
   SkillCatalogEntry,
 } from '@dsh-cyber/contracts'
 
-import { GroupTaskRouter } from '../src/services/group-task-router.js'
+import { GroupTaskRouter, resolveDirectSkillDelegation } from '../src/services/group-task-router.js'
 
 describe('GroupTaskRouter', () => {
   it('selects only capable participants and skips an unrelated role', () => {
@@ -103,6 +103,86 @@ describe('GroupTaskRouter', () => {
     expect(result.steps.every((step) => step.executionMode === 'parallel')).toBe(true)
     expect(new Set(result.steps.flatMap((step) => step.assignedEmployeeIds)).size).toBe(3)
   })
+
+  it('delegates a direct capability request to the only authorized world role', () => {
+    const employees = [
+      candidate('initiator', '发起角色', '协调员', []),
+      candidate('image', '图像角色', '视觉制作', ['image.generate']),
+    ]
+    const result = resolveDirectSkillDelegation({
+      prompt: '请帮我生成一张深海主题图片',
+      initiator: employees[0]!,
+      employees,
+      catalog: [skill('image.generate', '图片生成', ['生成', '图片'], 'integration')],
+    })
+
+    expect(result).toEqual({
+      kind: 'delegate',
+      requiredSkillIds: ['image.generate'],
+      targetEmployeeId: 'image',
+      candidateEmployeeIds: ['image'],
+    })
+  })
+
+  it('asks the owner to choose when more than one world role can perform a capability', () => {
+    const employees = [
+      candidate('initiator', '发起角色', '协调员', []),
+      candidate('image-a', '图像甲', '视觉制作', ['image.generate']),
+      candidate('image-b', '图像乙', '视觉制作', ['image.generate']),
+    ]
+    const result = resolveDirectSkillDelegation({
+      prompt: '生成图片',
+      initiator: employees[0]!,
+      employees,
+      catalog: [skill('image.generate', '图片生成', ['生成', '图片'], 'integration')],
+    })
+
+    expect(result.kind).toBe('choice')
+    if (result.kind === 'choice') {
+      expect(result.candidateEmployeeIds).toEqual(['image-a', 'image-b'])
+      expect(result.candidateDisplayNames).toEqual(['图像甲', '图像乙'])
+    }
+  })
+
+  it('explains how to configure a role when no authorized executor exists', () => {
+    const employees = [candidate('initiator', '发起角色', '协调员', [])]
+    const result = resolveDirectSkillDelegation({
+      prompt: '请生成图片',
+      initiator: employees[0]!,
+      employees,
+      catalog: [skill('image.generate', '图片生成', ['生成', '图片'], 'integration')],
+    })
+
+    expect(result.kind).toBe('unavailable')
+    if (result.kind === 'unavailable') expect(result.guidance).toContain('档案 → 角色 → Skill 授权')
+  })
+
+  it('does not treat a casual conversation question as a missing skill', () => {
+    const employees = [candidate('initiator', '发起角色', '协调员', [])]
+    const result = resolveDirectSkillDelegation({
+      prompt: '会话怎么切换？',
+      initiator: employees[0]!,
+      employees,
+      catalog: [skill('conversation-organization', '会话整理', ['会话'])],
+    })
+
+    expect(result).toEqual({ kind: 'none', requiredSkillIds: [] })
+  })
+
+  it('uses an assigned media capability when the request is for image or video generation', () => {
+    const employees = [
+      candidate('initiator', '发起角色', '协调员', []),
+      { ...candidate('video', '视频角色', '视觉制作', []), capabilityIds: ['video-generation'] },
+    ]
+    const result = resolveDirectSkillDelegation({
+      prompt: '请生视频',
+      initiator: employees[0]!,
+      employees,
+      catalog: [],
+    })
+
+    expect(result).toMatchObject({ kind: 'delegate', requiredSkillIds: ['video-generation'], targetEmployeeId: 'video' })
+  })
 })
 
 function candidate(
@@ -140,7 +220,7 @@ function candidate(
   }
 }
 
-function skill(id: string, displayName: string, routingHints: string[]): SkillCatalogEntry {
+function skill(id: string, displayName: string, routingHints: string[], kind: 'recipe' | 'integration' = 'recipe'): SkillCatalogEntry {
   return {
     id,
     displayName,
@@ -149,7 +229,7 @@ function skill(id: string, displayName: string, routingHints: string[]): SkillCa
     risks: [],
     supportsScheduling: false,
     persistentApproval: 'forbidden',
-    kind: 'recipe',
+    kind,
     recommendedByDefault: false,
     source: 'builtin',
     scope: 'builtin',

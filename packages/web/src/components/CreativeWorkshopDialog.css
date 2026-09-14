@@ -337,6 +337,21 @@
 .creative-workshop-skill-catalog strong { font-size: 14px; }
 .creative-workshop-skill-catalog small { color: var(--text-soft); font-size: 12px; line-height: 1.45; }
 .creative-workshop-skill-catalog em { color: var(--text-muted); font-size: 12px; font-style: normal; }
+/* Aggregated MCP service row: one checkbox requests every tool of the
+   service; the expandable tool list still allows per-tool requests. */
+.creative-workshop-skill-catalog > .creative-workshop-skill-catalog__mcp-service { min-height: 72px; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px; border: 1px solid var(--border); background: var(--surface-1); }
+.creative-workshop-skill-catalog > .creative-workshop-skill-catalog__mcp-service.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.creative-workshop-skill-catalog > .creative-workshop-skill-catalog__mcp-service.is-unavailable { opacity: .72; }
+.creative-workshop-skill-catalog__mcp-service > input { width: 16px; height: 16px; flex-shrink: 0; }
+.creative-workshop-skill-catalog__mcp-service > span { min-width: 0; }
+.creative-workshop-skill-catalog__mcp-tools { margin-top: 2px; }
+.creative-workshop-skill-catalog__mcp-tools summary { cursor: pointer; color: var(--text-muted); font-size: 12px; list-style: none; user-select: none; }
+.creative-workshop-skill-catalog__mcp-tools summary::-webkit-details-marker { display: none; }
+.creative-workshop-skill-catalog__mcp-tools > div { display: grid; gap: 6px; margin-top: 8px; padding-left: 10px; border-left: 1px solid var(--border); }
+.creative-workshop-skill-catalog__mcp-tools label { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px; border: 1px solid var(--border); background: var(--surface-1); cursor: pointer; }
+.creative-workshop-skill-catalog__mcp-tools label.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.creative-workshop-skill-catalog__mcp-tools input { width: 14px; height: 14px; margin-top: 0; }
+.creative-workshop-skill-catalog__mcp-tools code { flex: 1 1 auto; min-width: 0; color: var(--text-soft); font-size: 12px; }
 .creative-workshop-permission-note { margin: 0; padding: 12px 14px; border-left: 3px solid var(--accent); color: var(--text-soft); background: var(--surface-1); font-size: 12px; line-height: 1.55; }
 .creative-workshop-review { margin: 0; display: grid; border-top: 1px solid var(--border); }
 .creative-workshop-review > div { min-height: 46px; display: grid; grid-template-columns: 130px minmax(0, 1fr); align-items: center; border-bottom: 1px solid var(--border); }

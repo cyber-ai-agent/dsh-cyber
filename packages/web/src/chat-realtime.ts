@@ -13,6 +13,8 @@ export interface PendingChatTurn {
   content?: string
   status: PendingChatTurnStatus
   createdAt: string
+  /** Durable queue priority; higher values are shown before normal entries. */
+  priority?: number
   sessionId?: string
   workTurnId?: string
   serverQueueId?: string

@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { PlugsConnected, Trash } from '@phosphor-icons/react'
+import { Trash } from '@phosphor-icons/react'
 import type {
   IntegrationConnection,
   IntegrationDescriptor,
+  IntegrationFieldDescriptor,
   IntegrationHealth,
   JsonObject,
 } from '@dsh-cyber/contracts'
 import { api } from '../../api.js'
 import { MachineProfilePanel } from '../machine-profile/MachineProfilePanel.js'
+import { WebSearchProviderCards } from './WebSearchProviderCards.js'
+
+/** The 联网搜索 type: its working area is the catalog-driven provider cards. */
+const WEB_SEARCH_TYPE_ID = 'builtin.web-search'
 
 export interface IntegrationSettingsPanelProps {
   workspaceId: string
@@ -31,10 +36,14 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
   const [connections, setConnections] = useState<IntegrationConnection[]>([])
   const [selectedTypeId, setSelectedTypeId] = useState<string>()
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>()
+  // Multi-connection types stay a clean card list until the user opens the
+  // editor: either by clicking a card, or by choosing the add action.
+  const [addingNew, setAddingNew] = useState(false)
   const [config, setConfig] = useState<JsonObject>({})
   const [secretInputs, setSecretInputs] = useState<Record<string, string>>({})
   const [clearedSecrets, setClearedSecrets] = useState<Record<string, boolean>>({})
   const [enabled, setEnabled] = useState(true)
+  const [togglingConnectionId, setTogglingConnectionId] = useState<string>()
   const [health, setHealth] = useState<IntegrationHealth>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -58,18 +67,20 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
     () => connections.filter((item) => item.integrationId === descriptor?.id),
     [connections, descriptor?.id],
   )
-  // Single-connection types edit their one connection; multi-connection types
-  // edit the selected device, or a fresh form when none is chosen yet.
+  // Single-connection types always edit their one connection. Multi-connection
+  // types (SSH 设备, MCP 连接) keep a clean card list until a card is clicked or
+  // the add action is chosen; then the editor below that list appears.
+  const selected = typeConnections.find((item) => item.id === selectedConnectionId)
   const connection = multiple
-    ? typeConnections.find((item) => item.id === selectedConnectionId)
+    ? (addingNew ? undefined : selected)
     : typeConnections[0]
-
-  const isNew = multiple && connection === undefined
+  const isNew = multiple && addingNew
+  const editorVisible = multiple ? (addingNew || selected !== undefined) : true
 
   useEffect(() => {
     setConfig(Object.fromEntries((descriptor?.configFields ?? []).map((field) => [
       field.id,
-      connection?.config[field.id] ?? (field.kind === 'boolean' ? false : field.kind === 'number' ? '' : field.placeholder ?? ''),
+      connection?.config[field.id] ?? defaultConfigValue(field),
     ])) as JsonObject)
     setEnabled(connection?.enabled ?? true)
     setSecretInputs({})
@@ -123,9 +134,10 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
     // Multi-connection types create a fresh row on every PUT without a
     // connectionId; begin editing a blank form then save persists it.
     setSelectedConnectionId(undefined)
+    setAddingNew(true)
     setConfig(Object.fromEntries((descriptor.configFields ?? []).map((field) => [
       field.id,
-      field.kind === 'boolean' ? false : field.kind === 'number' ? '' : field.placeholder ?? '',
+      defaultConfigValue(field),
     ])) as JsonObject)
     setEnabled(true)
     setSecretInputs({})
@@ -141,11 +153,36 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
     try {
       await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/${encodeURIComponent(descriptor.id)}/connections/${encodeURIComponent(connection.id)}`, { method: 'DELETE' })
       setSelectedConnectionId(undefined)
+      setAddingNew(false)
       await load()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '连接删除失败')
     } finally {
       setBusy(false)
+    }
+  }
+
+  // The card's right-edge 启用连接 switch. A connection-scoped PUT replaces
+  // the stored config wholesale, so the card's config is sent back unchanged
+  // and only the enabled flag flips; secrets are never touched. The card flips
+  // optimistically and rolls back if the server rejects the write.
+  const setConnectionEnabled = async (item: IntegrationConnection, value: boolean) => {
+    if (descriptor === undefined) return
+    setTogglingConnectionId(item.id); setError(undefined)
+    setConnections((current) => current.map((row) => row.id === item.id ? { ...row, enabled: value } : row))
+    if (item.id === selectedConnectionId) setEnabled(value)
+    try {
+      await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/${encodeURIComponent(descriptor.id)}/connections/${encodeURIComponent(item.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ config: item.config, enabled: value }),
+      })
+      await load()
+    } catch (cause) {
+      setConnections((current) => current.map((row) => row.id === item.id ? { ...row, enabled: !value } : row))
+      if (item.id === selectedConnectionId) setEnabled(!value)
+      setError(cause instanceof Error ? cause.message : '连接启用状态保存失败')
+    } finally {
+      setTogglingConnectionId(undefined)
     }
   }
 
@@ -177,27 +214,67 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
 
   const renderBody = () => (descriptor === undefined
     ? <div className="dialog-empty">当前没有可配置的外部连接。</div>
-    : <>
-        {multiple ? <div className="integration-connection-list" role="list" aria-label={`${descriptor.displayName} 连接列表`}>
-          <button type="button" className={isNew ? 'is-active is-new-connection' : 'is-new-connection'} onClick={() => void addConnection()}>
-            <PlugsConnected size={15} /><strong>{isNew ? '添加设备' : '＋ 添加设备'}</strong><small>新建一个 {descriptor.displayName}</small>
-          </button>
-          {typeConnections.map((item) => <button key={item.id} type="button" className={item.id === selectedConnectionId ? 'is-active' : ''} onClick={() => setSelectedConnectionId(item.id)}>
-            <strong>{item.displayName}</strong><small>{`${String(item.config.host ?? item.config.endpoint ?? '')}${item.enabled ? '' : ' · 已停用'}`}</small>
-          </button>)}
-        </div> : null}
-        <section className="integration-editor">
+    : descriptor.id === WEB_SEARCH_TYPE_ID
+      ? <WebSearchProviderCards
+        workspaceId={workspaceId}
+        connections={connections}
+        typeId={descriptor.id}
+        {...(initialSkillId === undefined ? {} : { initialSkillId })}
+        onSaved={load}
+      />
+      : <>
+        {multiple ? <>
+          <div className="integration-connection-list" role="list" aria-label={`${descriptor.displayName} 连接列表`}>
+            <div className={isNew ? 'integration-connection-card is-active is-new-connection' : 'integration-connection-card is-new-connection'}>
+              <button type="button" onClick={() => void addConnection()}>
+                <strong>{isNew ? `添加${descriptor.displayName}` : `＋ 添加${descriptor.displayName}`}</strong><small>新建一个 {descriptor.displayName}</small>
+              </button>
+            </div>
+            {typeConnections.map((item) => {
+              const active = item.id === selectedConnectionId
+              return <div key={item.id} className={active ? 'integration-connection-card is-active' : 'integration-connection-card'}>
+                {/* Second click on the open card collapses the editor below. */}
+                <button type="button" aria-expanded={active} onClick={() => { if (active) { setSelectedConnectionId(undefined); return } setAddingNew(false); setSelectedConnectionId(item.id) }}>
+                  <strong>{item.displayName}</strong><small>{`${String(item.config.service ?? item.config.host ?? item.config.endpoint ?? item.config.command ?? '')}${item.enabled ? '' : ' · 已停用'}`}</small>
+                </button>
+                {/* Right edge carries the 启用连接 switch for quick on/off. */}
+                <label className="integration-connection-card__enable" title={item.enabled ? '点击停用该连接' : '点击启用该连接'}>
+                  <input type="checkbox" checked={item.enabled} disabled={togglingConnectionId === item.id} aria-label={`启用连接 ${item.displayName}`} onChange={() => void setConnectionEnabled(item, !item.enabled)} />
+                  <span>启用</span>
+                </label>
+              </div>
+            })}
+          </div>
+          {error !== undefined && !editorVisible ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
+        </> : null}
+        {editorVisible ? <section className="integration-editor">
           <header>
             <div><h4>{isNew ? `添加${descriptor.displayName}` : connection?.displayName ?? descriptor.displayName}</h4><p>{descriptor.summary}</p></div>
-            <label><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用连接</label>
+            {/* Multi-connection types toggle 启用连接 on the card's right edge; the
+                header checkbox remains only for single-connection types without cards. */}
+            {!multiple ? <label><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用连接</label> : null}
           </header>
-          {descriptor.configFields.map((field) => field.kind === 'boolean' ? (
-            <label className="dialog-field dialog-field--checkbox" key={field.id}><input type="checkbox" checked={config[field.id] === true} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.checked }))} /><span>{field.displayName}</span><small>{field.description}</small></label>
-          ) : field.id === 'displayName' ? (
-            <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type="text" value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.value }))} /><small>{field.description}</small></label>
-          ) : (
-            <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type={field.kind === 'number' ? 'number' : 'text'} value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: field.kind === 'number' ? Number(event.target.value) : event.target.value }))} /><small>{field.description}</small></label>
-          ))}
+          {descriptor.configFields.map((field) => {
+            // A field can be gated on a sibling select (e.g. MCP 远程地址 vs 本机启动命令):
+            // hidden fields keep their value in `config` state; the server drops
+            // whatever the active mode does not need.
+            if (field.visibleWhen !== undefined && !field.visibleWhen.equals.includes(String(config[field.visibleWhen.field] ?? ''))) return null
+            if (field.kind === 'select') {
+              return <label className="dialog-field" key={field.id}><span>{field.displayName}</span>
+                <select value={String(config[field.id] ?? '')} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.value }))}>
+                  {(field.options ?? []).map((option) => <option key={option} value={option}>{field.optionLabels?.[option] ?? option}</option>)}
+                </select>
+                <small>{field.description}</small>
+              </label>
+            }
+            return field.kind === 'boolean' ? (
+              <label className="dialog-field dialog-field--checkbox" key={field.id}><input type="checkbox" checked={config[field.id] === true} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.checked }))} /><span>{field.displayName}</span><small>{field.description}</small></label>
+            ) : field.id === 'displayName' ? (
+              <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type="text" value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.value }))} /><small>{field.description}</small></label>
+            ) : (
+              <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type={field.kind === 'number' ? 'number' : 'text'} value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: field.kind === 'number' ? Number(event.target.value) : event.target.value }))} /><small>{field.description}</small></label>
+            )
+          })}
           {(descriptor.secretFields ?? []).map((field) => {
             const stored = secretConfiguredFor(field.id)
             const cleared = clearedSecrets[field.id] === true
@@ -224,12 +301,12 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
               <button className="primary-button" type="button" disabled={busy || secretMissing} onClick={() => void save()}>{busy ? '处理中…' : isNew ? '添加连接' : '保存连接'}</button>
             </span>
           </footer>
-        </section>
+        </section> : null}
       </>)
 
   return <div className="integration-hub-layout">
     <div className="integration-provider-list" role="list" aria-label="连接类型">
-      {descriptors.map((item) => <button key={item.id} type="button" className={item.id === selectedTypeId ? 'is-active' : ''} onClick={() => { setSelectedTypeId(item.id); setSelectedConnectionId(undefined) }}><strong>{item.displayName}</strong><small>{item.summary}</small></button>)}
+      {descriptors.map((item) => <button key={item.id} type="button" className={item.id === selectedTypeId ? 'is-active' : ''} onClick={() => { setSelectedTypeId(item.id); setSelectedConnectionId(undefined); setAddingNew(false) }}><strong>{item.displayName}</strong><small>{item.summary}</small></button>)}
     </div>
     <div className="integration-hub-workspace">
       {renderBody()}
@@ -239,6 +316,19 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
 
 function pickInitialType(descriptors: IntegrationDescriptor[], initialSkillId: string | undefined): string | undefined {
   if (initialSkillId === undefined) return descriptors[0]?.id
+  // The 联网搜索 cards took over the Firecrawl settings (and its skill's
+  // config entry), so a Firecrawl skill request preselects that main item.
+  if (initialSkillId === 'web.search.firecrawl') return WEB_SEARCH_TYPE_ID
   const match = descriptors.find((item) => item.skillIds.includes(initialSkillId))
   return match?.id ?? descriptors[0]?.id
+}
+
+/** Blank-form value for a field by kind; a select field opens on its first option. */
+function defaultConfigValue(field: IntegrationFieldDescriptor): string | boolean {
+  switch (field.kind) {
+    case 'boolean': return false
+    case 'number': return ''
+    case 'select': return field.options?.[0] ?? ''
+    default: return field.placeholder ?? ''
+  }
 }

@@ -11,7 +11,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator, type GroupTurnPlannerPort } from '@dsh-cyber/orchestration'
 import type { PackageManager, PackageRuntimePort } from '@dsh-cyber/package-runtime'
-import { SqliteStore, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
+import { SkillScopeSettingsRepository, SqliteStore, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
 import { dispatchHttpRequest } from './http/context.js'
 import { assertApplicationAccess } from './http/application-access-guard.js'
 import { writeError } from './http/errors.js'
@@ -95,6 +95,7 @@ import { createKnowledgeSearchPort } from './services/knowledge-search-port.js'
 import { KnowledgeWebImportService } from './services/knowledge-web-import-service.js'
 import { WorldKnowledgeLibraryService } from './services/world-knowledge-library-service.js'
 import { WorldKnowledgeRetrievalService } from './services/world-knowledge-retrieval-service.js'
+import { createWebSearchWiring } from './compose-web-search.js'
 import type { KnowledgeExtractionPort } from './services/knowledge-extraction.js'
 import { createWorldKnowledgeGraphRuntime } from './services/world-knowledge-graph-runtime.js'
 import { WorldKnowledgeRuntimeContextContributor, WorldRuntimeContextComposer } from './services/world-runtime-context-composer.js'
@@ -113,7 +114,7 @@ import type { CharacterSkillActionRepository } from './skills/skill-action-repos
 import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import type { WorldSkillAvailabilityPort } from './services/world-skill-availability.js'
 import type { CreativeWorkshopDraftGeneratorPort } from './services/creative-workshop-draft-generator.js'
-import { composeGenerators, type CharacterImportAnalyzerPort, type PluginImportAnalyzerPort, type SkinImportAnalyzerPort, type WorldImportAnalyzerPort } from './composition/compose-generators.js'
+import { composeGenerators, type CharacterImportAnalyzerPort, type PluginImportAnalyzerPort, type SkillAuthoringAnalyzerPort, type SkinImportAnalyzerPort, type WorldImportAnalyzerPort } from './composition/compose-generators.js'
 import { composeCharacterGeneratorMarketplace } from './services/character-generator-marketplace.js'
 import { createWorldManagementHost } from './skills/world-management-host.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
@@ -153,8 +154,7 @@ export interface CyberServerOptions {
   worldImportAnalyzer?: WorldImportAnalyzerPort
   /** Skin Generator analyzer; tests and CI pass a deterministic stub. */
   skinImportAnalyzer?: SkinImportAnalyzerPort
-  /** Plugin Generator analyzer; tests and CI pass a deterministic stub. */
-  pluginImportAnalyzer?: PluginImportAnalyzerPort
+  /** Generator analyzers; tests and CI may pass deterministic stubs. */ pluginImportAnalyzer?: PluginImportAnalyzerPort; skillAuthoringAnalyzer?: SkillAuthoringAnalyzerPort
   /**
    * Decides the speaking roster of a group turn.
    *
@@ -283,19 +283,20 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   })
   const sshSessions = new SshSessionPool()
 
+  const connectionGrantsFor = createConnectionGrantsResolver(store); const webSearch = await createWebSearchWiring(integrations, () => startedAddress?.origin, connectionGrantsFor)
   const worldManagementHost = createWorldManagementHost({ store, worldSettings, worldPackages, authority })
 
   const environments = createEnvironmentService(stateRoot, { devices: composeSshEnvironmentDeviceSource({ store, integrations }) })
 
   const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry({
-    firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId) },
+    firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), connectionGrantsFor },
     browser: { store, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), publishScreenshot: (input) => worldArtifacts.publishBrowserScreenshot(input), ...(options.browserClientFactory === undefined ? {} : { clientFactory: options.browserClientFactory }), ...(options.browserPolicy === undefined ? {} : { policy: options.browserPolicy }) },
     worldManagement: worldManagementHost,
-    ssh: { store, integrations, sessions: sshSessions, connectionGrantsFor: createConnectionGrantsResolver(store), environment: environments },
+    ssh: { store, integrations, sessions: sshSessions, connectionGrantsFor, environment: environments },
   })
-  const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
+  const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients, connectionGrantsFor }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
-  const skillCatalog = new SkillCatalogService({ store, registry: skillRegistry, worldPackages })
+  const skillScopes = new SkillScopeSettingsRepository(store.database); const skillCatalog = new SkillCatalogService({ store, registry: skillRegistry, worldPackages, scopeSettings: skillScopes })
   // Production uses the derived World Catalog by default; tests and legacy embedders may inject a narrower port explicitly.
   const skillAvailability = options.skillAvailability ?? skillCatalog
 
@@ -310,7 +311,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     ...(options.knowledgeExtractionPort === undefined ? {} : { extractionPort: options.knowledgeExtractionPort }),
     publish: (worldId, payload) => publishKnowledgeChanged?.(worldId, payload),
   })
-  const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, request) } })
+  const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, request) }, resolveWebSearchPlan: webSearch.resolveWebSearchPlan })
   // World settings and the host-probed machine profile are rendered by the runtime into the cacheable prefix.
   const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings, runFileEvidence, environments)
   const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
@@ -467,6 +468,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
       if (integrationId === MCP_INTEGRATION_ID && mcpAdapter !== undefined) await refreshMcpCatalog(mcpAdapter, skillRegistry)
     },
   })
+  webSearch.register(router)
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerLocalTtsRoutes(router, localTtsAssets)
@@ -509,9 +511,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
       await dispatchHttpRequest(router, webRoot, request, response)
     })().catch((error: unknown) => writeError(response, error))
   })
-  httpServer.requestTimeout = 0
-  httpServer.headersTimeout = 10_000
-  httpServer.keepAliveTimeout = 5_000
+  httpServer.requestTimeout = 0; httpServer.headersTimeout = 10_000; httpServer.keepAliveTimeout = 5_000
   const voiceSocket = attachVoiceWebSocket({ server: httpServer, stateRoot, applicationAccess })
   const unsubscribe = orchestrator.subscribe((event) => {
     toolApprovals.capture(event)

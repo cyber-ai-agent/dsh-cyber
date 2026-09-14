@@ -1950,6 +1950,65 @@ describe('SqliteStore', () => {
     expect(columns.find((column) => column.name === 'accepted_at')).toMatchObject({ notnull: 1 })
     expect(columns.find((column) => column.name === 'started_at')).toMatchObject({ notnull: 0 })
   })
+
+  it('rewrites legacy two-segment MCP skill grants to the service-qualified form', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: 'MCP grant migration' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: 'MCP 迁移世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint({ id: 'mcp-migration.worker', worldTemplateId: 'cyber-company' }))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'mcp-migration.worker',
+      blueprintVersion: 1,
+    })
+    // The shape the pre-multi-service adapter left behind: two-segment
+    // mcp.<tool> grants next to already-qualified ids and foreign skills.
+    const legacyGrants = [
+      'core.chat',
+      'mcp.browser_navigate',
+      'mcp.browser_click',
+      'mcp.github.search',
+      'mcp.default.browser_snapshot',
+      'device.ssh.command',
+    ]
+    const writeGrants = (revision: number, grants: string[]) =>
+      store.database
+        .prepare('UPDATE employee_revisions SET skill_grants_json = ? WHERE employee_id = ? AND revision = ?')
+        .run(JSON.stringify(grants), employee.id, revision)
+    writeGrants(1, legacyGrants)
+    store.reviseEmployee({ employeeId: employee.id, reason: 'seed revision two' })
+    writeGrants(2, legacyGrants)
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the grant-rewrite migration; v53 carries no schema change.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DELETE FROM schema_migrations WHERE version > 52;
+      PRAGMA user_version = 52;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    const unified = [
+      'core.chat',
+      'mcp.default.browser_navigate',
+      'mcp.default.browser_click',
+      'mcp.github.search',
+      'mcp.default.browser_snapshot',
+      'device.ssh.command',
+    ]
+    // Both revisions are rewritten: a rollback to an old revision must not
+    // resurrect the dead two-segment ids.
+    expect(migrated.getEmployeeRevision(employee.id, 1)).toMatchObject({ skillGrants: unified })
+    expect(migrated.getEmployeeRevision(employee.id, 2)).toMatchObject({ skillGrants: unified })
+    // The rewrite is a pure string transform: already-qualified ids, foreign
+    // ids and their order survive byte-identical.
+    expect(migrated.getEmployeeRevision(employee.id, 1)).not.toMatchObject({ skillGrants: legacyGrants })
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+  })
 })
 
 describe('world trace watermark', () => {

@@ -221,6 +221,13 @@ export class CharacterSkillAdapterRegistry {
       ?? this.#recipes.get(skillId)?.descriptor
   }
 
+  recipeForSkill(skillId: string): CharacterSkillRecipe | undefined {
+    const recipe = this.#recipes.get(skillId)
+    return recipe === undefined
+      ? undefined
+      : { descriptor: { ...recipe.descriptor, risks: [...recipe.descriptor.risks] }, instruction: recipe.instruction }
+  }
+
   async propose(context: CharacterSkillMatchContext): Promise<CharacterSkillActionProposal[]> {
     const grants = new Set(context.grantedSkillIds)
     const adapters = new Set<CharacterSkillAdapter>()

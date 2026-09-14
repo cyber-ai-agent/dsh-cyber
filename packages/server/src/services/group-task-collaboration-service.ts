@@ -11,9 +11,12 @@ import type {
   TaskConversationResult,
 } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
+import { isImageGenerationModel } from './image-generation-service.js'
 
 import {
   GroupTaskRouter,
+  resolveDirectSkillDelegation,
+  type DirectSkillDelegationDecision,
   type GroupTaskRouterEmployee,
   type GroupTaskRoutingResult,
 } from './group-task-router.js'
@@ -25,6 +28,17 @@ interface SessionModeStore {
   /** Direct world-scoped lookups keep plan reads off the full world list path. */
   getTaskCollaborationPlanByTurn(worldId: string, workTurnId: string): TaskCollaborationPlan | undefined
   getLatestTaskCollaborationPlanForSession(worldId: string, sessionId: string): TaskCollaborationPlan | undefined
+}
+
+function modelCapabilityIds(profile: ReturnType<SqliteStore['resolveModelProfile']>): string[] {
+  if (profile === undefined) return []
+  const capabilities: string[] = []
+  if (isImageGenerationModel(profile)) capabilities.push('image-generation')
+  const outputTypes = Array.isArray(profile.settings.outputTypes)
+    ? profile.settings.outputTypes.filter((item): item is string => typeof item === 'string')
+    : []
+  if (outputTypes.includes('video')) capabilities.push('video-generation')
+  return capabilities
 }
 
 export interface GroupTaskCollaborationServiceOptions {
@@ -111,6 +125,42 @@ export class GroupTaskCollaborationService {
       employees,
       catalog,
       ...(input.coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId: input.coordinatorEmployeeId }),
+    })
+  }
+
+  /**
+   * Finds a world role for a direct request when the selected role lacks the
+   * requested capability. This is a preflight decision: it never starts a
+   * run, changes grants or creates a group until the route has a unique,
+   * authorized target.
+   */
+  async resolveDirectSkillDelegation(input: {
+    workspaceId: string
+    worldId: string
+    employeeId: string
+    prompt: string
+  }): Promise<DirectSkillDelegationDecision> {
+    const employees = await this.#routingContext({
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      employeeIds: this.#store.listEmployees(input.worldId)
+        .filter((employee) => employee.status !== 'archived')
+        .map((employee) => employee.id),
+      prompt: input.prompt,
+    })
+    const initiator = employees.employees.find((item) => item.employee.id === input.employeeId)
+    if (initiator === undefined) return { kind: 'unavailable', requiredSkillIds: [], candidateEmployeeIds: [], guidance: '当前角色不可用，请先检查角色是否仍在当前世界。' }
+    const enrichedEmployees = employees.employees.map((item) => ({
+      ...item,
+      capabilityIds: modelCapabilityIds(this.#store.resolveModelProfile(input.workspaceId, input.worldId, item.employee.id)),
+    }))
+    const enrichedInitiator = enrichedEmployees.find((item) => item.employee.id === input.employeeId)
+    if (enrichedInitiator === undefined) return { kind: 'unavailable', requiredSkillIds: [], candidateEmployeeIds: [], guidance: '当前角色不可用，请先检查角色是否仍在当前世界。' }
+    return resolveDirectSkillDelegation({
+      prompt: input.prompt,
+      initiator: enrichedInitiator,
+      employees: enrichedEmployees,
+      catalog: employees.catalog,
     })
   }
 

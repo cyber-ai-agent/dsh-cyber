@@ -12,6 +12,7 @@ import {
   HarnessCompatibilityAdapter,
   type HarnessAdapterOptions,
 } from './adapter.js'
+import type { WorkerWebSearchPlan } from './web-search.js'
 
 export interface HarnessModelRoute {
   id: string
@@ -59,6 +60,13 @@ export interface HarnessModelRouterOptions {
   adapterFactory?: (options: HarnessAdapterOptions) => AgentRuntimePort
   inheritedEnvironment?: NodeJS.ProcessEnv
   dshBinPath?: string
+  /**
+   * Host-resolved selection for the built-in `web_search` tool (the 连接中心
+   * 联网搜索 connection, or "disabled"). Called when a new adapter generation
+   * is created; the creator's request decides that generation. Omitted (tests,
+   * embedders) keeps the DSH bundle default.
+   */
+  resolveWebSearchPlan?: (request: AgentTurnRequest, route: HarnessModelRoute | undefined) => WorkerWebSearchPlan | undefined
 }
 
 interface AdapterEntry {
@@ -116,7 +124,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
     // There must be no await between selecting a generation and registering the
     // run: a concurrent route update may retire the generation, but it must not
     // close it while this turn is still about to start.
-    const lease = this.#acquireLease(routeId, route, fingerprint)
+    const lease = this.#acquireLease(routeId, route, fingerprint, request)
     const entry = lease.entry
     if (request.agentRunId !== undefined && this.#abortedRuns.has(request.agentRunId)) {
       lease.release()
@@ -280,6 +288,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
     routeId: string,
     route: HarnessModelRoute | undefined,
     fingerprint: string,
+    request: AgentTurnRequest,
   ): AdapterLease {
     if (this.#closed) throw new Error('Harness model router closed')
     const current = this.#currentEntries.get(routeId)
@@ -298,7 +307,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
     const entry: AdapterEntry = {
       routeId,
       fingerprint,
-      adapter: this.#createAdapter(route, fingerprint),
+      adapter: this.#createAdapter(route, fingerprint, request),
       leases: 0,
       retired: false,
     }
@@ -344,7 +353,12 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
     return entry.closePromise
   }
 
-  #createAdapter(route: HarnessModelRoute | undefined, fingerprint: string): AgentRuntimePort {
+  #createAdapter(route: HarnessModelRoute | undefined, fingerprint: string, request: AgentTurnRequest): AgentRuntimePort {
+    // The managed model web-search (`route.webSearch`) owns the deepseek
+    // backend itself, so the host resolver is only consulted otherwise.
+    const webSearchPlan = route?.webSearch === undefined
+      ? this.#options.resolveWebSearchPlan?.(request, route)
+      : undefined
     const options: HarnessAdapterOptions = {
       stateRoot: join(
         resolve(this.#options.stateRoot),
@@ -357,6 +371,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
       ...(this.#options.dshBinPath === undefined
         ? {}
         : { dshBinPath: this.#options.dshBinPath }),
+      ...(webSearchPlan === undefined ? {} : { webSearchPlan }),
     }
     if (route !== undefined) {
       const providerRoute = `cyber-${fingerprint.slice(0, 16)}`
