@@ -58,6 +58,12 @@ describe('DSH 0.1.5-rc.2 compatibility', () => {
     expect(patch).toMatch(/id: plugin-package-inventory-deepseek\s+disabled: true/)
   })
 
+  it('pins early tool-result pruning and compaction budgets in the worker bundle', async () => {
+    const patch = await readFile(join(HERE, '../../harness-bundle/cordis.patch.yml'), 'utf8')
+    expect(patch).toMatch(/id: compaction-basic[\s\S]*thresholdRatio: 0\.72[\s\S]*retainRatio: 0\.12[\s\S]*maxTokens: 2048/)
+    expect(patch).toMatch(/id: tool-result-pruner[\s\S]*thresholdChars: 4096[\s\S]*headChars: 3072[\s\S]*tailChars: 768/)
+  })
+
   it('reports the V3 migration boundary and verifies the Bundle peer closure', async () => {
     const report = await inspectHarnessCompatibility()
     expect(report).toMatchObject({

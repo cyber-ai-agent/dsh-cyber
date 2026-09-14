@@ -94,6 +94,7 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
         label: presentation.label,
         ...(description === undefined ? {} : { description }),
         ...(detail === undefined ? {} : { input: detail }),
+        ...(message.metadata.toolDetailTruncated === true ? { inputTruncated: true } : {}),
         status: current?.status ?? 'running',
         createdAt: message.createdAt,
         ...(current?.completedAt === undefined ? {} : { completedAt: current.completedAt }),
@@ -111,6 +112,7 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
       label: current?.label ?? '执行工具',
       ...(current?.description === undefined ? {} : { description: current.description }),
       ...(current?.input === undefined ? {} : { input: current.input }),
+      ...(current?.inputTruncated === undefined ? {} : { inputTruncated: current.inputTruncated }),
       ...toolResultFields(message.metadata),
       status: failed ? 'failed' : 'success',
       ...(current?.createdAt === undefined ? {} : { createdAt: current.createdAt }),
@@ -193,11 +195,15 @@ function friendlyRunError(
 
 
 /** Shared by historical and live projections; unknown result fields stay absent. */
-export function toolResultFields(metadata: Record<string, unknown>): Pick<WorldTraceToolStep, 'output' | 'outputTruncated' | 'outputRedacted' | 'exitCode'> {
+export function toolResultFields(metadata: Record<string, unknown>): Pick<WorldTraceToolStep, 'output' | 'outputReference' | 'outputTruncated' | 'outputRedacted' | 'exitCode'> {
   const output = typeof metadata.toolOutput === 'string' && metadata.toolOutput.trim() ? metadata.toolOutput : undefined
+  const outputReference = typeof metadata.toolOutputDuplicateOf === 'string' && metadata.toolOutputDuplicateOf.trim()
+    ? metadata.toolOutputDuplicateOf
+    : undefined
   const exitCode = typeof metadata.toolExitCode === 'number' && Number.isSafeInteger(metadata.toolExitCode) ? metadata.toolExitCode : undefined
   return {
     ...(output === undefined ? {} : { output }),
+    ...(outputReference === undefined ? {} : { outputReference }),
     ...(metadata.toolOutputTruncated === true ? { outputTruncated: true } : {}),
     ...(metadata.toolOutputRedacted === true ? { outputRedacted: true } : {}),
     ...(exitCode === undefined ? {} : { exitCode }),

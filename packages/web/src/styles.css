@@ -643,7 +643,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .application-lock-recovery-result small { color: #9fb2a5; font-size: 11px; line-height: 1.45; }
 .application-lock-error { width: 100%; margin-top: 12px; color: #ffafb1; font-size: 13px; text-align: left; }
 .workspace-backdrop { position: fixed; inset: var(--topbar-h) 0 0; pointer-events: none; background-image: var(--theme-backdrop-image, var(--workspace-background-image, var(--skin-backdrop))); background-size: var(--workspace-background-size, cover); background-repeat: var(--workspace-background-repeat, no-repeat); background-position: center; opacity: var(--theme-backdrop-opacity, var(--workspace-background-opacity, 0.95)); filter: saturate(1.1) contrast(1.05); transition: opacity var(--duration-normal) var(--ease-smooth); }
-.topbar { position: relative; z-index: 5; height: var(--topbar-h); display: flex; align-items: center; border-bottom: 1px solid var(--border); background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: 0 1px 0 var(--border-subtle), 0 4px 20px -2px rgba(0,0,0,.25); }
+.topbar { position: relative; z-index: 5; min-width: 0; height: var(--topbar-h); display: flex; align-items: center; overflow: hidden; border-bottom: 1px solid var(--border); background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: 0 1px 0 var(--border-subtle), 0 4px 20px -2px rgba(0,0,0,.25); }
 .brand-lockup { height: 100%; min-width: 178px; display: flex; align-items: center; gap: 9px; padding: 0 18px; border-right: 1px solid var(--border); }
 .brand-lockup svg { color: var(--accent); filter: drop-shadow(0 0 8px var(--accent)); transition: transform var(--duration-normal) var(--ease-smooth); }
 .brand-lockup:hover svg { transform: rotate(15deg) scale(1.1); }
@@ -964,8 +964,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   gap: 10px;
   margin-left: auto;
 }
-.topbar nav { margin-left: auto; height: 100%; display: flex; align-items: stretch; }
-.topbar nav button { display: flex; align-items: center; gap: 8px; padding: 0 16px; border: 0; border-left: 1px solid var(--border); color: var(--text-muted); background: transparent; font-size: 13px; font-weight: 500; transition: all var(--duration-fast) var(--ease-smooth); }
+.topbar nav { min-width: 0; flex: 1 1 auto; margin-left: auto; height: 100%; display: flex; align-items: stretch; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.topbar nav button { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-width: max-content; padding: 0 16px; border: 0; border-left: 1px solid var(--border); color: var(--text-muted); background: transparent; font-size: 13px; font-weight: 500; white-space: nowrap; transition: all var(--duration-fast) var(--ease-smooth); }
 .topbar nav button:hover { color: var(--text); background: var(--surface-2); }
 .health-indicator { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 10px var(--success), 0 0 0 3px rgba(16, 185, 129, .15); animation: pulseGlow 2.5s infinite ease-in-out; }
 @keyframes pulseGlow { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .75; transform: scale(.92); } }

@@ -2069,6 +2069,11 @@ function runtimeMetadata(event: AgentRuntimeEvent): JsonObject {
     sourceSessionId: event.sourceSessionId,
     ...event.metadata,
   }
+  // The environment pin is a lane-level recovery anchor. Tool rows carry
+  // execution evidence and do not need another copy of the full layer.
+  if (event.kind === 'tool.started' || event.kind === 'tool.completed') {
+    delete metadata.contextEnvironmentLayer
+  }
   if (event.sourceSequence !== undefined) metadata.sourceSequence = event.sourceSequence
   if (event.sourceTime !== undefined) metadata.sourceTime = event.sourceTime
   if (event.toolName !== undefined) metadata.toolName = event.toolName

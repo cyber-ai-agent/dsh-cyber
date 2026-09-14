@@ -55,6 +55,26 @@
 - id: tool-fs
   disabled: false
 
+# Keep the live DSH surface below the provider's hard edge. The host already
+# performs its own context planning; this worker policy gives tool-heavy turns
+# earlier pruning and a compact recent tail.
+- id: compaction-basic
+  config:
+    thresholdRatio: 0.72
+    retainRatio: 0.12
+    maxTokens: 2048
+    compactionRetries: 1
+    maxOverflowRetries: 1
+    auto: true
+
+# A large shell/search result should be reduced before it can be repeated in a
+# later model request. The complete result remains in the append-only DSH log.
+- id: tool-result-pruner
+  config:
+    thresholdChars: 4096
+    headChars: 3072
+    tailChars: 768
+
 - id: tool-fs-search
   disabled: false
 

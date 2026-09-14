@@ -324,6 +324,11 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
             ...(noticedRevision === undefined ? {} : { noticedRevision }),
           },
         }
+    // One assistant message is enough to recover the lane pin after a restart.
+    // Repeating the full environment object on every assistant event multiplies
+    // durable metadata for long tool-heavy turns.
+    let environmentStampPending = environmentStamp !== undefined
+      && (pinnedEnvironment === undefined || environmentNotice !== undefined)
     const onEvent = originalOnEvent === undefined
       ? undefined
       : (event: AgentRuntimeEvent) => {
@@ -334,8 +339,9 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           }
           sawAssistantMessage = true
           let stamped = event
-          if (environmentStamp !== undefined) {
+          if (environmentStampPending && environmentStamp !== undefined) {
             stamped = { ...stamped, metadata: { ...stamped.metadata, ...environmentStamp } }
+            environmentStampPending = false
           }
           originalOnEvent(snapshotSequence === undefined ? stamped : withObservation(stamped, snapshotSequence))
         }
@@ -475,7 +481,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         sourceSessionId: result.agentSessionId,
         content: result.finalResponse,
         metadata: {
-          ...(environmentStamp === undefined ? {} : environmentStamp),
+          ...(environmentStampPending && environmentStamp !== undefined ? environmentStamp : {}),
           ...observationMetadata({}, snapshotSequence),
         },
       })

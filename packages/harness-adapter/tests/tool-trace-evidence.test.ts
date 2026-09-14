@@ -3,6 +3,7 @@ import type { HarnessNotification } from '@deepseek-ai/dsh-sdk-client'
 import { normalizeHarnessNotification, normalizeHarnessTraceNotification } from '../src/adapter.js'
 import { ToolTraceSubjects } from '../src/tool-result-summary.js'
 import { summarizeToolCall } from '../src/tool-summary.js'
+import { TOOL_EVIDENCE_MAX_CHARS, TOOL_EVIDENCE_OMISSION } from '../src/evidence-bounds.js'
 
 function event(type: string, data: object, sessionId = 's'): HarnessNotification {
   return { method: 'session.event', params: { sessionId, event: { type, data, seq: 1, time: 1 } } } as HarnessNotification
@@ -52,6 +53,40 @@ describe('raw tool evidence from current Harness event shapes', () => {
     expect(done?.metadata.toolOutput).toContain('opaque private value')
     expect((done?.metadata.toolOutput as string).length).toBeLessThanOrEqual(32_000)
     expect(done?.metadata.toolOutputTruncated).toBe(true)
+  })
+  it('keeps large result evidence to a head/tail view', () => {
+    const subjects = new ToolTraceSubjects()
+    start(subjects, { command: 'rg repeated-output' }, 'bash', 'large')
+    const body = `RESULT-HEAD\n${'middle\n'.repeat(4_000)}RESULT-TAIL`
+    const [done] = normalizeHarnessTraceNotification(result(body, 'large'), subjects)
+
+    expect(done?.metadata.toolOutput).toContain('RESULT-HEAD')
+    expect(done?.metadata.toolOutput).toContain('RESULT-TAIL')
+    expect(done?.metadata.toolOutput).toContain(TOOL_EVIDENCE_OMISSION.trim())
+    expect((done?.metadata.toolOutput as string).length).toBeLessThanOrEqual(TOOL_EVIDENCE_MAX_CHARS)
+    expect(done?.metadata.toolOutputHash).toMatch(/^[0-9a-f]{16}$/)
+  })
+  it('deduplicates identical result bodies within one AgentRun', () => {
+    const subjects = new ToolTraceSubjects()
+    const body = 'same grep result\nline-1\nline-2'
+    start(subjects, { command: 'rg one' }, 'bash', 'first')
+    const [first] = normalizeHarnessTraceNotification(result(body, 'first'), subjects)
+    start(subjects, { command: 'rg two' }, 'bash', 'second')
+    const [second] = normalizeHarnessTraceNotification(result(body, 'second'), subjects)
+
+    expect(first?.metadata.toolOutput).toBe(body)
+    expect(second?.metadata.toolOutput).toBeUndefined()
+    expect(second?.metadata.toolOutputDuplicateOf).toBe('first')
+    expect(second?.metadata.toolOutputHash).toBe(first?.metadata.toolOutputHash)
+  })
+  it('bounds oversized tool-call parameters and marks the clipped detail', () => {
+    const subjects = new ToolTraceSubjects()
+    const [call] = start(subjects, { command: `${'echo head\n'}${'x'.repeat(10_000)}echo tail` }, 'bash', 'args')
+
+    expect(call?.metadata.toolDetail).toContain('echo head')
+    expect(call?.metadata.toolDetail).toContain('echo tail')
+    expect(call?.metadata.toolDetailTruncated).toBe(true)
+    expect((call?.metadata.toolDetail as string).length).toBeLessThanOrEqual(TOOL_EVIDENCE_MAX_CHARS)
   })
   it('shows developer command output and arbitrary script dumps alike', () => {
     const subjects = new ToolTraceSubjects()

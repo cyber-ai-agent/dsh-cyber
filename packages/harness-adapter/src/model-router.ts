@@ -14,6 +14,9 @@ import {
 } from './adapter.js'
 import type { WorkerWebSearchPlan } from './web-search.js'
 
+/** Matches the host planner's conservative fallback for an unspecified route. */
+export const DEFAULT_HARNESS_CONTEXT_WINDOW = 32_768
+
 export interface HarnessModelRoute {
   id: string
   displayName: string
@@ -384,7 +387,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
         baseURL: route.baseURL,
         model: {
           id: route.modelId,
-          ...(route.contextWindow === undefined ? {} : { contextWindow: route.contextWindow }),
+          contextWindow: route.contextWindow ?? DEFAULT_HARNESS_CONTEXT_WINDOW,
           ...(route.maxTokens === undefined ? {} : { maxTokens: route.maxTokens }),
           ...(route.reasoningEfforts === undefined ? {} : { reasoningEfforts: route.reasoningEfforts }),
           ...(route.compat === undefined ? {} : { compat: route.compat }),

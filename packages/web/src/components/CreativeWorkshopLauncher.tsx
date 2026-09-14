@@ -44,7 +44,7 @@ export function CreativeWorkshopLauncher({ workspaceId, onCreated, onOpenWorld }
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)}><Sparkle size={16} />{t('app.creativeWorkshop', '创意工坊')}</button>
+      <button type="button" aria-label={t('app.creativeWorkshop', '创意工坊')} title={t('app.creativeWorkshop', '创意工坊')} onClick={() => setOpen(true)}><Sparkle size={16} /><span>{t('app.creativeWorkshop', '创意工坊')}</span></button>
       {dialog}
     </>
   )

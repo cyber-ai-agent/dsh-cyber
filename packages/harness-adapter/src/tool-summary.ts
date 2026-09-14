@@ -6,16 +6,19 @@
  * folding. Values are only clipped to a bounded length so a single call
  * cannot bloat the trace or the persisted message metadata.
  */
+import { clipToolEvidence } from './evidence-bounds.js'
+
 export interface ToolCallSummary {
   /** One short display line for the target row (the command, or the compact record). */
   summary: string
   /** The full raw parameter text for the expandable view. */
   detail: string
+  /** Whether the expandable detail contains a bounded head/tail view. */
+  truncated?: true
 }
 
 const COMMAND_KEYS = ['command', 'cmd', 'script'] as const
 const MAX_SUMMARY = 120
-const MAX_DETAIL = 32_000
 
 function argsRecord(raw: unknown): Record<string, unknown> | undefined {
   if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>
@@ -63,8 +66,10 @@ export function summarizeToolCall(rawArguments: unknown): ToolCallSummary | unde
   const summarySource = record !== undefined
     ? (take(record, COMMAND_KEYS) ?? (typeof rawArguments === 'string' ? trimmed : JSON.stringify(record)))
     : firstLine(trimmed)
+  const bounded = clipToolEvidence(detail)
   return {
     summary: clip(summarySource, MAX_SUMMARY),
-    detail: clip(detail, MAX_DETAIL),
+    detail: bounded.value,
+    ...(bounded.truncated ? { truncated: true } : {}),
   }
 }

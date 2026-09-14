@@ -53,6 +53,11 @@ describe('owner-facing tool evidence', () => {
     expect(box.querySelector('pre')!.textContent).toBe('Get-ChildItem src')
     expect(box.textContent).not.toContain('结果')
   })
+  it('shows reused output as a compact trace reference', () => {
+    const view = mount({ input: undefined, output: undefined, outputReference: 'c-previous' })
+    expect(view.textContent).toContain('结果与前一次调用相同，已复用')
+    expect(view.textContent).toContain('c-previous')
+  })
   it('does not equate writing an artifact manifest with publishing an artifact', () => {
     const view = mount({ name: 'write', label: '写入文件', input: '.dsh/artifacts/run-123.json' })
     expect(view.textContent).toContain('写入产物登记清单')

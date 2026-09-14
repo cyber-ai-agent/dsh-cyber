@@ -7,6 +7,7 @@ import {
 } from '@deepseek-ai/dsh-sdk-jsonrpc-server'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { SessionSeq, type Session } from '@deepseek-ai/dsh-session'
+import type { ToolResultPruner } from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import type { ApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
 
 import { registerFirecrawlWebSearch } from './web-search-firecrawl.js'
@@ -37,6 +38,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
   // The 连接中心「联网搜索」Firecrawl backend. Dormant unless the host injects
   // the loopback coordinates; the DSH `web` seam selects it via `searchProvider`.
   registerFirecrawlWebSearch(ctx)
+  registerEagerToolResultPruning(ctx)
   const rootFiber = ctx.root.fiber
   const input = config.input ?? process.stdin
   const output = config.output ?? process.stdout
@@ -105,6 +107,41 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
       transport.close()
     }
   }, 'jsonrpc.serve')
+}
+
+/**
+ * Give the installed pruner an early pass at every step boundary that received
+ * tool output. This keeps one oversized result from reaching another model
+ * request while preserving the package's durable shadow-price replacement.
+ */
+function registerEagerToolResultPruning(ctx: Context): void {
+  const scannedThrough = new WeakMap<Session, number>()
+  ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+    if (!signal.aborted) {
+      const currentSeq = Number(agent.session.seq)
+      const previousSeq = scannedThrough.get(agent.session) ?? 0
+      let hasToolResult = false
+      for (let seq = previousSeq; seq < currentSeq; seq += 1) {
+        if (agent.session.eventAt(SessionSeq(seq))?.type === 'tool/result') {
+          hasToolResult = true
+          break
+        }
+      }
+      const pruner = ctx.get('toolResultPruner') as ToolResultPruner | undefined
+      if (hasToolResult && pruner !== undefined) {
+        try {
+          pruner.pruneSession(agent.session)
+          scannedThrough.set(agent.session, Number(agent.session.seq))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          ctx.logger.warn(`early tool-result pruning failed: ${message}`)
+        }
+      } else {
+        scannedThrough.set(agent.session, currentSeq)
+      }
+    }
+    return next()
+  })
 }
 
 export function latestApprovalRequestId(request: NativeApprovalRequest): string | undefined {

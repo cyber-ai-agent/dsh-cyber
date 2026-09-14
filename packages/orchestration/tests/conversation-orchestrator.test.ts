@@ -244,6 +244,41 @@ describe('ConversationOrchestrator', () => {
     expect(store.listMessages(first.session.id).every((message) => message.metadata.workTurnId !== undefined)).toBe(true)
   })
 
+  it('keeps lane environment pins out of durable tool rows', async () => {
+    const { directory, store, workspace, company } = await setup()
+    store.saveBlueprint(blueprint('environment-tool-role', '环境工具角色', '环境验证'))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      blueprintId: 'environment-tool-role',
+      blueprintVersion: 1,
+    })
+    const environmentPin = { text: '重复的机器环境层', revision: 'environment-revision' }
+    const runtime: AgentRuntimePort = {
+      async runTurn(request) {
+        request.onEvent?.({ kind: 'tool.started', source: 'test-runtime', sourceSessionId: 'session', callId: 'call', toolName: 'pwsh', metadata: { contextEnvironmentLayer: environmentPin } })
+        request.onEvent?.({ kind: 'tool.completed', source: 'test-runtime', sourceSessionId: 'session', callId: 'call', toolName: 'pwsh', metadata: { contextEnvironmentLayer: environmentPin, toolOutput: '完成' } })
+        request.onEvent?.({ kind: 'assistant.message', source: 'test-runtime', sourceSessionId: 'session', content: '已完成', metadata: {} })
+        return { agentSessionId: 'session', finalResponse: '已完成', eventCount: 3 }
+      },
+      async close() {},
+    }
+    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
+    orchestrators.push(orchestrator)
+
+    const result = await orchestrator.direct({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      employeeId: employee.id,
+      prompt: '检查环境工具',
+    })
+    const toolMessages = store.listMessages(result.session.id).filter((message) => message.kind === 'tool-call' || message.kind === 'tool-result')
+
+    expect(toolMessages).toHaveLength(2)
+    expect(toolMessages.every((message) => message.metadata.contextEnvironmentLayer === undefined)).toBe(true)
+    expect(toolMessages.find((message) => message.kind === 'tool-result')?.metadata.toolOutput).toBe('完成')
+  })
+
   it('runs the addressed characters concurrently and keeps every speaker identifiable', async () => {
     const { directory, store, workspace, company } = await setup()
     store.saveBlueprint(blueprint('tech-lead', '老王', '技术经理'))

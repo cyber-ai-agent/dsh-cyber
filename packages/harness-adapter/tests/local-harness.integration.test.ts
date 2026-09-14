@@ -286,6 +286,91 @@ describe('real Harness worker with a loopback model provider', () => {
     expect(canary.eventKinds).toEqual(expect.arrayContaining(['turn.started', 'assistant.message', 'turn.completed']))
     expect(requests).toHaveLength(5)
   }, 90_000)
+
+  it('prunes an oversized PowerShell result before the next model request', async () => {
+    const requests: Array<Record<string, unknown>> = []
+    let requestCount = 0
+    const provider = createServer((request, response) => {
+      void (async () => {
+        if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+          response.writeHead(404).end()
+          return
+        }
+        requests.push(await readJson(request))
+        requestCount += 1
+        const envelope = { id: `pruner-${requestCount}`, object: 'chat.completion.chunk', created: 1_777_777_777, model: 'local-test' }
+        const delta = requestCount === 1
+          ? {
+              role: 'assistant',
+              tool_calls: [{
+                index: 0,
+                id: 'pruner-call-1',
+                type: 'function',
+                function: {
+                  name: 'pwsh',
+                  arguments: JSON.stringify({ command: "Write-Output 'RESULT-HEAD'; Write-Output ('x' * 10000); Write-Output 'RESULT-TAIL'", description: '生成大输出验证裁剪' }),
+                },
+              }],
+            }
+          : { role: 'assistant', content: 'PRUNER-OK' }
+        response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' })
+        response.write(`data: ${JSON.stringify({ ...envelope, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`)
+        response.write(`data: ${JSON.stringify({ ...envelope, choices: [{ index: 0, delta: {}, finish_reason: requestCount === 1 ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } })}\n\n`)
+        response.end('data: [DONE]\n\n')
+      })().catch((error: unknown) => response.writeHead(500).end(error instanceof Error ? error.message : String(error)))
+    })
+    servers.push(provider)
+    await listen(provider)
+    const address = provider.address() as AddressInfo
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-pruner-'))
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      provider: 'local-pruner',
+      model: 'local-test',
+      inheritedEnvironment: { ...process.env, DSH_CYBER_LOCAL_TEST_KEY: 'local-test-only' },
+      providerProfile: {
+        route: 'local-pruner',
+        displayName: 'Local pruner provider',
+        api: 'openai-completions',
+        baseURL: `http://127.0.0.1:${address.port}/v1`,
+        apiKeyEnv: 'DSH_CYBER_LOCAL_TEST_KEY',
+        model: { id: 'local-test', contextWindow: 32_768, maxTokens: 512 },
+      },
+    })
+    const employee: EmployeeInstance = {
+      id: 'pruner-employee', workspaceId: 'pruner-workspace', worldId: 'pruner-world', blueprintId: 'pruner-role',
+      blueprintVersion: 1, displayName: '裁剪验证', role: '上下文验证', status: 'available', currentRevision: 1,
+      createdAt: '2026-09-06T00:00:00.000Z', updatedAt: '2026-09-06T00:00:00.000Z',
+    }
+    const revision: EmployeeRevision = {
+      employeeId: employee.id, revision: 1, persona: '只报告真实结果。', skillGrants: [], capabilityGrants: [],
+      modelPolicy: {}, reason: 'pruner-test', createdAt: employee.createdAt,
+    }
+    try {
+      const result = await adapter.runEmployeeTurn({
+        employee,
+        revision,
+        conversationId: 'pruner-conversation',
+        history: [],
+        observedThroughSequence: 0,
+        prompt: '执行大输出裁剪测试。',
+        workspacePath: stateRoot,
+      })
+      expect(result.finalResponse).toContain('PRUNER-OK')
+      expect(requests).toHaveLength(2)
+      const secondRequest = JSON.stringify(requests[1]?.messages ?? '')
+      expect(secondRequest).toContain('RESULT-HEAD')
+      expect(secondRequest).toContain('RESULT-TAIL')
+      expect(secondRequest).toContain('tool result middle pruned')
+      expect(secondRequest.length).toBeLessThan(20_000)
+      const eventTypes = result.notifications
+        .filter((notification) => notification.method === 'session.event')
+        .map((notification) => String(notification.params.event.type))
+      expect(eventTypes).toContain('compaction/prune')
+    } finally {
+      await adapter.close()
+    }
+  }, 90_000)
 })
 
 function listen(server: Server): Promise<void> {
