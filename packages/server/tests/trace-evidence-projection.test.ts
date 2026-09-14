@@ -26,6 +26,18 @@ describe('persistent and live tool evidence projections', () => {
     expect(safe.tools?.[0]?.output).toBe(new TraceSanitizer().entry(historical()).tools?.[0]?.output)
     expect(safe.tools?.[0]?.exitCode).toBe(2)
   })
+  it('shows a compact reference when an identical result body was reused', () => {
+    const entry = new AgentRunTraceAdapter().adapt({ kind: 'agent-run', value: { worldId: 'world', run, messages: [
+      { id: 'call-1', kind: 'tool-call', content: 'read', metadata: { agentRunId: 'run', callId: 'c1', toolName: 'read', toolSummary: 'first' }, createdAt: '2026-09-07T00:00:00Z' },
+      { id: 'result-1', kind: 'tool-result', content: 'done', metadata: { agentRunId: 'run', callId: 'c1', failed: false, toolOutput: 'same output' }, createdAt: '2026-09-07T00:00:01Z' },
+      { id: 'call-2', kind: 'tool-call', content: 'read', metadata: { agentRunId: 'run', callId: 'c2', toolName: 'read', toolSummary: 'second', toolDetail: 'large', toolDetailTruncated: true }, createdAt: '2026-09-07T00:00:02Z' },
+      { id: 'result-2', kind: 'tool-result', content: 'done', metadata: { agentRunId: 'run', callId: 'c2', failed: false, toolOutputDuplicateOf: 'c1' }, createdAt: '2026-09-07T00:00:03Z' },
+    ] as WorkMessage[] } })[0]!
+    const safe = new TraceSanitizer().entry(entry)
+
+    expect(safe.tools?.[1]).toMatchObject({ inputTruncated: true, outputReference: 'c1' })
+    expect(safe.tools?.[1]?.output).toBeUndefined()
+  })
   it('clips unbounded foreign-adapter output without hiding its content', () => {
     const entry = historical()
     entry.tools![0]!.output = 'x'.repeat(1_000_000)

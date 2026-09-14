@@ -48,16 +48,18 @@ export interface WorldTraceToolStep {
   /** Wall-clock span of the call, once both ends are known. */
   durationMs?: number
   /**
-   * The raw tool-call parameters: the actual command and/or argument payload
-   * the runtime executed, shown verbatim in the trace panel's expandable
-   * "查看参数" box.
+   * The actual command and/or argument payload the runtime executed, shown in
+   * the trace panel's expandable "查看参数" box within a bounded evidence view.
    *
-   * Only clipped to a bounded length (marked by the trailing ellipsis); no
-   * secret masking or argument allow-listing happens on this field.
+   * Oversized payloads retain their head and tail with an explicit marker.
    */
   input?: string
+  /** True when the parameter payload contains a bounded head/tail view. */
+  inputTruncated?: boolean
   /** The raw text actually returned by this tool call, clipped to a bounded length. */
   output?: string
+  /** Call id whose identical output body is shown in the trace. */
+  outputReference?: string
   outputTruncated?: boolean
   /**
    * @deprecated Legacy flag from the credential-redacted era. New trace data

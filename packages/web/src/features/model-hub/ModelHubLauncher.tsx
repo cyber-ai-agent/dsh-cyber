@@ -18,7 +18,7 @@ export function ModelHubLauncher({ workspaceId, worlds, employees, onClosed }: {
   const [open, setOpen] = useState(false)
   const close = (): void => { setOpen(false); onClosed?.() }
   return <>
-    <button type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}><Stack size={16} />{t('app.modelHub', '模型中心')}</button>
+    <button type="button" aria-label={t('app.modelHub', '模型中心')} title={t('app.modelHub', '模型中心')} aria-haspopup="dialog" onClick={() => setOpen(true)}><Stack size={16} /><span>{t('app.modelHub', '模型中心')}</span></button>
     {open ? <Suspense fallback={null}><ModelHubDialog workspaceId={workspaceId} worlds={worlds} employees={employees} onClose={close} /></Suspense> : null}
   </>
 }

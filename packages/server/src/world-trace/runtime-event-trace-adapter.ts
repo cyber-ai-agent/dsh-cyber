@@ -48,6 +48,7 @@ export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-even
         // empty so the merge keeps the started call's concrete summary.
         ...(event.kind === 'tool.started' ? { description: summary ?? presentation.description } : {}),
         ...(detail === undefined ? {} : { input: detail }),
+        ...(event.kind === 'tool.started' && event.metadata.toolDetailTruncated === true ? { inputTruncated: true } : {}),
         ...toolResultFields(event.metadata),
         status: event.kind === 'tool.started' ? 'running' : event.failed ? 'failed' : 'success',
         ...(event.kind === 'tool.started' ? { createdAt: value.createdAt } : { completedAt: value.createdAt }),

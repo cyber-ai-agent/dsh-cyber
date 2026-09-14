@@ -8,8 +8,8 @@ const PREVIEW_LINES = 5
 /**
  * One tool step in the trace: the raw command and the raw result live together
  * in a single evidence box. Collapsed it previews the first five lines; when
- * the content runs longer, clicking the box expands the full text. There is no
- * copy affordance and no redaction: the owner selects text to take it away.
+ * the content runs longer, clicking the box expands the bounded evidence view.
+ * There is no copy affordance; the owner selects text to take it away.
  */
 export function WorldTraceToolItem({ tool }: { tool: WorldTraceToolStep }) {
   const [expanded, setExpanded] = useState(false)
@@ -17,7 +17,9 @@ export function WorldTraceToolItem({ tool }: { tool: WorldTraceToolStep }) {
   const outputText = tool.output ?? ''
   const hasInput = inputText !== ''
   const hasOutput = outputText !== ''
-  const combined = [hasInput ? inputText : '', hasOutput ? outputText : ''].filter(Boolean).join('\n')
+  const hasOutputReference = typeof tool.outputReference === 'string' && tool.outputReference.trim() !== ''
+  const inputDisplay = hasInput ? `${inputText}${tool.inputTruncated ? '…' : ''}` : ''
+  const combined = [inputDisplay, hasOutput ? `${outputText}${tool.outputTruncated ? '…' : ''}` : ''].filter(Boolean).join('\n')
   const lines = combined ? combined.split('\n') : []
   const clamped = lines.length > PREVIEW_LINES
   const preview = lines.slice(0, PREVIEW_LINES).join('\n')
@@ -52,11 +54,12 @@ export function WorldTraceToolItem({ tool }: { tool: WorldTraceToolStep }) {
         }}
       >
         {expanded ? <>
-          {hasInput ? <div className="world-trace-tool__part"><span>命令</span><pre>{inputText}</pre></div> : null}
+          {hasInput ? <div className="world-trace-tool__part"><span>命令</span><pre>{inputDisplay}</pre></div> : null}
           {hasOutput ? <div className="world-trace-tool__part"><span>结果</span><pre>{outputText}{tool.outputTruncated ? '…' : ''}</pre></div> : null}
         </> : <pre>{preview}{clamped ? '…' : ''}</pre>}
         {clamped ? <small className="world-trace-tool__hint">{expanded ? '点击收起' : '点击展开完整内容'}</small> : null}
       </div> : null}
+      {!hasInput && !hasOutput && hasOutputReference ? <small>结果与前一次调用相同，已复用（{tool.outputReference}）。</small> : null}
     </div>
     <small className="world-trace-tool__status">{statusText}{tool.durationMs === undefined ? '' : ` · ${formatDuration(tool.durationMs)}`}</small>
   </li>

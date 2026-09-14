@@ -84,6 +84,7 @@ test('expands and reads raw event evidence, survives reload, and fits three view
     await page.screenshot({ path: info.outputPath(`trace-${size.width}x${size.height}.png`) })
   }
   await page.reload()
+  await page.setViewportSize({ width: 1440, height: 900 })
   await openTraceTab()
   entry = await openTraceEntry(dock, '完成处理')
   // Persisted evidence reloads collapsed again; expand to the full raw text.
@@ -92,6 +93,15 @@ test('expands and reads raw event evidence, survives reload, and fits three view
   await expect(box.locator('pre')).toContainText('LOCAL-FIXTURE-SECRET')
   await box.locator('pre').click()
   await expect(box.locator('.world-trace-tool__part pre').last()).toContainText('body-6')
+  await page.setViewportSize({ width: 912, height: 921 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false)
+  const topbarNav = page.locator('.topbar nav')
+  await expect(topbarNav).toHaveCSS('overflow-x', 'auto')
+  expect(await topbarNav.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+  expect(await topbarNav.locator('button')).toHaveCount(7)
+  for (const label of ['创意工坊', '市场', '技能中心', '模型中心', '连接中心', '系统状态：良好', '设置']) {
+    await expect(topbarNav.getByRole('button', { name: label, exact: true })).toBeVisible()
+  }
   await writeFile(info.outputPath('console.json'), JSON.stringify(consoleIssues, null, 2))
   expect(consoleIssues).toEqual([])
 })

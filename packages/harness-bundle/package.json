@@ -38,6 +38,8 @@
     "@deepseek-ai/dsh-bash-local": "0.1.5-rc.2",
     "@deepseek-ai/dsh-code-runtime": "0.1.5-rc.2",
     "@deepseek-ai/dsh-compaction": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-compaction-basic": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-compaction-tool-result-pruner": "0.1.5-rc.2",
     "@deepseek-ai/dsh-fs": "0.1.5-rc.2",
     "@deepseek-ai/dsh-hook-protocol": "0.1.5-rc.2",
     "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
@@ -64,6 +66,7 @@
     "@deepseek-ai/dsh-util-workspace-path": "0.1.5-rc.2",
     "@deepseek-ai/dsh-user-approval": "0.1.5-rc.2",
     "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-token-meter": "0.1.5-rc.2",
     "@deepseek-ai/dsh-workflow": "0.1.5-rc.2",
     "@dsh-cyber/contracts": "workspace:*"
   }

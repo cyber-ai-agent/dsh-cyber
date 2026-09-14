@@ -19,21 +19,24 @@ class CaptureRuntime implements AgentRuntimePort {
   readonly events: AgentRuntimeEvent[] = []
   /** Tool traffic the fake lane emits before it answers. */
   script: AgentRuntimeEvent[] = []
+  assistantMessageCount = 1
 
   async runTurn(request: AgentTurnRequest) {
     this.requests.push(request)
     for (const event of this.script) request.onEvent?.(event)
-    request.onEvent?.({
-      kind: 'assistant.message',
-      source: 'test',
-      sourceSessionId: 'agent-session-1',
-      content: '环境档案已注入。',
-      metadata: {},
-    })
+    for (let index = 0; index < this.assistantMessageCount; index += 1) {
+      request.onEvent?.({
+        kind: 'assistant.message',
+        source: 'test',
+        sourceSessionId: 'agent-session-1',
+        content: `环境档案已注入 ${index + 1}。`,
+        metadata: {},
+      })
+    }
     return {
       agentSessionId: request.agent.agentSessionId ?? 'new-agent-session',
       finalResponse: '环境档案已注入。',
-      eventCount: 1 + this.script.length,
+      eventCount: this.assistantMessageCount + this.script.length,
     }
   }
 
@@ -191,6 +194,7 @@ describe('CharacterProfileRuntime environment injection', () => {
 
   it('stamps the pinned layer onto durable assistant events of the lane', async () => {
     const inner = new CaptureRuntime()
+    inner.assistantMessageCount = 2
     const live = environmentLayer('[本机环境档案]\n系统: Linux x86_64 · shell: bash\n已安装: go, rustc')
     const runtime = new CharacterProfileRuntime(inner, storeWithMessages([]), undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
       async snapshot() {
@@ -201,17 +205,16 @@ describe('CharacterProfileRuntime environment injection', () => {
     await runtime.runTurn(runTurnRequest({ onEvent: (event) => { inner.events.push(event) } }))
 
     const assistant = inner.events.filter((event) => event.kind === 'assistant.message')
-    expect(assistant.length).toBeGreaterThan(0)
-    for (const event of assistant) {
-      expect(event.metadata.contextEnvironmentLayer).toMatchObject({
-        id: live.id,
-        text: live.text,
-        revision: live.revision,
-        sourceRefs: live.sourceRefs,
-        present: ['go', 'rustc'],
-        noticedRevision: live.revision,
-      })
-    }
+    expect(assistant).toHaveLength(2)
+    expect(assistant[0]!.metadata.contextEnvironmentLayer).toMatchObject({
+      id: live.id,
+      text: live.text,
+      revision: live.revision,
+      sourceRefs: live.sourceRefs,
+      present: ['go', 'rustc'],
+      noticedRevision: live.revision,
+    })
+    expect(assistant[1]!.metadata.contextEnvironmentLayer).toBeUndefined()
   })
 
   it('counts the environment layer inside the fixed input budget', async () => {

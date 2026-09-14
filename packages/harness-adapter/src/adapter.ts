@@ -417,7 +417,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     try {
       assertLaneTaskActive(task)
       const result = await lane.runtime!.run(agentSessionId, prepared.prompt, onNotification, request.worldDirectory)
-      lane.retainedContextTokens += retainedTurnTokens(prepared.prompt, result) + nativeContext.retainedPerTurnTokens
+      lane.retainedContextTokens += estimateRetainedTurnTokens(prepared.prompt, result) + nativeContext.retainedPerTurnTokens
       return { agentSessionId, ...result, contextUsage: prepared.contextUsage }
     } catch (error) {
       if (task.aborted) throw error
@@ -448,7 +448,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         request.onNotification,
         request.worldDirectory,
       )
-      lane.retainedContextTokens += retainedTurnTokens(recovered.prompt, result) + nativeContext.retainedPerTurnTokens
+      lane.retainedContextTokens += estimateRetainedTurnTokens(recovered.prompt, result) + nativeContext.retainedPerTurnTokens
       return { agentSessionId: recoveredSessionId, ...result, contextUsage: recovered.contextUsage }
     }
   }
@@ -868,6 +868,7 @@ export function normalizeHarnessTraceNotification(
       if (summary !== undefined) {
         metadata.toolSummary = summary.summary
         metadata.toolDetail = summary.detail
+        if (summary.truncated === true) metadata.toolDetailTruncated = true
       }
       return [
         make('tool.started', {
@@ -884,7 +885,11 @@ export function normalizeHarnessTraceNotification(
       const failure = record(data.error)
       const failed = failure !== undefined
       const subject = toolSubjects?.complete(sourceSessionId, callId)
-      const metadata: JsonObject = { failed, ...summarizeToolResult(data, subject) }
+      const summary = summarizeToolResult(data, subject)
+      const metadata: JsonObject = {
+        failed,
+        ...(toolSubjects === undefined ? summary : toolSubjects.deduplicateToolResult(callId, summary)),
+      }
       appendFailureDiagnostics(metadata, failure, data)
       return [make('tool.completed', { callId, failed, metadata, ...(subject === undefined ? {} : { toolName: subject.name }) })]
     }
@@ -1098,17 +1103,45 @@ function runtimeContextSourceRefs(
     }))
 }
 
-function retainedTurnTokens(
+export function estimateRetainedTurnTokens(
   prompt: string,
   result: Pick<EmployeeTurnResult, 'finalResponse' | 'notifications'>,
 ): number {
-  // The owned notification interval contains assistant messages plus native
-  // tool calls/results. Counting its full JSON envelope is conservative and
-  // avoids silently omitting provider-owned tool history. Minimal fake
-  // runtimes may return no notifications, so retain their final response too.
-  return estimateTextTokens(prompt)
-    + estimateTextTokens(JSON.stringify(result.notifications))
-    + estimateTextTokens(result.finalResponse)
+  // The model receives surface messages. Session metadata, notification
+  // envelopes, request headers and projection bookkeeping stay host-side and
+  // must not inflate the lane's retained-context estimate.
+  let tokens = 0
+  let hasUserMessage = false
+  let hasAssistantMessage = false
+  const replacedRanges: Array<readonly [number, number]> = []
+  for (const notification of result.notifications) {
+    if (notification.method !== 'session.event') continue
+    const event = record(notification.params.event)
+    const operation = record(event?.surfaceOp)
+    if (operation?.op !== 'replace') continue
+    const start = numberValue(operation.startSeq)
+    const end = numberValue(operation.endSeq)
+    if (start !== undefined && end !== undefined && start <= end) replacedRanges.push([start, end])
+  }
+  for (const notification of result.notifications) {
+    if (notification.method !== 'session.event') continue
+    const event = record(notification.params.event)
+    const eventType = stringValue(event?.type)
+    if (eventType !== 'user/message' && eventType !== 'assistant/message' && eventType !== 'tool/result') continue
+    const sequence = numberValue(event?.seq)
+    if (sequence !== undefined && replacedRanges.some(([start, end]) => sequence >= start && sequence <= end)) continue
+    const data = record(event?.data)
+    const message = eventType === 'user/message' ? data : record(data?.message)
+    if (message === undefined) continue
+    if (eventType === 'user/message') hasUserMessage = true
+    if (eventType === 'assistant/message' && Array.isArray(message.content) && message.content.length > 0) {
+      hasAssistantMessage = true
+    }
+    tokens += estimateTextTokens(JSON.stringify({ type: eventType, message }))
+  }
+  if (!hasUserMessage) tokens += estimateTextTokens(prompt)
+  if (!hasAssistantMessage) tokens += estimateTextTokens(result.finalResponse)
+  return tokens
 }
 
 function assertLaneTaskActive(task: LaneTask): void {

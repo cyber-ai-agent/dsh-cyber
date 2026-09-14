@@ -1,5 +1,6 @@
 import { redactToolTraceText } from '@dsh-cyber/contracts'
 import type { JsonObject, JsonValue, WorldTraceEntry } from '@dsh-cyber/contracts'
+import { clipToolEvidence } from '@dsh-cyber/harness-adapter'
 
 const SENSITIVE_KEY = /^(?:authorization|cookie|set-cookie|password|passphrase|secret|api[-_]?key|access[-_]?token|refresh[-_]?token|token|credential)$/i
 const SENSITIVE_TEXT = [
@@ -35,13 +36,23 @@ export class TraceSanitizer {
       ...tool,
       callId: this.text(tool.callId, 160),
       ...(tool.name === undefined ? {} : { name: this.text(tool.name, 160) }),
+      ...(tool.outputReference === undefined ? {} : { outputReference: this.text(tool.outputReference, 160) }),
       label: this.text(tool.label, 200),
       ...(tool.description === undefined ? {} : { description: this.text(tool.description, 300) }),
-      ...(tool.input === undefined ? {} : { input: clip(tool.input, 32_000) }),
-      ...(tool.output === undefined ? {} : {
-        output: clip(tool.output, 32_000),
-        outputTruncated: tool.outputTruncated || tool.output.length > 32_000,
-      }),
+      ...(tool.input === undefined ? {} : (() => {
+        const bounded = clipToolEvidence(tool.input)
+        return {
+          input: bounded.value,
+          ...(tool.inputTruncated || bounded.truncated ? { inputTruncated: true } : {}),
+        }
+      })()),
+      ...(tool.output === undefined ? {} : (() => {
+        const bounded = clipToolEvidence(tool.output)
+        return {
+          output: bounded.value,
+          outputTruncated: tool.outputTruncated || bounded.truncated,
+        }
+      })()),
     }))
     // Artifact titles are author-supplied text and reach the trace verbatim, so
     // they pass through the same redaction as every other displayed string.
@@ -90,9 +101,4 @@ export class TraceSanitizer {
     if (value !== null && typeof value === 'object') return this.#record(value)
     return value
   }
-}
-
-/** Plain length clipping without any masking: raw text stays verbatim. */
-function clip(value: string, limit: number): string {
-  return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`
 }

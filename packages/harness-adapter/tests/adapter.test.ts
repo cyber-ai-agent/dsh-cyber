@@ -19,6 +19,7 @@ import {
   HarnessCompatibilityAdapter,
   HarnessModelRouter,
   ensureHarnessProfile,
+  estimateRetainedTurnTokens,
   extractHarnessTokenUsage,
   inspectHarnessCandidate,
   normalizeHarnessNotification,
@@ -78,6 +79,50 @@ describe('Harness profile and adapter', () => {
     }]
     expect(extractHarnessTokenUsage(notifications)).toEqual({ prompt: 420, completion: 80, total: 500 })
     expect(extractHarnessTokenUsage([])).toBeUndefined()
+  })
+
+  it('estimates retained context from model-visible messages and excludes bulky event metadata', () => {
+    const hugeMetadata = 'x'.repeat(500_000)
+    const notifications = [
+      {
+        method: 'session.event' as const,
+        params: {
+          sessionId: 'session-1',
+          event: {
+            type: 'user/message',
+            data: { role: 'user', content: [{ type: 'text', text: '当前请求' }] },
+            meta: { hugeMetadata },
+          },
+        },
+      },
+      {
+        method: 'session.event' as const,
+        params: {
+          sessionId: 'session-1',
+          event: {
+            type: 'tool/result',
+            data: { message: { role: 'user', source: { callId: 'call-1' }, content: [{ type: 'text', text: '短结果' }] }, meta: { hugeMetadata } },
+          },
+        },
+      },
+      {
+        method: 'session.event' as const,
+        params: {
+          sessionId: 'session-1',
+          event: {
+            type: 'assistant/message',
+            data: { message: { role: 'assistant', content: [{ type: 'text', text: '完成' }] }, meta: { hugeMetadata } },
+          },
+        },
+      },
+    ]
+    const retained = estimateRetainedTurnTokens('当前请求', {
+      finalResponse: '完成',
+      notifications,
+    })
+
+    expect(retained).toBeLessThan(1_000)
+    expect(retained).toBeLessThan(estimateTextTokens(JSON.stringify(notifications)) / 100)
   })
 
   it.each([
@@ -1118,7 +1163,7 @@ describe('Harness profile and adapter', () => {
     expect(created[0]?.providerProfile).toMatchObject({
       displayName: 'Local A',
       baseURL: 'http://127.0.0.1:11434/v1',
-      model: { id: 'qwen-a' },
+      model: { id: 'qwen-a', contextWindow: 32_768 },
     })
     expect(created[1]?.providerProfile).toMatchObject({
       apiKeyEnv: 'MODEL_B_API_KEY',
