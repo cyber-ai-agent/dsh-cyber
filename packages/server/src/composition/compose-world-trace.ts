@@ -4,6 +4,7 @@ import type { CharacterSkillActionRepository } from '../skills/skill-action-repo
 import { ContextSnapshotService } from '../services/context-snapshot-service.js'
 import type { WorldArtifactService } from '../services/world-artifact-service.js'
 import { WorldTraceService } from '../services/world-trace-service.js'
+import { TraceSanitizer } from '../world-trace/trace-sanitizer.js'
 
 /**
  * Wires the world trace to the owners of what it reads.
@@ -19,6 +20,7 @@ export function composeWorldTrace(options: {
   store: SqliteStore
   actions: CharacterSkillActionRepository
   artifacts: WorldArtifactService
+  sanitizer?: TraceSanitizer
 }): { worldTrace: WorldTraceService; contextSnapshots: ContextSnapshotService } {
   const contextSnapshots = new ContextSnapshotService(options.store)
   const worldTrace = new WorldTraceService({
@@ -27,6 +29,7 @@ export function composeWorldTrace(options: {
     artifacts: options.artifacts,
     tasks: new WorkSystemRepository(options.store.database),
     contexts: contextSnapshots,
+    ...(options.sanitizer === undefined ? {} : { sanitizer: options.sanitizer }),
   })
   return { worldTrace, contextSnapshots }
 }

@@ -1,10 +1,11 @@
 import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/contracts/skill-runtime'
-import type { JsonObject } from '@dsh-cyber/contracts'
+import { redactCredentialPatternText, type JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { MCP_INTEGRATION_ID, mcpConnectSpecFor, normalizeMcpServiceSlug } from '../integrations/mcp-provider.js'
 import type { McpClientFactory, McpToolDefinition } from '../integrations/mcp-client.js'
 import type { IntegrationService } from '../integrations/integration-service.js'
+import type { CredentialManager } from '../services/credential-manager.js'
 import { ServiceError } from '../services/service-error.js'
 import type { CharacterSkillActionProposal, CharacterSkillAdapter, CharacterSkillExecutionResult, CharacterSkillMatchContext } from './skill-adapter.js'
 
@@ -33,12 +34,13 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
   readonly dynamicDescriptors = true
   readonly #store: Pick<SqliteStore, 'getWorld' | 'listWorkspaces'>
   readonly #integrations: IntegrationService
+  readonly #credentials: CredentialManager | undefined
   readonly #clients: McpClientFactory
   readonly #connectionGrantsFor: ((characterId: string) => readonly string[] | undefined) | undefined
   #tools = new Map<string, DiscoveredTool[]>()
 
-  constructor(options: { store: Pick<SqliteStore, 'getWorld' | 'listWorkspaces'>; integrations: IntegrationService; clients: McpClientFactory; connectionGrantsFor?: (characterId: string) => readonly string[] | undefined }) {
-    this.#store = options.store; this.#integrations = options.integrations; this.#clients = options.clients; this.#connectionGrantsFor = options.connectionGrantsFor
+  constructor(options: { store: Pick<SqliteStore, 'getWorld' | 'listWorkspaces'>; integrations: IntegrationService; clients: McpClientFactory; connectionGrantsFor?: (characterId: string) => readonly string[] | undefined; credentials?: CredentialManager }) {
+    this.#store = options.store; this.#integrations = options.integrations; this.#clients = options.clients; this.#connectionGrantsFor = options.connectionGrantsFor; this.#credentials = options.credentials
   }
 
   get descriptors(): readonly CharacterSkillDescriptor[] {
@@ -94,7 +96,8 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
             next.set(entry.skillId, [...(next.get(entry.skillId) ?? []), entry])
           }
         } catch (error) {
-          failures.push(`${workspace.id}/${connection.id}: ${error instanceof Error ? error.message : String(error)}`)
+          const detail = error instanceof Error ? error.message : String(error)
+          failures.push(`${workspace.id}/${connection.id}: ${this.#credentials?.redactText(detail, workspace.id) ?? redactCredentialPatternText(detail)}`)
         } finally { await client?.close().catch(() => undefined) }
       }
     }
@@ -198,13 +201,17 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
     if (this.#connectionGrantsFor?.(action.characterId)?.includes(connectionId) !== true) return { status: 'failed', detail: '该角色尚未获得这个 MCP 连接权限，工具调用未发送' }
     const args = this.#integrations.resolveMcpPayload(payloadRef)
     if (args === undefined) return { status: 'failed', detail: 'MCP 工具参数已过期或无法解密，未调用外部工具' }
+    const resolvedArgs = this.#credentials?.resolveConnectionJson(world.workspaceId, connectionId, args) ?? args
     let client
     try {
       client = await this.#clients.connect(
         mcpConnectSpecFor(connection.config, this.#integrations.credentialForConnection(world.workspaceId, connectionId)),
       )
-      const result = await client.callTool(toolName, args)
+      const result = await client.callTool(toolName, resolvedArgs)
       return { status: 'executed', detail: summarizeMcpResult(discovered.service, toolName, result) }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'MCP 工具执行失败'
+      return { status: 'outcome-unknown', detail: `MCP 工具执行异常：${this.#credentials?.redactText(detail, world.workspaceId) ?? redactCredentialPatternText(detail)}；不得自动重试` }
     } finally {
       await client?.close().catch(() => undefined)
       await this.#integrations.deleteMcpPayload(payloadRef).catch(() => undefined)

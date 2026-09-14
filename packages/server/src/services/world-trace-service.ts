@@ -83,7 +83,7 @@ export interface WorldTraceServiceOptions {
 export type WorldTraceCheckpoint = ReadonlyMap<string, string>
 
 /** Bump whenever adapters/sanitizing change, so cached projections rebuild. */
-const TRACE_PROJECTION_VERSION = 4
+const TRACE_PROJECTION_VERSION = 5
 const MAX_CACHED_PROJECTIONS = 8
 
 interface CachedTraceProjection {
@@ -204,13 +204,15 @@ export class WorldTraceService {
   }
 
   async #materialize(worldId: string): Promise<WorldTraceEntry[]> {
-    const persisted = await this.#persistedProjection(worldId)
+    // Re-run the sanitizer on cached rows so adding or rotating a credential
+    // also protects historical evidence already held in this process.
+    const persisted = (await this.#persistedProjection(worldId)).map((entry) => this.#sanitizer.entry(entry))
     // The persisted projection has already resolved durable task links. Strip
     // only the live card's hinted task fields before merging so a transient
     // seed hint cannot outrank a task_runs link that has landed meanwhile.
     const live = [...this.#liveRuns.values()]
       .filter((entry) => entry.worldId === worldId)
-      .map(({ taskId: _hintedTaskId, taskTitle: _hintedTaskTitle, ...entry }) => entry)
+      .map(({ taskId: _hintedTaskId, taskTitle: _hintedTaskTitle, ...entry }) => this.#sanitizer.entry(entry))
     return live.length === 0 ? persisted : deduplicate([...persisted, ...live])
   }
 

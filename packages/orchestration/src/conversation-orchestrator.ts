@@ -207,6 +207,8 @@ export interface ConversationOrchestratorOptions {
   /** Durable outbox handler type. The host processes it after the answer commits. */
   completionJobType?: string
   onCompletionJobQueued?: () => void
+  /** Host credential variableization applied before prompts enter durable chat facts. */
+  redactText?: (value: string, workspaceId?: string) => string
   /**
    * Decides who speaks in a group turn and in what order.
    *
@@ -406,6 +408,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
   readonly #historyBudget: ConversationHistoryBudget
   readonly #completionJobType: string | undefined
   readonly #onCompletionJobQueued: (() => void) | undefined
+  readonly #redactText: (value: string, workspaceId?: string) => string
   readonly #listeners = new Set<ConversationRealtimeListener>()
   readonly #controlListeners = new Set<ConversationControlListener>()
   readonly #activeAgentRuns = new Map<string, { workTurnId: string; employeeId: string }>()
@@ -420,6 +423,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     this.#historyBudget = options.historyBudget ?? DEFAULT_CONVERSATION_HISTORY_BUDGET
     this.#completionJobType = options.completionJobType?.trim() || undefined
     this.#onCompletionJobQueued = options.onCompletionJobQueued
+    this.#redactText = options.redactText ?? ((value) => value)
     this.#groupTurnPlanner = options.groupTurnPlanner ?? new HeuristicGroupTurnPlanner()
     if (this.#workspacePath === undefined && this.#resolveWorldRoot === undefined) throw new Error('ConversationOrchestrator requires workspacePath or resolveWorldRoot')
   }
@@ -482,7 +486,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     return this.continueDirect({
       workTurnId: begun.workTurn.id,
       employeeId: input.employeeId,
-      runtimePrompt: input.runtimePrompt?.trim() || requiredText(input.prompt, 'Prompt'),
+      runtimePrompt: this.#redactText(input.runtimePrompt?.trim() || requiredText(input.prompt, 'Prompt'), input.workspaceId),
       ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
       ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
       previousMessages: begun.previousMessages,
@@ -500,7 +504,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
   }
 
   #beginDirect(input: DirectConversationInput, start: boolean): DirectConversationTurn {
-    const prompt = requiredText(input.prompt, 'Prompt')
+    const prompt = requiredText(this.#redactText(input.prompt, input.workspaceId), 'Prompt')
     const employee = this.#requireEmployeeInWorld(input.employeeId, input.workspaceId, input.worldId)
     const session = input.sessionId
       ? this.#requireDirectSession(input.sessionId, input.workspaceId, input.worldId, employee.id)
@@ -586,7 +590,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
   }
 
   #beginGroupTurn(input: GroupConversationInput, start: boolean): GroupConversationTurnContext {
-    const prompt = requiredText(input.prompt, 'Prompt')
+    const prompt = requiredText(this.#redactText(input.prompt, input.workspaceId), 'Prompt')
     const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
     if (employeeIds.length < 2) throw new ConversationOrchestrationError('A group conversation requires at least two agents')
     const employees = employeeIds.map((employeeId) => this.#requireEmployeeInWorld(employeeId, input.workspaceId, input.worldId))
@@ -631,7 +635,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
   }
 
   #resumeGroupTurn(input: GroupConversationInput): GroupConversationTurnContext {
-    const prompt = requiredText(input.prompt, 'Prompt')
+    const prompt = requiredText(this.#redactText(input.prompt, input.workspaceId), 'Prompt')
     const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
     if (employeeIds.length < 2) throw new ConversationOrchestrationError('A group conversation requires at least two agents')
     const turn = input.existingWorkTurnId === undefined ? undefined : this.#store.getWorkTurn(input.existingWorkTurnId)
@@ -664,7 +668,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     // taken from the durable message so the queued and immediate paths agree.
     const selection = this.#turnModelSelection(session.id, workTurn.id)
     const modelProfileIds = { ...selection.perCharacter, ...input.modelProfileIds }
-    const plan = await this.#planGroupTurn(input, employees, session)
+    const plan = await this.#planGroupTurn({ ...input, prompt }, employees, session)
     this.#store.appendDomainEvent({
       workspaceId: input.workspaceId,
       worldId: input.worldId,
@@ -857,7 +861,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
    * runs steps whose assignments were produced by the host Task Router.
    */
   async task(input: TaskConversationInput): Promise<TaskConversationResult> {
-    const prompt = requiredText(input.prompt, 'Prompt')
+    const prompt = requiredText(this.#redactText(input.prompt, input.workspaceId), 'Prompt')
     const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
     if (employeeIds.length < 1) throw new ConversationOrchestrationError('A task group requires at least one executor')
     if (!employeeIds.includes(input.coordinatorEmployeeId)) {
@@ -1136,7 +1140,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
   }
 
   async peer(input: PeerConversationInput): Promise<PeerConversationResult> {
-  const purpose = requiredText(input.purpose, 'Peer conversation purpose')
+  const purpose = requiredText(this.#redactText(input.purpose, input.workspaceId), 'Peer conversation purpose')
   const initiatorId = requiredText(input.initiatorId, 'Initiator id')
   const participantIds = [...new Set(
     [initiatorId, ...input.participantIds]

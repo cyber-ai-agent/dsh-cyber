@@ -49,6 +49,7 @@ export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-even
         ...(event.kind === 'tool.started' ? { description: summary ?? presentation.description } : {}),
         ...(detail === undefined ? {} : { input: detail }),
         ...(event.kind === 'tool.started' && event.metadata.toolDetailTruncated === true ? { inputTruncated: true } : {}),
+        ...(event.kind === 'tool.started' && event.metadata.toolDetailRedacted === true ? { inputRedacted: true } : {}),
         ...toolResultFields(event.metadata),
         status: event.kind === 'tool.started' ? 'running' : event.failed ? 'failed' : 'success',
         ...(event.kind === 'tool.started' ? { createdAt: value.createdAt } : { completedAt: value.createdAt }),

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
+import { CredentialRedactor, credentialVariable } from '@dsh-cyber/contracts'
 
 import { SSH_COMMAND_SKILL, SshSkillAdapter } from '../src/skills/ssh-skill-adapter.js'
 
@@ -144,6 +145,34 @@ describe('SshSkillAdapter', () => {
       exitCode: 1,
       output: expect.stringContaining('systemctl: not found'),
     })
+  })
+
+  it('variableizes a credential echoed by the remote tool before environment learning', async () => {
+    const secret = 'ssh-output-secret-123456'
+    const variable = credentialVariable('integration:device-1:password')
+    const redactor = new CredentialRedactor([{
+      ref: 'integration:device-1:password',
+      variable,
+      value: secret,
+    }])
+    const recorded: Array<{ output?: string }> = []
+    const adapter = new SshSkillAdapter({
+      store: { getWorld: () => world() },
+      integrations: { listByType: () => [device()], getById: () => device(), secretsForConnection: () => ({ password: secret }) } as never,
+      connectionGrantsFor: grantsDevice,
+      redactText: redactor.text.bind(redactor),
+      environment: {
+        applySignals: async (incoming) => { recorded.push({ output: incoming[0]?.output }) },
+      },
+    })
+    exec.mockResolvedValueOnce({ code: 0, stdout: 'Linux\nlinux-apt', stderr: '' })
+      .mockResolvedValueOnce({ code: 0, stdout: `password=${secret}`, stderr: '' })
+
+    const result = await adapter.execute(directAction(), { now: new Date() })
+    expect(result.detail).toContain(variable)
+    expect(result.detail).not.toContain(secret)
+    expect(recorded[0]?.output).toContain(variable)
+    expect(recorded[0]?.output).not.toContain(secret)
   })
 
   it('reports refused auth as failed and connection loss as outcome-unknown', async () => {

@@ -27,9 +27,9 @@ describe('summarizeToolCall', () => {
     expect(summary?.detail).toBe('{"pattern":"function parseJson","glob":"**/*.ts","path":"src"}')
   })
 
-  it('keeps url query strings raw', () => {
+  it('redacts credential-shaped url query values', () => {
     const summary = summarizeToolCall('{"url":"https://example.com/docs?session=abc123"}')
-    expect(summary?.detail).toContain('session=abc123')
+    expect(summary?.detail).not.toContain('session=abc123')
   })
 
   it('surfaces first arguments that look like secrets, verbatim', () => {
@@ -40,7 +40,8 @@ describe('summarizeToolCall', () => {
 
   it('never renders values of keys outside the allow-list', () => {
     const summary = summarizeToolCall('{"apiKey":"sk-live-abcdef0123456789"}')
-    expect(summary?.detail).toBe('{"apiKey":"sk-live-abcdef0123456789"}')
+    expect(summary?.detail).not.toContain('sk-live-abcdef0123456789')
+    expect(summary?.redacted).toBe(true)
     const body = summarizeToolCall('{"body":"full prompt text"}')
     expect(body?.detail).toBe('{"body":"full prompt text"}')
   })

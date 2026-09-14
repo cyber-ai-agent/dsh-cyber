@@ -101,6 +101,8 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
    * makes "this file came from this run" a Host observation instead of a claim.
    */
   readonly #runFileEvidence: AgentRunFileEvidencePort | undefined
+  readonly #redactText: ((value: string, workspaceId?: string) => string) | undefined
+  readonly #redactRuntimeEvent: ((event: AgentRuntimeEvent, workspaceId?: string) => AgentRuntimeEvent) | undefined
   /**
    * The machine profile the host has probed: OS, shell dialect, available and
    * missing CLI tools. Rendered into the cacheable prefix by this runtime,
@@ -130,6 +132,10 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     worldContext?: WorldContextPort,
     runFileEvidence?: AgentRunFileEvidencePort,
     environment?: EnvironmentContextPort,
+    redaction?: {
+      redactText?: (value: string, workspaceId?: string) => string
+      redactRuntimeEvent?: (event: AgentRuntimeEvent, workspaceId?: string) => AgentRuntimeEvent
+    },
   ) {
     this.#inner = inner
     this.#store = store
@@ -140,6 +146,8 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     this.#directory = defaultWorldCharacterDirectory(store, skillAvailability)
     this.#runFileEvidence = runFileEvidence
     this.#environment = environment
+    this.#redactText = redaction?.redactText
+    this.#redactRuntimeEvent = redaction?.redactRuntimeEvent
     this.contextInspection = inspection ?? new ContextInspectionService()
     this.#memory = memory ?? defaultMemoryForStore(store)
     this.#context = defaultConversationContextComposer(
@@ -158,6 +166,10 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     const revision = this.#store.getEmployeeRevision(agent.id, agent.currentRevision)
       ?? request.revision
     const profile = this.#store.getEmployeeProfile(agent.id)
+    const safePrompt = this.#redactText?.(request.prompt, agent.workspaceId) ?? request.prompt
+    const safeHistory = this.#redactText === undefined
+      ? request.history
+      : request.history.map((entry) => ({ ...entry, content: this.#redactText!(entry.content, agent.workspaceId) }))
 
     const grantedSkillIds = await availableWorldSkillIds(this.#skillAvailability, {
       workspaceId: agent.workspaceId,
@@ -190,7 +202,8 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         )
       : composeWorldAuthorityPersona(profiledPersona, currentAuthority)
     const runtimePersona = composeConversationPermissionPersona(persona, request.permissionMode ?? 'read-only')
-    const effectivePersona = composeSkillRecipes(runtimePersona, recipeInstructions)
+    const composedPersona = composeSkillRecipes(runtimePersona, recipeInstructions)
+    const effectivePersona = this.#redactText?.(composedPersona, agent.workspaceId) ?? composedPersona
 
     const durableMessages = this.#store.listMessages?.(request.conversationId)
     const durableObserved = durableMessages === undefined
@@ -206,7 +219,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     // given the same observation cursor the lane will use, so the window can
     // never start after an entry the lane still has to replay.
     const turnPrompt = composeArtifactPublicationPrompt(
-      request.prompt,
+      safePrompt,
       request.agentRunId,
       request.permissionMode ?? 'read-only',
     )
@@ -214,22 +227,26 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     // of the turn, so they are rendered once here and placed directly behind
     // the identity: in the cacheable prefix, in front of every retrieved
     // memory, instead of being re-sent behind them on every request.
-    const worldContext = await this.#composeWorldContext(agent, request.conversationId)
+    const worldContextRaw = await this.#composeWorldContext(agent, request.conversationId)
+    const worldContext = safeContextLayer(worldContextRaw, this.#redactText, agent.workspaceId)
     const worldDirectory = await this.#directory?.snapshot(agent.worldId, agent.id)
-    const directoryLayer = worldDirectory === undefined ? undefined : composeWorldDirectoryLayer(worldDirectory)
+    const directoryLayer = worldDirectory === undefined
+      ? undefined
+      : safeContextLayer(composeWorldDirectoryLayer(worldDirectory), this.#redactText, agent.workspaceId)
     // The machine profile is a fact of the host, not of the turn. A lane pins
     // the revision it first saw on its durable assistant messages: a later
     // refresh may change what a NEW lane sees, but never what this lane is
     // already mid-conversation with. A change that happened since the pin is
     // reported to the model as one line in the volatile suffix instead.
-    const pinnedEnvironment = lastPinnedEnvironmentLayer(durableMessages, agent.id)
+    const pinnedEnvironment = lastPinnedEnvironmentLayer(durableMessages, agent.id, this.#redactText, agent.workspaceId)
     // A boundary may probe; a mid-lane turn only reads. The pin is what makes
     // that distinction durable across turns and restarts.
-    const currentEnvironment = await this.#environment?.snapshot({
+    const currentEnvironmentRaw = await this.#environment?.snapshot({
       worldId: agent.worldId,
       characterId: agent.id,
       laneBoundary: pinnedEnvironment === undefined,
     })
+    const currentEnvironment = safeEnvironmentSnapshot(currentEnvironmentRaw, this.#redactText, agent.workspaceId)
     const environmentLayer = pinnedEnvironment?.layer ?? currentEnvironment?.layer
     const environmentNotice = environmentChangeNotice(pinnedEnvironment, currentEnvironment)
     const fixedContext = [
@@ -245,7 +262,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     // its recognizable raw plan arrives, rebuild the allocation against the
     // exact fixed text now. This gives retrieval the smaller, truthful history
     // budget instead of letting the adapter reject an overfilled request later.
-    const rawFixedTokens = estimateTextTokens(revision.persona) + estimateTextTokens(request.prompt)
+    const rawFixedTokens = estimateTextTokens(revision.persona) + estimateTextTokens(safePrompt)
     const effectiveContextBudget = request.contextBudget !== undefined
       && request.contextBudget.fixedTokens === rawFixedTokens
       ? planContextBudget({
@@ -269,7 +286,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ...(environmentLayer === undefined ? {} : { environment: environmentLayer }),
       conversationId: request.conversationId,
       prompt: turnPrompt,
-      history: request.history ?? [],
+      history: safeHistory,
       observedThroughSequence: durableObserved ?? request.observedThroughSequence ?? 0,
       ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
       ...(effectiveContextBudget === undefined ? {} : { memoryBudgetTokens: effectiveContextBudget.memoryTokens }),
@@ -279,7 +296,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       : await this.#memory?.compose({
           employeeId: agent.id,
           conversationId: request.conversationId,
-          prompt: request.prompt,
+          prompt: safePrompt,
           ...(effectiveContextBudget === undefined ? {} : { budgetTokens: effectiveContextBudget.memoryTokens }),
         })
     const basePrompt = composed?.prompt
@@ -332,13 +349,14 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     const onEvent = originalOnEvent === undefined
       ? undefined
       : (event: AgentRuntimeEvent) => {
-          if (learnsEnvironment) collectEnvironmentSignal(event, environmentSignals, commandByCallId)
-          if (event.kind !== 'assistant.message' || !event.content?.trim()) {
-            originalOnEvent(snapshotSequence === undefined ? event : withObservation(event, snapshotSequence))
+          const safeEvent = this.#redactRuntimeEvent?.(event, agent.workspaceId) ?? event
+          if (learnsEnvironment) collectEnvironmentSignal(safeEvent, environmentSignals, commandByCallId)
+          if (safeEvent.kind !== 'assistant.message' || !safeEvent.content?.trim()) {
+            originalOnEvent(snapshotSequence === undefined ? safeEvent : withObservation(safeEvent, snapshotSequence))
             return
           }
           sawAssistantMessage = true
-          let stamped = event
+          let stamped = safeEvent
           if (environmentStampPending && environmentStamp !== undefined) {
             stamped = { ...stamped, metadata: { ...stamped.metadata, ...environmentStamp } }
             environmentStampPending = false
@@ -391,7 +409,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           ? {}
           : { promptCache: composed.envelope.promptCache }),
         ...(composed === undefined ? {} : { contextSourceRefs: runtimeSourceRefs(composed.envelope) }),
-        ...(composed === undefined ? {} : { history: composed.recentHistory }),
+        ...(composed === undefined ? { history: safeHistory } : { history: composed.recentHistory }),
         ...(durableObserved === undefined ? {} : { observedThroughSequence: durableObserved }),
         ...(onEvent === undefined ? {} : { onEvent }),
         revision: {
@@ -412,6 +430,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           ].filter(Boolean).join('\n\n'),
         },
       })
+      if (this.#redactText !== undefined) result = { ...result, finalResponse: this.#redactText(result.finalResponse, agent.workspaceId) }
     } finally {
       // A failed or aborted turn may still have written files, and it is the
       // run most likely to be argued about, so it is closed exactly like a
@@ -639,7 +658,22 @@ interface PinnedEnvironment {
   noticedRevision?: string
 }
 
-function lastPinnedEnvironmentLayer(messages: readonly WorkMessage[] | undefined, employeeId: string): PinnedEnvironment | undefined {
+function safeContextLayer(layer: ContextLayer | undefined, redactText: ((value: string, workspaceId?: string) => string) | undefined, workspaceId: string): ContextLayer | undefined {
+  return layer === undefined || redactText === undefined ? layer : { ...layer, text: redactText(layer.text, workspaceId) }
+}
+
+function safeEnvironmentSnapshot(snapshot: EnvironmentSnapshot | undefined, redactText: ((value: string, workspaceId?: string) => string) | undefined, workspaceId: string): EnvironmentSnapshot | undefined {
+  if (snapshot === undefined || redactText === undefined) return snapshot
+  const layer = safeContextLayer(snapshot.layer, redactText, workspaceId)
+  return layer === undefined ? snapshot : { ...snapshot, layer }
+}
+
+function lastPinnedEnvironmentLayer(
+  messages: readonly WorkMessage[] | undefined,
+  employeeId: string,
+  redactText?: (value: string, workspaceId?: string) => string,
+  workspaceId?: string,
+): PinnedEnvironment | undefined {
   if (messages === undefined) return undefined
   let pinned: { id: string; text: string; revision: string; sourceRefs: ContextSourceRef[]; present: string[]; noticedRevision?: string } | undefined
   let latestSequence = -1
@@ -653,7 +687,7 @@ function lastPinnedEnvironmentLayer(messages: readonly WorkMessage[] | undefined
     if (typeof candidate.revision !== 'string' || candidate.revision === '') continue
     pinned = {
       id: typeof candidate.id === 'string' && candidate.id !== '' ? candidate.id : 'environment:local',
-      text: candidate.text,
+      text: redactText?.(candidate.text, workspaceId) ?? candidate.text,
       revision: candidate.revision,
       sourceRefs: pinnedSourceRefs(candidate.sourceRefs),
       present: pinnedPresence(candidate.present),

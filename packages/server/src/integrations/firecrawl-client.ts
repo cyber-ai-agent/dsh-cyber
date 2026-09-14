@@ -1,7 +1,7 @@
 import { isIP } from 'node:net'
 
 import { firecrawlBaseUrl, FIRECRAWL_INTEGRATION_ID } from './firecrawl-provider.js'
-import type { JsonObject } from '@dsh-cyber/contracts'
+import { redactCredentialPatternText, type JsonObject } from '@dsh-cyber/contracts'
 
 /**
  * The transport shared by the Firecrawl Skill and the Knowledge Library.
@@ -34,6 +34,8 @@ export interface FirecrawlClientOptions {
   fetch?: typeof globalThis.fetch
   timeoutMs?: number
   maxResponseBytes?: number
+  /** Host credential variableization for untrusted upstream response text. */
+  redactText?: (value: string, workspaceId?: string) => string
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -44,12 +46,14 @@ export class FirecrawlClient {
   readonly #fetch: typeof globalThis.fetch
   readonly #timeoutMs: number
   readonly #maxResponseBytes: number
+  readonly #redactText: (value: string, workspaceId?: string) => string
 
   constructor(options: FirecrawlClientOptions) {
     this.#integrations = options.integrations
     this.#fetch = options.fetch ?? globalThis.fetch
     this.#timeoutMs = boundedPositive(options.timeoutMs, DEFAULT_TIMEOUT_MS, 1_000, 120_000)
     this.#maxResponseBytes = boundedPositive(options.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES, 64 * 1024, 64 * 1024 * 1024)
+    this.#redactText = options.redactText ?? redactCredentialPatternText
   }
 
   async search(input: { workspaceId: string; query: string; limit?: number }): Promise<FirecrawlSearchItem[]> {
@@ -60,7 +64,7 @@ export class FirecrawlClient {
       limit,
       sources: ['web'],
     })
-    return parseSearch(payload, limit)
+    return parseSearch(payload, limit, (value) => this.#redactText(value, input.workspaceId))
   }
 
   async scrape(input: { workspaceId: string; url: string }): Promise<FirecrawlScrapeResult> {
@@ -69,7 +73,7 @@ export class FirecrawlClient {
       url,
       formats: ['markdown'],
     })
-    return parseScrape(payload, url)
+    return parseScrape(payload, url, (value) => this.#redactText(value, input.workspaceId))
   }
 
   async #request(workspaceId: string, path: string, body: Record<string, unknown>): Promise<unknown> {
@@ -151,6 +155,8 @@ export async function firecrawlSearchDirect(input: {
   limit?: number
   fetch?: typeof globalThis.fetch
   timeoutMs?: number
+  redactText?: (value: string, workspaceId?: string) => string
+  workspaceId?: string
 }): Promise<FirecrawlSearchItem[]> {
   const query = normalizeQuery(input.query)
   const limit = boundedPositive(input.limit, 5, 1, 20)
@@ -173,7 +179,7 @@ export async function firecrawlSearchDirect(input: {
     } catch {
       throw new FirecrawlClientError('invalid-response', 'Firecrawl 返回了无法识别的 JSON')
     }
-    return parseSearch(payload, limit)
+    return parseSearch(payload, limit, (value) => input.redactText?.(value, input.workspaceId) ?? redactCredentialPatternText(value))
   } catch (error) {
     if (error instanceof FirecrawlClientError) throw error
     if (error instanceof Error && error.name === 'AbortError') {
@@ -195,7 +201,7 @@ export class FirecrawlClientError extends Error {
   }
 }
 
-function parseSearch(value: unknown, limit: number): FirecrawlSearchItem[] {
+function parseSearch(value: unknown, limit: number, redactText: (value: string) => string = redactCredentialPatternText): FirecrawlSearchItem[] {
   const root = asRecord(value)
   const data = asRecord(root?.data)
   const web = data?.web
@@ -204,24 +210,26 @@ function parseSearch(value: unknown, limit: number): FirecrawlSearchItem[] {
     const row = asRecord(item)
     const url = typeof row?.url === 'string' ? row.url.trim() : ''
     if (!/^https?:\/\//i.test(url)) return []
-    const title = typeof row?.title === 'string' ? cleanText(row.title, 160) : url
-    const description = typeof row?.description === 'string' ? cleanText(row.description, 320) : undefined
-    return [{ title: title || url, url, ...(description ? { description } : {}) }]
+    const safeUrl = redactText(url)
+    if (!/^https?:\/\//i.test(safeUrl)) return []
+    const title = typeof row?.title === 'string' ? redactText(cleanText(row.title, 160)) : safeUrl
+    const description = typeof row?.description === 'string' ? redactText(cleanText(row.description, 320)) : undefined
+    return [{ title: title || safeUrl, url: safeUrl, ...(description ? { description } : {}) }]
   })
 }
 
-function parseScrape(value: unknown, requestedUrl: string): FirecrawlScrapeResult {
+function parseScrape(value: unknown, requestedUrl: string, redactText: (value: string) => string = redactCredentialPatternText): FirecrawlScrapeResult {
   const root = asRecord(value)
   const data = asRecord(root?.data) ?? root
   if (data === undefined) throw new FirecrawlClientError('invalid-response', 'Firecrawl 返回了无法识别的网页内容')
   const markdown = typeof data.markdown === 'string' ? data.markdown : typeof data.content === 'string' ? data.content : undefined
   if (markdown === undefined || markdown.trim() === '') throw new FirecrawlClientError('invalid-response', 'Firecrawl 返回的网页没有可索引正文')
   const metadata = asRecord(data.metadata)
-  const title = typeof metadata?.title === 'string' ? cleanText(metadata.title, 240) : undefined
+  const title = typeof metadata?.title === 'string' ? redactText(cleanText(metadata.title, 240)) : undefined
   const canonical = typeof metadata?.sourceURL === 'string' && /^https?:\/\//i.test(metadata.sourceURL)
     ? metadata.sourceURL
     : requestedUrl
-  return { url: canonical, ...(title ? { title } : {}), markdown: cleanText(markdown, 4_000_000), fetchedAt: new Date().toISOString() }
+  return { url: redactText(canonical), ...(title ? { title } : {}), markdown: redactText(cleanText(markdown, 4_000_000)), fetchedAt: new Date().toISOString() }
 }
 
 function normalizeQuery(value: string): string {

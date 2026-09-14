@@ -10,6 +10,7 @@ import { estimateTextTokens, type EmployeeInstance, type EmployeeRevision } from
 
 import {
   HarnessCompatibilityAdapter,
+  credentialEnvironmentAlias,
   PINNED_HARNESS_NATIVE_SYSTEM_OVERHEAD_TOKENS,
   PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS,
   PINNED_HARNESS_NATIVE_TURN_CONTEXT_TOKENS,
@@ -371,6 +372,88 @@ describe('real Harness worker with a loopback model provider', () => {
         .filter((notification) => notification.method === 'session.event')
         .map((notification) => String(notification.params.event.type))
       expect(eventTypes).toContain('compaction/prune')
+    } finally {
+      await adapter.close()
+    }
+  }, 90_000)
+
+  it('replaces worker credential echoes before the next model request', async () => {
+    const requests: Array<Record<string, unknown>> = []
+    let requestCount = 0
+    const provider = createServer((request, response) => {
+      void (async () => {
+        if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+          response.writeHead(404).end()
+          return
+        }
+        requests.push(await readJson(request))
+        requestCount += 1
+        const envelope = { id: `credential-guard-${requestCount}`, object: 'chat.completion.chunk', created: 1_777_777_777, model: 'local-test' }
+        const shell = process.platform === 'win32' ? 'pwsh' : 'bash'
+        const delta = requestCount === 1
+          ? {
+              role: 'assistant',
+              tool_calls: [{
+                index: 0,
+                id: 'credential-echo-call',
+                type: 'function',
+                function: {
+                  name: shell,
+                  arguments: JSON.stringify({ command: `node -e "process.stdout.write(process.env.${credentialEnvironmentAlias('DSH_CYBER_LOCAL_TEST_KEY')})"`, description: '读取凭证变量隔离结果' }),
+                },
+              }],
+            }
+          : { role: 'assistant', content: 'CREDENTIAL-VARIABLE-OK' }
+        response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' })
+        response.write(`data: ${JSON.stringify({ ...envelope, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`)
+        response.write(`data: ${JSON.stringify({ ...envelope, choices: [{ index: 0, delta: {}, finish_reason: requestCount === 1 ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } })}\n\n`)
+        response.end('data: [DONE]\n\n')
+      })().catch((error: unknown) => response.writeHead(500).end(error instanceof Error ? error.message : String(error)))
+    })
+    servers.push(provider)
+    await listen(provider)
+    const address = provider.address() as AddressInfo
+    const secret = 'worker-credential-echo-7f3a1b9c'
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-credential-guard-'))
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      provider: 'local-credential-guard',
+      model: 'local-test',
+      inheritedEnvironment: { ...process.env, DSH_CYBER_LOCAL_TEST_KEY: secret },
+      providerProfile: {
+        route: 'local-credential-guard',
+        displayName: 'Local credential guard provider',
+        api: 'openai-completions',
+        baseURL: `http://127.0.0.1:${address.port}/v1`,
+        apiKeyEnv: 'DSH_CYBER_LOCAL_TEST_KEY',
+        model: { id: 'local-test', contextWindow: 32_768, maxTokens: 512 },
+      },
+    })
+    const employee: EmployeeInstance = {
+      id: 'credential-guard-employee', workspaceId: 'credential-guard-workspace', worldId: 'credential-guard-world', blueprintId: 'credential-guard-role',
+      blueprintVersion: 1, displayName: '凭证隔离验证', role: '安全验证', status: 'available', currentRevision: 1,
+      createdAt: '2026-09-06T00:00:00.000Z', updatedAt: '2026-09-06T00:00:00.000Z',
+    }
+    const revision: EmployeeRevision = {
+      employeeId: employee.id, revision: 1, persona: '只报告变量化后的工具事实。', skillGrants: [], capabilityGrants: [],
+      modelPolicy: {}, reason: 'credential-guard-test', createdAt: employee.createdAt,
+    }
+    try {
+      const result = await adapter.runEmployeeTurn({
+        employee,
+        revision,
+        conversationId: 'credential-guard-conversation',
+        history: [],
+        observedThroughSequence: 0,
+        prompt: '执行凭证隔离验证。',
+        workspacePath: stateRoot,
+      })
+      expect(result.finalResponse).toContain('CREDENTIAL-VARIABLE-OK')
+      expect(requests).toHaveLength(2)
+      const secondMessages = JSON.stringify(requests[1]?.messages ?? '')
+      expect(secondMessages).not.toContain(secret)
+      expect(secondMessages).toContain('${credential.environment.dsh_cyber_local_test_key}')
+      expect(JSON.stringify(result.notifications)).not.toContain(secret)
     } finally {
       await adapter.close()
     }

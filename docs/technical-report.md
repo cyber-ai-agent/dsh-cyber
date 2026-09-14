@@ -73,6 +73,7 @@ The current branch already includes:
 - SQLite queue claim/lease recovery and derived Employee Presence/Health;
 - durable Completion Outbox that separates the final answer from Artifact post-processing;
 - atomic serialized credential file fallback behind a SecretStoragePort;
+- unified credential variable facade with execution-edge resolution and tool-result redaction;
 - World Trace Center with adapter-based projections over durable domain, conversation and Skill facts;
 - chat/result and execution/trace separation with reconnect recovery and centralized sanitization.
 

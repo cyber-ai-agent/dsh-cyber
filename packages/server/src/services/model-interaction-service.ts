@@ -22,9 +22,11 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
  */
 export class ModelInteractionService {
   readonly #store: SqliteStore
+  readonly #redactText: (value: string, workspaceId?: string) => string
 
-  constructor(store: SqliteStore) {
+  constructor(store: SqliteStore, options: { redactText?: (value: string, workspaceId?: string) => string } = {}) {
     this.#store = store
+    this.#redactText = options.redactText ?? ((value) => value)
   }
 
   /**
@@ -48,7 +50,7 @@ export class ModelInteractionService {
       ...(input.providerSnapshot ?? this.captureProvider(input.workspaceId, input.modelProfileId)),
       status: input.status,
       ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
-      ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(input.errorMessage) }),
+      ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(this.#redactText(input.errorMessage, input.workspaceId)) }),
       ...(input.httpStatus === undefined ? {} : { httpStatus: input.httpStatus }),
       promptMessageCount: 1 + (input.toolCallCount ?? 0),
       promptCharCount: input.prompt.length,
@@ -77,7 +79,7 @@ export class ModelInteractionService {
       ...(input.providerSnapshot ?? this.captureProvider(input.workspaceId, input.modelProfileId)),
       status: input.status,
       ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
-      ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(input.errorMessage) }),
+      ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(this.#redactText(input.errorMessage, input.workspaceId)) }),
       ...(input.httpStatus === undefined ? {} : { httpStatus: input.httpStatus }),
       promptMessageCount: 0,
       promptCharCount: 0,
@@ -99,7 +101,7 @@ export class ModelInteractionService {
       ...(input.providerSnapshot ?? this.captureProvider(input.workspaceId, input.modelProfileId)),
       status: input.status,
       ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
-      ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(input.errorMessage) }),
+      ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(this.#redactText(input.errorMessage, input.workspaceId)) }),
       ...(input.httpStatus === undefined ? {} : { httpStatus: input.httpStatus }),
       promptMessageCount: 1,
       promptCharCount: input.promptCharCount,

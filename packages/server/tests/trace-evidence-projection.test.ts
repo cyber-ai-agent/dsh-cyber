@@ -13,12 +13,12 @@ function historical() {
   ] as WorkMessage[] } })[0]!
 }
 describe('persistent and live tool evidence projections', () => {
-  it('keeps recorded targets, raw multiline results and measured elapsed time after a reload', () => {
+  it('keeps recorded targets, sanitized multiline results and measured elapsed time after a reload', () => {
     const entry = new TraceSanitizer().entry(historical())
     expect(entry.tools?.[0]).toMatchObject({ name: 'read', label: '读取文件', input: 'src/keyboard-shortcuts.ts', durationMs: 1000, outputTruncated: true, exitCode: 2 })
     expect(entry.tools?.[0]?.output).toContain('native result\n')
-    // Raw results are shown verbatim in the trace; no credential masking.
-    expect(entry.tools?.[0]?.output).toContain('opaque-credential')
+    expect(entry.tools?.[0]?.output).not.toContain('opaque-credential')
+    expect(entry.tools?.[0]?.outputRedacted).toBe(true)
   })
   it('projects the same output fields in live events and applies the same exit clip', () => {
     const entry = new RuntimeEventTraceAdapter().adapt({ kind: 'runtime-event', value: { worldId: 'world', actorId: 'self', sessionId: 'session', agentRunId: 'run', createdAt: run.createdAt, event: { kind: 'tool.completed', source: 'harness', sourceSessionId: 'native', callId: 'c', toolName: 'read', metadata: meta } } })[0]!

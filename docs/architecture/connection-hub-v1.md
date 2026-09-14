@@ -83,3 +83,16 @@ Character revision
 - `GET /api/employees/:employeeId/dossier`（返回 revision 含 `connectionGrants`）
 
 API 不返回凭据明文，只返回 `credentialConfigured`。
+
+## 统一凭证变量层
+
+模型凭证与第三方连接凭证继续使用各自的本机加密存储，同时由宿主的
+`CredentialManager` 提供统一的引用、解析和脱敏接口。凭证进入工具执行时
+才解析为内存值；模型上下文、工具反馈、轨迹、上下文检查和持久化元数据只
+接收 `${credential...}` 变量引用或通用隐藏标记。
+
+DSH worker 为每个可用凭证创建稳定的 `DSH_CYBER_CREDENTIAL_*` 环境别名，
+通过 `dsh-shell-env` 在每次 shell 调用时注入。`tools/execute`、
+`tools/post-execute` 两道宿主边界会清洗结构化结果、错误、附加上下文和
+presentation metadata；SSH 环境学习、Firecrawl 返回内容和 MCP 变量参数
+沿用同一套引用规则。

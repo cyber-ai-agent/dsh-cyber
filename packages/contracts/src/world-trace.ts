@@ -56,15 +56,14 @@ export interface WorldTraceToolStep {
   input?: string
   /** True when the parameter payload contains a bounded head/tail view. */
   inputTruncated?: boolean
-  /** The raw text actually returned by this tool call, clipped to a bounded length. */
+  /** The text returned by this tool call after credential variableization. */
   output?: string
+  /** True when a credential value in the input was replaced by a variable. */
+  inputRedacted?: boolean
   /** Call id whose identical output body is shown in the trace. */
   outputReference?: string
   outputTruncated?: boolean
-  /**
-   * @deprecated Legacy flag from the credential-redacted era. New trace data
-   * no longer sets it; persisted older entries may still carry it.
-   */
+  /** True when a credential value in the output was replaced by a variable. */
   outputRedacted?: boolean
   /** Only present when the runtime explicitly supplied a process exit code. */
   exitCode?: number
@@ -90,9 +89,8 @@ export interface WorldTraceArtifactRef {
  * Provider- and renderer-neutral read model for meaningful activity in a world.
  *
  * Entries reference canonical facts; they are not a second source of truth.
- * Narrative fields (summary, detail, reasoning) stay host-sanitized; the tool
- * step's `input`/`output` carry the raw, unmasked call parameters and result
- * text so the trace panel can show them verbatim.
+ * Narrative fields and tool evidence stay host-sanitized; known credentials
+ * appear as stable variable references in expandable tool details.
  */
 export interface WorldTraceEntry {
   id: string

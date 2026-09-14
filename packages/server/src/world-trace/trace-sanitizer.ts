@@ -1,8 +1,8 @@
-import { redactToolTraceText } from '@dsh-cyber/contracts'
+import { redactCredentialPatternText, redactToolTraceText } from '@dsh-cyber/contracts'
 import type { JsonObject, JsonValue, WorldTraceEntry } from '@dsh-cyber/contracts'
 import { clipToolEvidence } from '@dsh-cyber/harness-adapter'
 
-const SENSITIVE_KEY = /^(?:authorization|cookie|set-cookie|password|passphrase|secret|api[-_]?key|access[-_]?token|refresh[-_]?token|token|credential)$/i
+const SENSITIVE_KEY = /^(?:authorization|proxy-authorization|cookie|set-cookie|password|passphrase|secret|api[-_]?key|access[-_]?key|private[-_]?key|access[-_]?token|refresh[-_]?token|token|credential|credentials)$/i
 const SENSITIVE_TEXT = [
   /\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi,
   /\bsk-[A-Za-z0-9_-]{12,}\b/g,
@@ -11,8 +11,21 @@ const SENSITIVE_TEXT = [
 ]
 
 export class TraceSanitizer {
-  text(value: string, maximumLength = 500): string {
-    let sanitized = redactToolTraceText(value, Math.max(maximumLength, 4_000)).replaceAll(/\s+/g, ' ').trim()
+  readonly #credentialRedact: (value: string, scopeId?: string) => string
+  readonly #scopeForEntry: ((worldId: string) => string | undefined) | undefined
+
+  constructor(options: { redactText?: (value: string, scopeId?: string) => string; scopeForEntry?: (worldId: string) => string | undefined } = {}) {
+    this.#credentialRedact = options.redactText ?? redactCredentialPatternText
+    this.#scopeForEntry = options.scopeForEntry
+  }
+
+  /** Credential-only pass that preserves line breaks for evidence previews. */
+  redact(value: string, scopeId?: string): string {
+    return this.#credentialRedact(value, scopeId)
+  }
+
+  text(value: string, maximumLength = 500, scopeId?: string): string {
+    let sanitized = redactToolTraceText(this.#credentialRedact(value, scopeId), Math.max(maximumLength, 4_000)).replaceAll(/\s+/g, ' ').trim()
     for (const pattern of SENSITIVE_TEXT) sanitized = sanitized.replace(pattern, '[已隐藏敏感信息]')
     return sanitized.length <= maximumLength
       ? sanitized
@@ -24,33 +37,35 @@ export class TraceSanitizer {
   }
 
   entry(entry: WorldTraceEntry): WorldTraceEntry {
-    const summary = this.text(entry.summary, 160)
-    const detail = entry.detail === undefined ? undefined : this.text(entry.detail, 500)
-    const reasoningSummary = entry.reasoningSummary === undefined ? undefined : this.text(entry.reasoningSummary, 1_200)
-    // The tool step's `input`/`output` are the raw, unmasked call parameters
-    // and result the trace panel expands on click; they only ever get clipped
-    // to a bounded length here. `name`/`label`/`description` are narrative
-    // fields (and may interpolate a runtime-supplied tool name), so they stay
-    // on the redaction path.
+    const scopeId = this.#scopeForEntry?.(entry.worldId) ?? entry.worldId
+    const summary = this.text(entry.summary, 160, scopeId)
+    const detail = entry.detail === undefined ? undefined : this.text(entry.detail, 500, scopeId)
+    const reasoningSummary = entry.reasoningSummary === undefined ? undefined : this.text(entry.reasoningSummary, 1_200, scopeId)
+    // Tool evidence is variableized before clipping; labels and descriptions
+    // use the same redaction path because provider names are runtime data.
     const tools = entry.tools?.map((tool) => ({
       ...tool,
-      callId: this.text(tool.callId, 160),
-      ...(tool.name === undefined ? {} : { name: this.text(tool.name, 160) }),
-      ...(tool.outputReference === undefined ? {} : { outputReference: this.text(tool.outputReference, 160) }),
-      label: this.text(tool.label, 200),
-      ...(tool.description === undefined ? {} : { description: this.text(tool.description, 300) }),
+      callId: this.text(tool.callId, 160, scopeId),
+      ...(tool.name === undefined ? {} : { name: this.text(tool.name, 160, scopeId) }),
+      ...(tool.outputReference === undefined ? {} : { outputReference: this.text(tool.outputReference, 160, scopeId) }),
+      label: this.text(tool.label, 200, scopeId),
+      ...(tool.description === undefined ? {} : { description: this.text(tool.description, 300, scopeId) }),
       ...(tool.input === undefined ? {} : (() => {
-        const bounded = clipToolEvidence(tool.input)
+        const redacted = this.#credentialRedact(tool.input, scopeId)
+        const bounded = clipToolEvidence(redacted)
         return {
           input: bounded.value,
           ...(tool.inputTruncated || bounded.truncated ? { inputTruncated: true } : {}),
+          ...(tool.inputRedacted || redacted !== tool.input ? { inputRedacted: true } : {}),
         }
       })()),
       ...(tool.output === undefined ? {} : (() => {
-        const bounded = clipToolEvidence(tool.output)
+        const redacted = this.#credentialRedact(tool.output, scopeId)
+        const bounded = clipToolEvidence(redacted)
         return {
           output: bounded.value,
           outputTruncated: tool.outputTruncated || bounded.truncated,
+          ...(tool.outputRedacted || redacted !== tool.output ? { outputRedacted: true } : {}),
         }
       })()),
     }))
@@ -58,12 +73,12 @@ export class TraceSanitizer {
     // they pass through the same redaction as every other displayed string.
     const artifacts = entry.artifacts?.map((artifact) => ({
       ...artifact,
-      artifactId: this.text(artifact.artifactId, 160),
-      title: this.text(artifact.title, 200) || '未命名产物',
+      artifactId: this.text(artifact.artifactId, 160, scopeId),
+      title: this.text(artifact.title, 200, scopeId) || '未命名产物',
     }))
     // A task title is owner-typed and reaches the card verbatim, like an
     // artifact title. The id stays untouched: it is what a filter matches on.
-    const taskTitle = entry.taskTitle === undefined ? undefined : this.text(entry.taskTitle, 160)
+    const taskTitle = entry.taskTitle === undefined ? undefined : this.text(entry.taskTitle, 160, scopeId)
     const {
       detail: _originalDetail,
       reasoningSummary: _originalReasoning,
@@ -87,7 +102,8 @@ export class TraceSanitizer {
     const output: JsonObject = {}
     for (const [key, item] of Object.entries(value)) {
       if (SENSITIVE_KEY.test(key)) {
-        output[key] = '[已隐藏敏感信息]'
+        const safe = typeof item === 'string' ? this.#credentialRedact(item) : '[已隐藏敏感信息]'
+        output[key] = safe === item ? '[已隐藏敏感信息]' : safe
         continue
       }
       output[key] = this.#value(item)

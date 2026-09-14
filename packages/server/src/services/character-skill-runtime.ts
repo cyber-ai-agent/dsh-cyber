@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { ApprovalPolicy, ApprovalRequest, ApprovalScope } from '@dsh-cyber/contracts'
+import type { ApprovalPolicy, ApprovalRequest, ApprovalScope, JsonObject } from '@dsh-cyber/contracts'
 import type {
   CharacterSkillAction,
   CharacterSkillDescriptor,
@@ -32,6 +32,9 @@ export interface CharacterSkillRuntimeOptions {
   worldPermissions?: WorldPermissionRequestService
   /** Host-provided World Availability; omitted by legacy embedders. */
   skillAvailability?: WorldSkillAvailabilityPort
+  /** Shared credential boundary for action labels/details and parameters. */
+  redactText?: (value: string, workspaceId?: string) => string
+  redactJson?: (value: JsonObject, workspaceId?: string) => JsonObject
 }
 
 export interface SkillPreparationContext {
@@ -61,6 +64,8 @@ export class CharacterSkillRuntime {
   readonly #actions: CharacterSkillActionRepository
   readonly #worldPermissions: WorldPermissionRequestService | undefined
   readonly #skillAvailability: WorldSkillAvailabilityPort | undefined
+  readonly #redactText: (value: string, workspaceId?: string) => string
+  readonly #redactJson: (value: JsonObject, workspaceId?: string) => JsonObject
   #timer: NodeJS.Timeout | undefined
   #ticking = false
   #approvalSettlementHandler: ((workTurnId: string) => Promise<void>) | undefined
@@ -71,6 +76,8 @@ export class CharacterSkillRuntime {
     this.#actions = options.actions
     this.#worldPermissions = options.worldPermissions
     this.#skillAvailability = options.skillAvailability
+    this.#redactText = options.redactText ?? ((value) => value)
+    this.#redactJson = options.redactJson ?? ((value) => value)
   }
 
   start(): void {
@@ -157,14 +164,14 @@ export class CharacterSkillRuntime {
         characterId,
         skillId: proposal.skillId,
         adapterId: proposal.adapterId,
-        action: proposal.action,
-        target: proposal.target,
-        label: proposal.label,
+        action: this.#redactText(proposal.action, workspaceId),
+        target: this.#redactText(proposal.target, workspaceId),
+        label: this.#redactText(proposal.label, workspaceId),
         risk: proposal.risk,
         authorization: proposal.authorization,
         ...(proposal.authorizationSource === undefined ? {} : { authorizationSource: proposal.authorizationSource }),
         ...(proposal.requiredWorldPermission === undefined ? {} : { requiredWorldPermission: proposal.requiredWorldPermission }),
-        parameters: proposal.parameters ?? {},
+        parameters: this.#redactJson(proposal.parameters ?? {}, workspaceId),
         ...(proposal.scheduledFor === undefined ? {} : { scheduledFor: proposal.scheduledFor }),
         workTurnId,
         ...(agentRunId === undefined ? {} : { agentRunId }),
@@ -533,7 +540,7 @@ export class CharacterSkillRuntime {
     try {
       const result = await adapter.execute(action, { now })
       action.status = result.status
-      action.detail = result.detail
+      action.detail = this.#redactText(result.detail, this.#store.getWorld(action.worldId)?.workspaceId)
     } catch {
       // Adapter exceptions are deliberately ambiguous: the provider may have
       // accepted an external side effect before the local process lost the

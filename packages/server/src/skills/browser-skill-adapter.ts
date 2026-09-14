@@ -36,6 +36,7 @@ import type {
   CharacterSkillExecutionResult,
   CharacterSkillMatchContext,
 } from './skill-adapter.js'
+import { redactCredentialPatternText } from '@dsh-cyber/contracts'
 
 export { BROWSER_ADAPTER_ID, BROWSER_PACKAGE_ID } from '@dsh-cyber/contracts'
 
@@ -56,6 +57,8 @@ export interface BrowserSkillAdapterOptions {
   listWorldPackages?: (worldId: string) => Promise<InstalledPackage[]>
   clientFactory?: BrowserClientFactory
   policy?: BrowserPolicy
+  /** Credential variableization for untrusted page content and URLs. */
+  redactText?: (value: string, workspaceId?: string) => string
   publishScreenshot?: (input: {
     workspaceId: string
     worldId: string
@@ -76,6 +79,7 @@ export class BrowserSkillAdapter implements CharacterSkillAdapter {
   readonly #clientFactory: BrowserClientFactory
   readonly #policy: BrowserPolicy
   readonly #publishScreenshot: BrowserSkillAdapterOptions['publishScreenshot']
+  readonly #redactText: (value: string, workspaceId?: string) => string
 
   constructor(options: BrowserSkillAdapterOptions) {
     this.#store = options.store
@@ -83,6 +87,7 @@ export class BrowserSkillAdapter implements CharacterSkillAdapter {
     this.#clientFactory = options.clientFactory ?? new PlaywrightBrowserClientFactory()
     this.#policy = options.policy ?? new BrowserPolicy()
     this.#publishScreenshot = options.publishScreenshot
+    this.#redactText = options.redactText ?? redactCredentialPatternText
   }
 
   propose(context: CharacterSkillMatchContext): CharacterSkillActionProposal[] {
@@ -148,10 +153,11 @@ export class BrowserSkillAdapter implements CharacterSkillAdapter {
       const target = await this.#policy.resolveTarget(parameters.url)
       client = await this.#clientFactory.create(this.#policy, target)
       requestBoundaryCrossed = true
-      if (skillId === BROWSER_OPEN_SKILL) return { status: 'executed', detail: formatFactualResult(skillId, await client.open(parameters.url)) }
-      if (skillId === BROWSER_READ_SKILL) return { status: 'executed', detail: formatFactualResult(skillId, await client.read(parameters.url)) }
+      const redactText = (value: string) => this.#redactText(value, world.workspaceId)
+      if (skillId === BROWSER_OPEN_SKILL) return { status: 'executed', detail: formatFactualResult(skillId, await client.open(parameters.url), undefined, redactText) }
+      if (skillId === BROWSER_READ_SKILL) return { status: 'executed', detail: formatFactualResult(skillId, await client.read(parameters.url), undefined, redactText) }
       if (skillId === BROWSER_EXTRACT_SKILL) {
-        return { status: 'executed', detail: formatFactualResult(skillId, await client.extract({ url: parameters.url, selector: parameters.selector! })) }
+        return { status: 'executed', detail: formatFactualResult(skillId, await client.extract({ url: parameters.url, selector: parameters.selector! }), undefined, redactText) }
       }
       const screenshot = await client.screenshot({
         url: parameters.url,
@@ -168,7 +174,7 @@ export class BrowserSkillAdapter implements CharacterSkillAdapter {
         ...(action.agentRunId === undefined ? {} : { agentRunId: action.agentRunId }),
         idempotencyKey: `browser-screenshot:v1:${action.id}`,
       })
-      return { status: 'executed', detail: formatFactualResult(skillId, screenshot, publication) }
+      return { status: 'executed', detail: formatFactualResult(skillId, screenshot, publication, redactText) }
     } catch (error) {
       if (error instanceof BrowserPolicyError && ['timeout', 'peer-timeout', 'peer-mismatch'].includes(error.kind)) {
         return { status: 'outcome-unknown', detail: `浏览器外部请求结果未知：${error.message}；不得自动重试` }
@@ -296,18 +302,18 @@ function actionLabel(action: BrowserActionKind): string {
   return action === 'open' ? '打开网页' : action === 'read' ? '读取网页' : action === 'extract' ? '提取网页' : '网页截图'
 }
 
-function formatFactualResult(skillId: BrowserSkillId, result: BrowserPageInfo | BrowserReadResult | BrowserExtractResult | BrowserScreenshotResult, publication?: WorldArtifactPublication): string {
+function formatFactualResult(skillId: BrowserSkillId, result: BrowserPageInfo | BrowserReadResult | BrowserExtractResult | BrowserScreenshotResult, publication?: WorldArtifactPublication, redactText: (value: string) => string = (value) => value): string {
   const action = skillId.slice('browser.'.length) as BrowserActionKind
   const factual: BrowserFactualResult = {
     kind: 'browser.factual-result',
-    sourceUrl: result.url,
+    sourceUrl: redactText(result.url),
     action,
     untrusted: true,
-    ...(result.title === '' ? {} : { title: safeExternal(result.title, 240) }),
+    ...(result.title === '' ? {} : { title: redactText(safeExternal(result.title, 240)) }),
     fetchedAt: new Date().toISOString(),
   }
-  if ('text' in result) factual.text = safeExternal(result.text, 12_000)
-  if ('items' in result) factual.extracted = result.items.slice(0, 100).map((item) => ({ selector: item.selector, text: safeExternal(item.text, 2_000) }))
+  if ('text' in result) factual.text = redactText(safeExternal(result.text, 12_000))
+  if ('items' in result) factual.extracted = result.items.slice(0, 100).map((item) => ({ selector: redactText(item.selector), text: redactText(safeExternal(item.text, 2_000)) }))
   if ('bytes' in result) {
     factual.screenshot = {
       width: result.width,

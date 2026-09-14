@@ -65,6 +65,55 @@ describe('CharacterProfileRuntime', () => {
     expect(inner.requests[0]?.revision.persona).toContain('[世界管理员职责]')
   })
 
+  it('redacts the current prompt, runtime events and final response before the host persists them', async () => {
+    const secret = 'runtime-secret-123456'
+    const variable = '${credential.test.runtime}'
+    const inner = new CaptureRuntime()
+    const events: string[] = []
+    const originalRun = inner.runTurn.bind(inner)
+    inner.runTurn = async (request) => {
+      request.onEvent?.({
+        kind: 'tool.completed',
+        source: 'test',
+        sourceSessionId: 'session',
+        content: secret,
+        metadata: { toolOutput: secret },
+      })
+      return { ...(await originalRun(request)), finalResponse: secret }
+    }
+    const runtime = new CharacterProfileRuntime(inner, {
+      getEmployee: () => character(),
+      getEmployeeRevision: () => revision(1, '当前角色设定'),
+      getEmployeeProfile: () => undefined,
+      getWorld: () => undefined,
+    }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      redactText: (value) => value.split(secret).join(variable),
+      redactRuntimeEvent: (event) => ({
+        ...event,
+        ...(event.content === undefined ? {} : { content: event.content.split(secret).join(variable) }),
+        metadata: Object.fromEntries(Object.entries(event.metadata).map(([key, value]) => [key, typeof value === 'string' ? value.split(secret).join(variable) : value])),
+      }),
+    })
+
+    const result = await runtime.runTurn({
+      agent: character(),
+      revision: revision(1, '当前角色设定'),
+      prompt: `执行 ${secret}`,
+      history: [{ role: 'user', sequence: 1, speakerId: 'owner', speakerName: '用户', content: secret, createdAt: '' }],
+      observedThroughSequence: 0,
+      conversationId: 'conversation-1',
+      workspacePath: '/tmp/world',
+      onEvent: (event) => events.push(JSON.stringify(event)),
+    })
+
+    expect(inner.requests[0]?.prompt).not.toContain(secret)
+    expect(inner.requests[0]?.prompt).toContain(variable)
+    expect(JSON.stringify(inner.requests[0]?.history)).not.toContain(secret)
+    expect(events.join('\n')).not.toContain(secret)
+    expect(events.join('\n')).toContain(variable)
+    expect(result.finalResponse).toBe(variable)
+  })
+
   it('injects only granted declarative recipes and never loads the full catalog', async () => {
     const inner = new CaptureRuntime()
     const granted = revision(2, '当前角色设定')

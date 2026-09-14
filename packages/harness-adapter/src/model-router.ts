@@ -6,6 +6,7 @@ import type {
   AgentRuntimePort,
   AgentTurnRequest,
   AgentTurnResult,
+  CredentialRedactor,
 } from '@dsh-cyber/contracts'
 
 import {
@@ -70,6 +71,8 @@ export interface HarnessModelRouterOptions {
    * embedders) keeps the DSH bundle default.
    */
   resolveWebSearchPlan?: (request: AgentTurnRequest, route: HarnessModelRoute | undefined) => WorkerWebSearchPlan | undefined
+  /** Fresh host-side credential snapshot for runtime evidence and replies. */
+  credentialRedactor?: (workspaceId?: string) => CredentialRedactor
 }
 
 interface AdapterEntry {
@@ -375,6 +378,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
         ? {}
         : { dshBinPath: this.#options.dshBinPath }),
       ...(webSearchPlan === undefined ? {} : { webSearchPlan }),
+      ...(this.#options.credentialRedactor === undefined ? {} : { credentialRedactor: this.#options.credentialRedactor }),
     }
     if (route !== undefined) {
       const providerRoute = `cyber-${fingerprint.slice(0, 16)}`

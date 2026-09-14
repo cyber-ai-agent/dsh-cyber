@@ -8,6 +8,7 @@ import { HttpError } from '../http/errors.js'
 import { nullableString, readJson, requiredEnum, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { type ModelCredentialService } from '../services/model-credential-service.js'
+import type { CredentialManager } from '../services/credential-manager.js'
 import type { ModelCatalogService } from '../services/model-catalog-service.js'
 import { assertModelBaseUrl, modelBaseUrlIdentity, ModelUrlPolicyError } from '../services/model-url-policy.js'
 import { ServiceError } from '../services/service-error.js'
@@ -22,6 +23,7 @@ const MAX_IMPORT_BATCH = 50
 export interface ModelHubRoutesDependencies {
   store: SqliteStore
   credentials: ModelCredentialService
+  credentialManager?: Pick<CredentialManager, 'invalidate'>
   modelCatalog: ModelCatalogService
   providerCatalog: ModelProviderCatalogService
   balance: ModelProviderBalanceService
@@ -29,7 +31,7 @@ export interface ModelHubRoutesDependencies {
 }
 
 export function registerModelHubRoutes(router: Router, dependencies: ModelHubRoutesDependencies): void {
-  const { store, credentials, modelCatalog, providerCatalog, balance, probe } = dependencies
+  const { store, credentials, credentialManager, modelCatalog, providerCatalog, balance, probe } = dependencies
 
   const resolveProviderKey = (providerId: string, credentialEnvName: string | undefined): string | undefined =>
     credentials.resolve(providerId)
@@ -139,12 +141,14 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
     })
     if (apiKey !== undefined && apiKey.trim() !== '') {
       const envName = await credentials.set(provider.id, apiKey)
+      credentialManager?.invalidate()
       const saved = store.saveModelProvider({ ...provider, credentialEnvName: envName })
       writeJson(response, 200, { provider: saved })
       return
     }
     if (body.clearCredential === true) {
       await credentials.delete(provider.id)
+      credentialManager?.invalidate()
       store.saveModelProvider({ ...provider, credentialEnvName: null })
     }
     writeJson(response, 200, { provider: store.getModelProvider(provider.id) ?? provider })
@@ -159,6 +163,7 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
       throw new HttpError(409, 'model_provider_in_use', `该服务商仍有 ${result.assignedScopeIds.length} 处分配在使用，请先在角色或世界设置中改用其它模型。`)
     }
     await credentials.delete(providerId)
+    credentialManager?.invalidate()
     writeJson(response, 200, { removed: true })
   })
 

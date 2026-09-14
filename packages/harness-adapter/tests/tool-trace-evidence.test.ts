@@ -15,7 +15,7 @@ function start(subjects: ToolTraceSubjects, args: object, name = 'read', callId 
   return normalizeHarnessTraceNotification(event('tool/call', { name, callId, arguments: JSON.stringify(args) }, sessionId), subjects)
 }
 
-describe('raw tool evidence from current Harness event shapes', () => {
+describe('sanitized tool evidence from current Harness event shapes', () => {
   it('keeps long code filenames and raw read ranges', () => {
     const summary = summarizeToolCall({ file_path: 'packages/server/src/services/character-profile-runtime.ts', offset: 10, limit: 25 })!
     expect(summary.detail).toContain('character-profile-runtime.ts')
@@ -25,7 +25,7 @@ describe('raw tool evidence from current Harness event shapes', () => {
   it('keeps actual nested text results and the raw input bodies', () => {
     const subjects = new ToolTraceSubjects()
     const [call] = start(subjects, { file_path: 'src/token-counter.ts', content: 'RAW-INPUT-BODY' })
-    // Raw parameters now travel verbatim; nothing is dropped for a trace view.
+    // Ordinary source content remains readable in the bounded trace view.
     expect(JSON.stringify(call)).toContain('RAW-INPUT-BODY')
     const [done] = normalizeHarnessTraceNotification(result('1 export const count = 1\n2 // next'), subjects)
     expect(done?.metadata.toolOutput).toContain('export const count')
@@ -39,20 +39,21 @@ describe('raw tool evidence from current Harness event shapes', () => {
     expect(normalizeHarnessTraceNotification(result('own'), subjects)[0]?.metadata.toolOutput).toBe('own')
     expect(normalizeHarnessTraceNotification(result('late duplicate'), subjects)[0]?.metadata.toolOutput).toBeUndefined()
   })
-  it('shows credential container contents verbatim', () => {
+  it('keeps unlabeled output when no credential shape is present', () => {
     const subjects = new ToolTraceSubjects()
     expect(start(subjects, { file_path: '.env' })[0]?.metadata.toolSummary).toBe('{"file_path":".env"}')
     const value = normalizeHarnessTraceNotification(result('UNLABELED-PRIVATE-VALUE'), subjects)[0]
     expect(value?.metadata.toolOutput).toBe('UNLABELED-PRIVATE-VALUE')
     expect(value?.metadata.toolOutputRedacted).toBeUndefined()
   })
-  it('clips large results with an explicit truncation flag, without redacting', () => {
+  it('clips large results with an explicit truncation and redaction flag', () => {
     const subjects = new ToolTraceSubjects()
     start(subjects, { file_path: 'src/index.ts' })
     const [done] = normalizeHarnessTraceNotification(result('access_token="opaque private value"\n' + 'x'.repeat(40_000)), subjects)
-    expect(done?.metadata.toolOutput).toContain('opaque private value')
+    expect(done?.metadata.toolOutput).not.toContain('opaque private value')
     expect((done?.metadata.toolOutput as string).length).toBeLessThanOrEqual(32_000)
     expect(done?.metadata.toolOutputTruncated).toBe(true)
+    expect(done?.metadata.toolOutputRedacted).toBe(true)
   })
   it('keeps large result evidence to a head/tail view', () => {
     const subjects = new ToolTraceSubjects()

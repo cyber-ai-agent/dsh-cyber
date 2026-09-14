@@ -17,6 +17,7 @@ export interface ImageTurnRuntimeDependencies {
   images: ImageGenerationService
   worldFiles: WorldFileService
   interactions: ModelInteractionService
+  redactText?: (value: string, workspaceId?: string) => string
 }
 
 /**
@@ -117,7 +118,7 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
       // usage log, trace and UI all learn about an image attempt exactly like
       // any other model call - the error message keeps the 'HTTP 429' style
       // markers classifyRuntimeFailure looks for.
-      const message = cause instanceof Error ? cause.message : '图片生成失败'
+      const message = deps.redactText?.(cause instanceof Error ? cause.message : '图片生成失败', employee.workspaceId) ?? (cause instanceof Error ? cause.message : '图片生成失败')
       emit('turn.failed', { metadata: { error: message, ...(cause instanceof ServiceError ? { errorCode: cause.code } : {}) } })
       deps.interactions.recordTurn({
         workspaceId: employee.workspaceId,
