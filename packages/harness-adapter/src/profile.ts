@@ -6,7 +6,14 @@ import { randomUUID } from 'node:crypto'
 
 import type { WorkerWebSearchPlan } from './web-search.js'
 
-export const SUPPORTED_HARNESS_VERSION = '0.1.2-rc.1' as const
+export const SUPPORTED_HARNESS_VERSION = '0.1.5-rc.2' as const
+export const SUPPORTED_HARNESS_RELEASE_TAG = 'dsh-v0.1.5-rc.2' as const
+export const SUPPORTED_HARNESS_RELEASE_DATE = '2026-09-10' as const
+export const SUPPORTED_HARNESS_RELEASE_COMMIT = 'fb2c4b9e698e30edb738bca4cf0618587db7d203' as const
+export const SUPPORTED_HARNESS_NPM_CHANNEL = 'next' as const
+export const SUPPORTED_HARNESS_PROTOCOL_CONTRACT = 'dsh-session-events-v1' as const
+export const SUPPORTED_HARNESS_SESSION_FORMAT_VERSION = 3 as const
+export const SUPPORTED_HARNESS_FORMAT_MIGRATIONS = ['v2-to-v3'] as const
 export const WORKER_PROFILE_NAME = 'dsh-cyber-worker' as const
 
 export interface HarnessProfilePaths {
@@ -41,6 +48,13 @@ export interface HarnessProviderProfile {
 export interface HarnessCompatibilityReport {
   ok: boolean
   expectedVersion: string
+  releaseTag: string
+  releaseDate: string
+  releaseCommit: string
+  npmChannel: string
+  contractId: string
+  sessionFormatVersion: number
+  supportedFormatMigrations: readonly string[]
   packages: Record<string, { version?: string; path?: string; error?: string }>
   profile?: HarnessProfilePaths
   errors: string[]
@@ -190,6 +204,13 @@ export async function inspectHarnessCompatibility(
   const report: HarnessCompatibilityReport = {
     ok: true,
     expectedVersion: SUPPORTED_HARNESS_VERSION,
+    releaseTag: SUPPORTED_HARNESS_RELEASE_TAG,
+    releaseDate: SUPPORTED_HARNESS_RELEASE_DATE,
+    releaseCommit: SUPPORTED_HARNESS_RELEASE_COMMIT,
+    npmChannel: SUPPORTED_HARNESS_NPM_CHANNEL,
+    contractId: SUPPORTED_HARNESS_PROTOCOL_CONTRACT,
+    sessionFormatVersion: SUPPORTED_HARNESS_SESSION_FORMAT_VERSION,
+    supportedFormatMigrations: SUPPORTED_HARNESS_FORMAT_MIGRATIONS,
     packages: {},
     errors: [],
   }
@@ -223,6 +244,7 @@ export async function inspectHarnessCompatibility(
       report.errors.push(`${packageName}: ${message}`)
     }
   }
+  await inspectBundleDependencies(report)
   if (homeDir !== undefined) {
     try {
       report.profile = await ensureHarnessProfile(homeDir)
@@ -232,6 +254,41 @@ export async function inspectHarnessCompatibility(
   }
   report.ok = report.errors.length === 0
   return report
+}
+
+async function inspectBundleDependencies(report: HarnessCompatibilityReport): Promise<void> {
+  const bundlePath = report.packages['@dsh-cyber/harness-bundle']?.path
+  if (bundlePath === undefined) return
+  try {
+    const bundleManifest = JSON.parse(await readFile(bundlePath, 'utf8')) as {
+      dependencies?: Record<string, unknown>
+    }
+    const require = createRequire(bundlePath)
+    for (const [packageName, declared] of Object.entries(bundleManifest.dependencies ?? {})) {
+      if (!packageName.startsWith('@deepseek-ai/dsh-')) continue
+      if (declared !== SUPPORTED_HARNESS_VERSION) {
+        report.errors.push(`${packageName} bundle spec is ${String(declared)}, expected ${SUPPORTED_HARNESS_VERSION}`)
+      }
+      try {
+        const manifestPath = require.resolve(`${packageName}/package.json`)
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { version?: unknown }
+        const version = typeof manifest.version === 'string' ? manifest.version : undefined
+        report.packages[packageName] = {
+          ...(version === undefined ? {} : { version }),
+          path: manifestPath,
+        }
+        if (version !== SUPPORTED_HARNESS_VERSION) {
+          report.errors.push(`${packageName} is ${version ?? 'unknown'}, expected ${SUPPORTED_HARNESS_VERSION}`)
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        report.packages[packageName] = { error: message }
+        report.errors.push(`${packageName}: ${message}`)
+      }
+    }
+  } catch (error) {
+    report.errors.push(`@dsh-cyber/harness-bundle: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 async function writeTextAtomic(destination: string, content: string): Promise<void> {

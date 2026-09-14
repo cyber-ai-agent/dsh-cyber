@@ -14,7 +14,7 @@ function start(subjects: ToolTraceSubjects, args: object, name = 'read', callId 
   return normalizeHarnessTraceNotification(event('tool/call', { name, callId, arguments: JSON.stringify(args) }, sessionId), subjects)
 }
 
-describe('raw tool evidence from real rc.1 event shapes', () => {
+describe('raw tool evidence from current Harness event shapes', () => {
   it('keeps long code filenames and raw read ranges', () => {
     const summary = summarizeToolCall({ file_path: 'packages/server/src/services/character-profile-runtime.ts', offset: 10, limit: 25 })!
     expect(summary.detail).toContain('character-profile-runtime.ts')

@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -236,6 +236,8 @@ describe('real Harness worker with a loopback model provider', () => {
       expect(eventKinds).toContain('turn.started')
       expect(eventKinds).toContain('assistant.message')
       expect(eventKinds).toContain('turn.completed')
+      const sessionLogs = await findFiles(join(stateRoot, 'harness-home', 'sessions'), 'session.v3.jsonl.zstd')
+      expect(sessionLogs.length).toBeGreaterThan(0)
     } finally {
       await adapter.close()
     }
@@ -278,7 +280,7 @@ describe('real Harness worker with a loopback model provider', () => {
     })
     expect(canary).toMatchObject({
       ok: true,
-      version: '0.1.2-rc.1',
+      version: '0.1.5-rc.2',
       stableSession: true,
     })
     expect(canary.eventKinds).toEqual(expect.arrayContaining(['turn.started', 'assistant.message', 'turn.completed']))
@@ -294,6 +296,17 @@ function listen(server: Server): Promise<void> {
       resolvePromise()
     })
   })
+}
+
+async function findFiles(root: string, filename: string): Promise<string[]> {
+  const matches: string[] = []
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    const path = join(root, entry.name)
+    if (entry.isDirectory()) matches.push(...await findFiles(path, filename))
+    else if (entry.isFile() && entry.name === filename) matches.push(path)
+  }
+  return matches
 }
 
 function closeServer(server: Server): Promise<void> {

@@ -9,15 +9,21 @@ import {
   HARNESS_COMPATIBILITY_MATRIX,
   inspectHarnessCandidate,
 } from '../src/compatibility.js'
-import { SUPPORTED_HARNESS_VERSION } from '../src/profile.js'
+import { inspectHarnessCompatibility, SUPPORTED_HARNESS_VERSION } from '../src/profile.js'
 
-const EXPECTED_HARNESS_VERSION = '0.1.2-rc.1'
+const EXPECTED_HARNESS_VERSION = '0.1.5-rc.2'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-describe('DSH 0.1.2-rc.1 compatibility', () => {
-  it('pins the bundled and candidate runtime to the supported rc1 release', () => {
+describe('DSH 0.1.5-rc.2 compatibility', () => {
+  it('pins the bundled and candidate runtime to the supported rc2 release', () => {
     expect(SUPPORTED_HARNESS_VERSION).toBe(EXPECTED_HARNESS_VERSION)
     expect(HARNESS_COMPATIBILITY_MATRIX.some((entry) => entry.dshVersion === EXPECTED_HARNESS_VERSION)).toBe(true)
+    expect(HARNESS_COMPATIBILITY_MATRIX[0]).toMatchObject({
+      releaseTag: 'dsh-v0.1.5-rc.2',
+      sessionFormatVersion: 3,
+      supportedFormatMigrations: ['v2-to-v3'],
+      lifecycle: { sessionHandle: true, asyncAgentLoopCreate: true, sessionLock: true },
+    })
   })
 
   it('advertises no DSH release the rewritten launch API cannot start', () => {
@@ -28,6 +34,7 @@ describe('DSH 0.1.2-rc.1 compatibility', () => {
       expect(Object.values(entry.packages)).toEqual(
         Object.values(entry.packages).map(() => entry.dshVersion),
       )
+      expect(entry.packages['@deepseek-ai/dsh']).toBe(entry.dshVersion)
     }
   })
 
@@ -49,6 +56,25 @@ describe('DSH 0.1.2-rc.1 compatibility', () => {
     const patch = await readFile(join(HERE, '../../harness-bundle/cordis.patch.yml'), 'utf8')
     expect(patch).toMatch(/id: session-log-deepseek\s+disabled: true/)
     expect(patch).toMatch(/id: plugin-package-inventory-deepseek\s+disabled: true/)
+  })
+
+  it('reports the V3 migration boundary and verifies the Bundle peer closure', async () => {
+    const report = await inspectHarnessCompatibility()
+    expect(report).toMatchObject({
+      ok: true,
+      expectedVersion: EXPECTED_HARNESS_VERSION,
+      releaseTag: 'dsh-v0.1.5-rc.2',
+      releaseDate: '2026-09-10',
+      releaseCommit: 'fb2c4b9e698e30edb738bca4cf0618587db7d203',
+      npmChannel: 'next',
+      contractId: 'dsh-session-events-v1',
+      sessionFormatVersion: 3,
+      supportedFormatMigrations: ['v2-to-v3'],
+    })
+    const dshPackages = Object.entries(report.packages)
+      .filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))
+    expect(dshPackages.length).toBeGreaterThan(20)
+    expect(dshPackages.every(([, value]) => value.version === EXPECTED_HARNESS_VERSION)).toBe(true)
   })
 })
 

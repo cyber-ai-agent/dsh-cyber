@@ -86,8 +86,7 @@ async function freshStateRoot(): Promise<string> {
 describe('activated Harness runtime version gate', () => {
   it('refuses to boot on an older activated runtime and names the required version and the recovery command', async () => {
     const stateRoot = await freshStateRoot()
-    // Still listed in the compatibility matrix, but older than the version this
-    // build pins, so the current adapter can no longer drive it.
+    // This runtime predates the version pinned by the current adapter.
     await activate(stateRoot, '0.1.1-rc.1')
 
     const failure = await boot(stateRoot).then(

@@ -2,19 +2,46 @@ import { createRequire } from 'node:module'
 import { readFile, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
-import { ensureHarnessProfile, SUPPORTED_HARNESS_VERSION, type HarnessProfilePaths } from './profile.js'
+import {
+  ensureHarnessProfile,
+  SUPPORTED_HARNESS_FORMAT_MIGRATIONS,
+  SUPPORTED_HARNESS_NPM_CHANNEL,
+  SUPPORTED_HARNESS_PROTOCOL_CONTRACT,
+  SUPPORTED_HARNESS_RELEASE_DATE,
+  SUPPORTED_HARNESS_RELEASE_COMMIT,
+  SUPPORTED_HARNESS_RELEASE_TAG,
+  SUPPORTED_HARNESS_SESSION_FORMAT_VERSION,
+  SUPPORTED_HARNESS_VERSION,
+  type HarnessProfilePaths,
+} from './profile.js'
 
-export const HARNESS_PROTOCOL_CONTRACT = 'dsh-session-events-v1' as const
+export const HARNESS_PROTOCOL_CONTRACT = SUPPORTED_HARNESS_PROTOCOL_CONTRACT
 
 /**
  * Runtimes DSH Cyber can actually drive. The launch API and profile layout were
- * rewritten for 0.1.2-rc.1, so every older DSH release is unreachable: the
+ * rewritten for 0.1.5-rc.2, so every older DSH release is unreachable: the
  * matrix must never advertise a version the adapter cannot start.
  */
 export const HARNESS_COMPATIBILITY_MATRIX = [
   {
     dshVersion: SUPPORTED_HARNESS_VERSION,
+    releaseTag: SUPPORTED_HARNESS_RELEASE_TAG,
+    releaseDate: SUPPORTED_HARNESS_RELEASE_DATE,
+    releaseCommit: SUPPORTED_HARNESS_RELEASE_COMMIT,
+    npmChannel: SUPPORTED_HARNESS_NPM_CHANNEL,
     contractId: HARNESS_PROTOCOL_CONTRACT,
+    sessionFormatVersion: SUPPORTED_HARNESS_SESSION_FORMAT_VERSION,
+    supportedFormatMigrations: SUPPORTED_HARNESS_FORMAT_MIGRATIONS,
+    lifecycle: {
+      sessionHandle: true,
+      asyncAgentLoopCreate: true,
+      sessionLock: true,
+    },
+    adaptationNotes: [
+      'session.v2 JSONL 由上游 V2-to-V3 迁移边读取并生成 V3 后继代',
+      '默认文件编辑工具采用 read/write/edit；str_replace_editor 保持按需配置',
+      '协议客户端、JSON-RPC Server、审批、工具事件与流式通知沿用当前适配层合同',
+    ],
     packages: {
       '@deepseek-ai/dsh': SUPPORTED_HARNESS_VERSION,
       '@deepseek-ai/dsh-sdk-client': SUPPORTED_HARNESS_VERSION,
@@ -49,6 +76,12 @@ export interface HarnessCandidateReport {
   candidateRoot: string
   version?: string
   supported: boolean
+  releaseTag?: string
+  releaseDate?: string
+  releaseCommit?: string
+  npmChannel?: string
+  sessionFormatVersion?: number
+  supportedFormatMigrations?: readonly string[]
   contractId?: string
   packages: Record<string, { version?: string; path?: string; error?: string }>
   profile?: HarnessProfilePaths
@@ -120,6 +153,12 @@ export async function inspectHarnessCandidate(options: {
         report.errors.push(unsupportedHarnessVersionMessage(version))
       } else {
         report.contractId = entry.contractId
+        report.releaseTag = entry.releaseTag
+        report.releaseDate = entry.releaseDate
+        report.releaseCommit = entry.releaseCommit
+        report.npmChannel = entry.npmChannel
+        report.sessionFormatVersion = entry.sessionFormatVersion
+        report.supportedFormatMigrations = entry.supportedFormatMigrations
         for (const [packageName, expectedVersion] of Object.entries(entry.packages)) {
           const actual = report.packages[packageName]?.version
           if (actual !== expectedVersion) {
