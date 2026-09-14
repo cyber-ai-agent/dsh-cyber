@@ -60,12 +60,40 @@ export function NavigationPane({
     return () => { cancelled = true }
   }, [world.id, sessions.length, employees.length, activityPulse])
 
+  const activeHubItem = hubItems?.find((item) => item.session.id === activeSessionId)
+  const activeHidden = activeHubItem?.hidden === true
+  const activeUnread = activeHubItem?.unread === true
+  const activeLastEmployeeSequence = activeHubItem?.lastEmployeeSequence
+
   useEffect(() => {
-    if (activeSessionId === undefined || hubItems === undefined) return
-    const selected = hubItems.find((item) => item.session.id === activeSessionId)
-    if (selected?.hidden !== true) return
-    void updatePreference(activeSessionId, { hidden: false }).then(setHubItems).catch(() => undefined)
-  }, [activeSessionId, hubItems])
+    if (activeSessionId === undefined || (!activeHidden && !activeUnread)) return
+    let cancelled = false
+    const synchronizeActiveSession = async () => {
+      let nextItems: ConversationHubItem[] | undefined
+      let unread = activeUnread
+      let sequence = activeLastEmployeeSequence
+      if (activeHidden) {
+        const result = await api<{ items: ConversationHubItem[] }>(`/api/sessions/${encodeURIComponent(activeSessionId)}/conversation-preferences`, {
+          method: 'PUT',
+          body: JSON.stringify({ hidden: false }),
+        })
+        nextItems = result.items
+        const activeItem = nextItems.find((item) => item.session.id === activeSessionId)
+        unread = activeItem?.unread === true
+        sequence = activeItem?.lastEmployeeSequence
+      }
+      if (unread && sequence !== undefined) {
+        const result = await api<{ items: ConversationHubItem[] }>(`/api/sessions/${encodeURIComponent(activeSessionId)}/read`, {
+          method: 'POST',
+          body: JSON.stringify({ sequence }),
+        })
+        nextItems = result.items
+      }
+      if (!cancelled && nextItems !== undefined) setHubItems(nextItems)
+    }
+    void synchronizeActiveSession().catch(() => undefined)
+    return () => { cancelled = true }
+  }, [activeHidden, activeLastEmployeeSequence, activeSessionId, activeUnread])
 
   const fallbackItems = useMemo((): ConversationHubItem[] => {
     const sessionItems: ConversationHubItem[] = sessions.map((session) => ({
@@ -202,9 +230,10 @@ export function SessionRow({
     ? t('nav.groupMembers', '群聊 · {count} 名成员', { count: participants.length || participantIds.length })
     : t('nav.directChat', '私聊'))
   const openMenu = (position: ContextMenuPosition) => { if (onPin !== undefined && onDelete !== undefined) setMenuPosition(position) }
+  const showUnreadDot = item.unread === true && !active
   return (
-    <div className={`session-row-wrap${active ? ' is-active' : ''}${item.pinned ? ' is-pinned' : ''}`}>
-      <button className="session-row session-row--hub" type="button" onClick={onClick} onContextMenu={(event) => { event.preventDefault(); openMenu({ x: event.clientX, y: event.clientY }) }} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu({ x: rect.left + 28, y: rect.top + 28 }) }} aria-label={session.kind === 'direct' && participants[0] !== undefined ? `与${participants[0].displayName}私聊` : directTitle(session, participants)}>
+    <div className={`session-row-wrap${item.pinned ? ' is-pinned' : ''}${showUnreadDot ? ' is-unread' : ''}`}>
+      <button className={`session-row session-row--hub${active ? ' is-active' : ''}`} type="button" onClick={onClick} onContextMenu={(event) => { event.preventDefault(); openMenu({ x: event.clientX, y: event.clientY }) }} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu({ x: rect.left + 28, y: rect.top + 28 }) }} aria-label={session.kind === 'direct' && participants[0] !== undefined ? `与${participants[0].displayName}私聊` : directTitle(session, participants)}>
         <span className={`session-row__avatar${session.kind === 'group' || session.kind === 'meeting' ? ' session-row__avatar--group' : ''}`} aria-hidden="true">
           {participants.length === 0
             ? session.kind === 'group' || session.kind === 'meeting' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
@@ -213,7 +242,10 @@ export function SessionRow({
               : <Avatar index={participants[0]!.avatarIndex} size="sm" label={participants[0]!.displayName} authorityRole={participants[0]!.authorityRole} assetUrl={participants[0]!.avatarAssetUrl} rendererKind={participants[0]!.avatarProfile?.rendererKind} />}
         </span>
         <span className="session-row__copy"><strong className="session-row__title"><span className="session-row__name">{directTitle(session, participants)}{session.kind === 'direct' ? <AuthorityBadge role={participants[0]?.authorityRole} /> : null}</span>{session.kind === 'direct' && participants[0]?.role ? <span className="session-row__role">· {participants[0].role}</span> : null}</strong><small>{subtitle}</small></span>
-        <time dateTime={session.updatedAt}>{formatSessionTime(session.updatedAt)}</time>
+        <span className="session-row__time-wrap">
+          <time dateTime={session.updatedAt}>{formatSessionTime(session.updatedAt)}</time>
+          {showUnreadDot ? <span className="session-row__unread-dot" aria-label="未读消息" /> : null}
+        </span>
       </button>
       {menuPosition === undefined || onPin === undefined || onDelete === undefined ? null : <ContextMenu label={`${directTitle(session, participants)}会话操作`} position={menuPosition} onClose={() => setMenuPosition(undefined)} items={[
         { id: 'pin', label: item.pinned ? '取消置顶' : '置顶会话', description: item.pinned ? '恢复按最近消息排序' : '固定在会话列表顶部', icon: item.pinned ? <PushPinSlash size={17} /> : <PushPin size={17} />, onSelect: onPin },

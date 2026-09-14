@@ -11,6 +11,7 @@ import { ServiceError } from './service-error.js'
 interface ConversationEntryState {
   pinned?: boolean
   hidden?: boolean
+  lastReadSeq?: number
 }
 
 interface ConversationHubState {
@@ -83,6 +84,10 @@ export class ConversationHubService {
       const explicit = state.entries[session.id]
       const pinned = explicit?.pinned ?? character?.blueprintId === 'core.butler'
       const lastPrompt = compactPromptPreview(this.#store.latestMessageBySender(session.id, 'owner')?.content)
+      const lastEmployee = this.#store.latestMessageBySender(session.id, 'employee')
+      const lastReadSeq = explicit?.lastReadSeq
+      const unread = lastEmployee !== undefined
+        && (lastReadSeq === undefined || lastEmployee.sequence > lastReadSeq)
       items.push({
         session,
         participantIds,
@@ -90,6 +95,8 @@ export class ConversationHubService {
         hidden: explicit?.hidden ?? false,
         ...(canonicalCharacterId === undefined ? {} : { canonicalCharacterId }),
         ...(lastPrompt === undefined ? {} : { lastPrompt }),
+        ...(unread ? { unread: true } : {}),
+        ...(lastEmployee === undefined ? {} : { lastEmployeeSequence: lastEmployee.sequence }),
       })
     }
     return items.sort((left, right) => {
@@ -123,6 +130,19 @@ export class ConversationHubService {
     if (state.entries[session.id]?.hidden !== true) return
     state.entries[session.id] = { ...state.entries[session.id], hidden: false }
     await this.#write(session.worldId, state)
+  }
+
+  async setLastReadSeq(sessionId: string, sequence: number): Promise<ConversationHubItem[]> {
+    if (!Number.isSafeInteger(sequence) || sequence < 0) throw new ServiceError('invalid', 'invalid_sequence', 'Read sequence must be a non-negative safe integer')
+    const session = this.#requireSession(sessionId)
+    const state = await this.#read(session.worldId)
+    const latestEmployeeSequence = this.#store.latestMessageBySender(session.id, 'employee')?.sequence ?? 0
+    const savedSequence = state.entries[session.id]?.lastReadSeq
+    const currentSequence = typeof savedSequence === 'number' && Number.isSafeInteger(savedSequence) && savedSequence >= 0 ? savedSequence : 0
+    const lastReadSeq = Math.max(currentSequence, Math.min(sequence, latestEmployeeSequence))
+    state.entries[session.id] = { ...state.entries[session.id], lastReadSeq }
+    await this.#write(session.worldId, state)
+    return this.list(session.worldId)
   }
 
   #requireSession(sessionId: string) {
