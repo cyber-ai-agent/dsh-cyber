@@ -25,8 +25,26 @@ export function normalizeSkillCatalogEntry(value: unknown): SkillCatalogEntry | 
   const availability = value.availability === 'unavailable' || value.status === 'unavailable' ? 'unavailable' : 'available'
   const worldAvailable = typeof value.worldAvailable === 'boolean' ? value.worldAvailable : availability === 'available'
   const requiredWorldPermission = typeof value.requiredWorldPermission === 'string' ? value.requiredWorldPermission as SkillCatalogEntry['requiredWorldPermission'] : undefined
+  const dependencies = Array.isArray(value.dependencies)
+    ? value.dependencies.slice(0, 64).flatMap((item) => {
+      if (!isRecord(item) || (item.kind !== 'integration' && item.kind !== 'skill') || typeof item.id !== 'string' || item.id.trim() === '' || item.id.length > 160) return []
+      return [{ kind: item.kind as 'integration' | 'skill', id: item.id, ...(typeof item.required === 'boolean' ? { required: item.required } : {}) }]
+    })
+    : undefined
   const mcpService = isRecord(value.mcpService) && typeof value.mcpService.id === 'string' && typeof value.mcpService.label === 'string'
     ? { id: value.mcpService.id, label: value.mcpService.label }
+    : undefined
+  const skillPackage = isRecord(value.skillPackage)
+    && typeof value.skillPackage.id === 'string'
+    && typeof value.skillPackage.version === 'string'
+    && typeof value.skillPackage.displayName === 'string'
+    && typeof value.skillPackage.summary === 'string'
+    ? {
+      id: value.skillPackage.id,
+      version: value.skillPackage.version,
+      displayName: value.skillPackage.displayName,
+      summary: value.skillPackage.summary,
+    }
     : undefined
   return {
     id: value.id,
@@ -36,6 +54,7 @@ export function normalizeSkillCatalogEntry(value: unknown): SkillCatalogEntry | 
     risks: risks as SkillCatalogEntry['risks'],
     supportsScheduling: value.supportsScheduling === true,
     persistentApproval: value.persistentApproval === 'exact-target' ? 'exact-target' : 'forbidden',
+    ...(dependencies === undefined ? {} : { dependencies }),
     ...(value.authorizationSource === 'world-authority' ? { authorizationSource: value.authorizationSource } : {}),
     ...(requiredWorldPermission === undefined ? {} : { requiredWorldPermission }),
     ...(value.kind === 'integration' ? { kind: 'integration' as const } : value.kind === 'recipe' ? { kind: 'recipe' as const } : {}),
@@ -48,6 +67,7 @@ export function normalizeSkillCatalogEntry(value: unknown): SkillCatalogEntry | 
     availability,
     ...(typeof value.packageId === 'string' ? { packageId: value.packageId } : {}),
     ...(typeof value.packageVersion === 'string' ? { packageVersion: value.packageVersion } : {}),
+    ...(skillPackage === undefined ? {} : { skillPackage }),
   }
 }
 

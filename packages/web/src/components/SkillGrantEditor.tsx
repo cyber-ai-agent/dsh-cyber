@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EmployeeBlueprint, EmployeeInstance } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
@@ -9,6 +9,13 @@ import {
   worldSkillCatalogPath,
   type SkillCatalogEntry,
 } from './skill-catalog.js'
+import {
+  groupSkillCatalog,
+  skillEntityMemberLabel,
+  skillEntitySelectionState,
+  toggleSkillEntity,
+  type SkillEntityGroup,
+} from './skill-entity-grouping.js'
 import './SkillGrantEditor.css'
 
 interface SkillGrantEditorProps {
@@ -44,12 +51,8 @@ export function SkillGrantEditor({ employee, value, onChange }: SkillGrantEditor
 
   const requested = blueprint?.requestedSkills ?? []
   const entryById = useMemo(() => new Map(catalog.map((item) => [item.id, item])), [catalog])
-  const recommendedIds = useMemo(() => new Set(catalog
-    .filter((item) => requested.includes(item.id) && isLearnable(item))
-    .map((item) => item.id)), [catalog, requested])
-
-  // Historical grants whose catalog entry is gone remain individually
-  // revocable. Every row represents exactly one Skill ID.
+  // Historical grants whose catalog entry is gone remain revocable through
+  // the same entity row as their sibling tools.
   const legacyOrphans = useMemo(() => {
     const rows: SkillCatalogEntry[] = []
     const known = new Set(catalog.map((item) => item.id))
@@ -61,12 +64,10 @@ export function SkillGrantEditor({ employee, value, onChange }: SkillGrantEditor
     return rows
   }, [catalog, entryById, value])
 
-  const recommendedRows = catalog.filter((item) => isLearnable(item) && recommendedIds.has(item.id))
-  const learnableRows = catalog.filter((item) => isLearnable(item) && !recommendedIds.has(item.id))
-  const unavailableRows = [
-    ...catalog.filter((item) => !isLearnable(item) && value.includes(item.id)),
-    ...legacyOrphans,
-  ]
+  const entityGroups = useMemo(() => groupSkillCatalog([...catalog, ...legacyOrphans]), [catalog, legacyOrphans])
+  const recommendedRows = entityGroups.filter((group) => group.entries.some((item) => isLearnable(item) && requested.includes(item.id)))
+  const learnableRows = entityGroups.filter((group) => group.availableIds.length > 0 && !recommendedRows.includes(group))
+  const unavailableRows = entityGroups.filter((group) => group.availableIds.length === 0 && group.memberIds.some((id) => value.includes(id)))
 
   if (loading) return <div className="dialog-empty" role="status">正在读取当前世界的技能目录…</div>
   if (error !== undefined) return <div className="permission-notice permission-notice--warning" role="alert"><p>{error}</p></div>
@@ -83,7 +84,7 @@ export function SkillGrantEditor({ employee, value, onChange }: SkillGrantEditor
 
 function SkillGrantGroup({ title, rows, empty, value, onChange, recommended = false }: {
   title: string
-  rows: SkillCatalogEntry[]
+  rows: SkillEntityGroup[]
   empty: string
   value: string[]
   onChange(next: string[]): void
@@ -91,31 +92,35 @@ function SkillGrantGroup({ title, rows, empty, value, onChange, recommended = fa
 }) {
   return <section className="skill-grant-group" aria-labelledby={`skill-grant-${title}`}>
     <header><div><h4 id={`skill-grant-${title}`}>{title}</h4><span>{rows.length} 项</span></div></header>
-    {rows.length === 0 ? <p className="skill-grant-group__empty">{empty}</p> : <div className="skill-grant-group__rows">{rows.map((entry) => <SkillGrantRow key={entry.id} entry={entry} value={value} recommended={recommended} onChange={onChange} />)}</div>}
+    {rows.length === 0 ? <p className="skill-grant-group__empty">{empty}</p> : <div className="skill-grant-group__rows">{rows.map((group) => <SkillGrantRow key={group.key} group={group} value={value} recommended={recommended} onChange={onChange} />)}</div>}
   </section>
 }
 
-function SkillGrantRow({ entry, value, recommended, onChange }: {
-  entry: SkillCatalogEntry
+function SkillGrantRow({ group, value, recommended, onChange }: {
+  group: SkillEntityGroup
   value: string[]
   recommended: boolean
   onChange(next: string[]): void
 }) {
-  const available = isLearnable(entry)
-  const granted = value.includes(entry.id)
-  const status = !available ? '暂不可用' : granted ? '已启用' : recommended ? '推荐' : '可学习'
-  return <label className={`skill-grant-row${granted ? ' is-granted' : ''}${available ? '' : ' is-unavailable'}`}>
-    <input type="checkbox" checked={granted} disabled={!available && !granted} onChange={(event) => onChange(onGrantChange(entry.id, event.target.checked, value))} />
+  const { checked, indeterminate, selectedCount } = skillEntitySelectionState(group, value)
+  const available = group.availableIds.length > 0
+  const status = !available ? '暂不可用' : checked ? '已启用' : indeterminate ? '部分启用' : recommended ? '推荐' : '可学习'
+  const statusClass = status === '暂不可用' ? 'unavailable' : status === '已启用' ? 'granted' : status === '部分启用' ? 'partial' : status === '推荐' ? 'recommended' : 'learnable'
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (inputRef.current !== null) inputRef.current.indeterminate = indeterminate
+  }, [indeterminate])
+  const external = group.entries.some((entry) => entry.risks.includes('external-side-effect'))
+  const integration = group.entries.some((entry) => entry.kind === 'integration')
+  return <label className={`skill-grant-row${checked || selectedCount > 0 ? ' is-granted' : ''}${available ? '' : ' is-unavailable'}${group.kind === 'mcp-service' ? ' skill-grant-row--mcp-service' : group.kind === 'skill-package' ? ' skill-grant-row--skill-package' : ''}`}>
+    <input ref={inputRef} type="checkbox" checked={checked} disabled={!available && selectedCount === 0} onChange={(event) => onChange(toggleSkillEntity(group, value, event.target.checked))} />
     <span>
-      <strong>{entry.displayName}</strong>
-      <small>{entry.summary}</small>
-      <span className="skill-grant-row__meta"><em className={`skill-grant-row__status skill-grant-row__status--${status === '暂不可用' ? 'unavailable' : status === '已启用' ? 'granted' : status === '推荐' ? 'recommended' : 'learnable'}`}>{status}</em><em>{entry.risks.includes('external-side-effect') ? '涉及外部操作' : entry.kind === 'integration' ? '外部连接' : '工作方法'}</em></span>
+      <strong>{group.displayName}</strong>
+      <small>{group.summary}</small>
+      <span className="skill-grant-row__meta"><em className={`skill-grant-row__status skill-grant-row__status--${statusClass}`}>{status}</em><em>{external ? '涉及外部操作' : integration ? '外部连接' : '工作方法'}</em>{group.entries.length > 1 ? <em>{group.kind === 'mcp-service' ? `${group.entries.length} 个工具` : `${group.entries.length} 项能力`}</em> : null}</span>
+      {group.entries.length > 1 ? <details className="skill-grant-row__tools"><summary>查看组成</summary><ul>{group.entries.map((entry) => <li key={entry.id} className={value.includes(entry.id) ? 'is-granted' : ''}><code>{skillEntityMemberLabel(group, entry)}</code><span>{isLearnable(entry) ? value.includes(entry.id) ? '已启用' : '可学习' : '暂不可用'}</span></li>)}</ul></details> : null}
     </span>
   </label>
-}
-
-function onGrantChange(skillId: string, checked: boolean, value: string[]): string[] {
-  return checked ? [...new Set([...value, skillId])] : value.filter((item) => item !== skillId)
 }
 
 function isLearnable(entry: SkillCatalogEntry): boolean {
@@ -130,7 +135,8 @@ function legacyUnavailableSkill(id: string): SkillCatalogEntry {
   if (id.startsWith('mcp.')) {
     const tail = id.slice(4)
     const dot = tail.indexOf('.')
-    const label = dot > 0 ? `${tail.slice(0, dot)} / ${tail.slice(dot + 1)}` : tail
+    const service = dot > 0 ? tail.slice(0, dot) : tail
+    const label = dot > 0 ? `${service} / ${tail.slice(dot + 1)}` : tail
     return {
       id,
       displayName: `MCP 工具 · ${label}`,
@@ -140,6 +146,7 @@ function legacyUnavailableSkill(id: string): SkillCatalogEntry {
       supportsScheduling: false,
       persistentApproval: 'forbidden',
       kind: 'integration',
+      mcpService: { id: service, label: service },
       source: 'mcp',
       scope: 'workspace',
       globalKnown: false,

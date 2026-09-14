@@ -18,6 +18,7 @@ const DESCRIPTOR: CharacterSkillDescriptor = {
   routingHints: ['联网搜索', '网页搜索', '搜索官网', '查官网', '公开资料', 'web search', 'search the web', 'research website'],
   adapterId: FIRECRAWL_ADAPTER_ID,
   packageId: FIRECRAWL_PACKAGE_ID,
+  dependencies: [{ kind: 'integration', id: FIRECRAWL_INTEGRATION_ID, required: true }],
   risks: ['external-side-effect'],
   supportsScheduling: false,
   // The whole semantic payload of this skill is `parameters.query`, and an

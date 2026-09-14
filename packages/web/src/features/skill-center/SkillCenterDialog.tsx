@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import type { SkillDetailView, SkillScopeView, SkillSettingsView, World } from '@dsh-cyber/contracts'
 
 import type { SkillCatalogEntry } from '../../components/skill-catalog.js'
+import { groupSkillCatalog } from '../../components/skill-entity-grouping.js'
 import { useDialogFocusTrap } from '../../components/useDialogFocusTrap.js'
 import { loadSkillDetail, loadSkillSettings, listSkills, saveSkillSettings } from './api.js'
 import { SkillAuthoringPanel, draftFromDetail, type SkillEditSeed } from './SkillAuthoringPanel.js'
@@ -65,7 +66,7 @@ export function SkillCenterDialog({ world, worlds, onClose, onOpenMarket }: { wo
   return createPortal(<div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section ref={dialogRef} className="skill-center" role="dialog" aria-modal="true" aria-labelledby="skill-center-title">
       <header className="skill-center__header">
-        <div><h2 id="skill-center-title"><PuzzlePiece size={18} />技能中心</h2><p>{catalog.length} 个技能 · 当前世界：{world.name} · Skill 定义单份保存，范围与角色通过 ID 引用</p></div>
+        <div><h2 id="skill-center-title"><PuzzlePiece size={18} />技能中心</h2><p>{groupSkillCatalog(catalog).length} 个技能 · 当前世界：{world.name} · 服务与技能包按一个实体管理，底层 ID 用于授权与执行</p></div>
         <div className="skill-center__header-actions"><button type="button" className="icon-button" aria-label="刷新技能中心" disabled={busy === 'reload'} onClick={() => { setBusy('reload'); void reload().catch((cause) => setError(errorMessage(cause, '刷新失败'))).finally(() => setBusy(undefined)) }}><ArrowsClockwise size={16} className={busy === 'reload' ? 'spin' : undefined} /></button><button type="button" className="icon-button" data-dialog-initial-focus aria-label="关闭技能中心" onClick={onClose}><X size={18} /></button></div>
       </header>
       <nav className="skill-center__tabs" aria-label="技能中心分区">

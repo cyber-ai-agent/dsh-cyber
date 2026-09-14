@@ -1,11 +1,12 @@
 import { ArrowLeft, ArrowRight, BracketsCurly, ChatCircleDots, Check, FileArrowUp, MagnifyingGlass, Plus, Sparkle, Trash, UsersThree } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ModelProfile, WorldTemplateManifest } from '@dsh-cyber/contracts'
-import type { CharacterSkillDescriptor, EmbodimentPresetDescriptor } from '@dsh-cyber/contracts/creative-platform'
+import type { EmbodimentPresetDescriptor } from '@dsh-cyber/contracts/creative-platform'
 
 import { createRoleDraft, type WorkshopDraft, type WorkshopRoleDraft } from './model.js'
 import { WorkshopJsonEditor } from './WorkshopJsonEditor.js'
 import { WorkshopSkillPicker } from './workshop-skill-picker.js'
+import type { SkillEntityDescriptor } from '../skill-entity-grouping.js'
 import { ModelPicker } from '../../features/models/ModelPicker.js'
 import { useI18n } from '../../i18n/runtime.js'
 
@@ -13,7 +14,7 @@ interface CreativeWorkshopEditorProps {
   draft: WorkshopDraft
   templates: WorldTemplateManifest[]
   presets: EmbodimentPresetDescriptor[]
-  skills: CharacterSkillDescriptor[]
+  skills: SkillEntityDescriptor[]
   models: ModelProfile[]
   saving: boolean
   error?: string

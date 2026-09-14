@@ -47,6 +47,7 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
       displayName: `MCP · ${entries[0]!.label} / ${entries[0]!.tool.name}`,
       summary: safeToolDescription(entries[0]!.tool, entries[0]!.label),
       adapterId: this.id,
+      dependencies: [{ kind: 'integration', id: MCP_INTEGRATION_ID, required: true }],
       risks: ['external-side-effect'],
       supportsScheduling: false,
       persistentApproval: 'forbidden',

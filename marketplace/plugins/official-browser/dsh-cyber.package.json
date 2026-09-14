@@ -12,19 +12,19 @@
   "files": [
     {
       "path": "skill-open.json",
-      "sha256": "d59706507b6d1d3724c0ef4f8ab45ea327048db275f6c521496bea78a4fd81ac"
+      "sha256": "17e581ec60fae0b6f80a0aef2a32b7fec977c51c510f17d3c2fabe381b25c6eb"
     },
     {
       "path": "skill-read.json",
-      "sha256": "960deba16c002c293042bfecdb4d0a3da7078bc8667f3e43b0e00594848d774e"
+      "sha256": "c71bc2d086284185c7c94ab20c635591a82ee7a7879d2f4956ae438d79a60adc"
     },
     {
       "path": "skill-extract.json",
-      "sha256": "0ef56d1e14e35504314e83f5094af26d59ad112104b4df1e75acbd4a0e14bfbe"
+      "sha256": "c617e320ed944831c08a8e015d2c2bd57c5bc9c465636683b03e20f04445fb1c"
     },
     {
       "path": "skill-screenshot.json",
-      "sha256": "2a244245413fb423fe3a8cd16c165ff14eab13166531a5d341bb80e55ac65f7b"
+      "sha256": "ec832f0af0b58e7f5c7ad5db7475e1d1755424d8bc3247f37e26ca080a9d5344"
     }
   ],
   "entrypoints": [

@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EmployeeInstance, IntegrationConnection, IntegrationDescriptor } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
+import { normalizeSkillCatalog, worldSkillCatalogPath } from './skill-catalog.js'
 import './ConnectionGrantEditor.css'
 
 interface ConnectionGrantEditorProps {
   employee: EmployeeInstance
   /** Connection-hub connection ids currently granted to this character. */
   value: string[]
+  /** Exact Skill ids currently granted to the character. */
+  skillIds?: readonly string[]
   onChange(next: string[]): void
 }
 
@@ -23,6 +26,7 @@ interface ConnectionRow {
 interface ConnectionGroup {
   descriptor: IntegrationDescriptor
   rows: ConnectionRow[]
+  required: boolean
 }
 
 const WEB_SEARCH_TYPE_ID = 'builtin.web-search'
@@ -35,20 +39,28 @@ const LEGACY_FIRECRAWL_TYPE_ID = 'builtin.firecrawl'
  * parent checkbox and every concrete connection remains independently
  * selectable, including web-search providers and MCP services.
  */
-export function ConnectionGrantEditor({ employee, value, onChange }: ConnectionGrantEditorProps) {
+export function ConnectionGrantEditor({ employee, value, skillIds, onChange }: ConnectionGrantEditorProps) {
   const [descriptors, setDescriptors] = useState<IntegrationDescriptor[]>([])
   const [items, setItems] = useState<IntegrationConnection[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
+  const [requiredIntegrationIds, setRequiredIntegrationIds] = useState<string[]>([])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    void api<{ descriptors: IntegrationDescriptor[]; items: IntegrationConnection[] }>(`/api/workspaces/${encodeURIComponent(employee.workspaceId)}/integrations`)
-      .then((result) => {
+    void Promise.all([
+      api<{ descriptors: IntegrationDescriptor[]; items: IntegrationConnection[] }>(`/api/workspaces/${encodeURIComponent(employee.workspaceId)}/integrations`),
+      skillIds === undefined || skillIds.length === 0 ? Promise.resolve<unknown>({ items: [] }) : api<unknown>(worldSkillCatalogPath(employee.worldId)).catch(() => ({ items: [] })),
+    ]).then(([result, skillCatalog]) => {
         if (cancelled) return
         setDescriptors(result.descriptors)
         setItems(result.items)
+        const selectedIds = new Set(skillIds ?? [])
+        const dependencyIds = normalizeSkillCatalog(skillCatalog)
+          .filter((skill) => selectedIds.has(skill.id))
+          .flatMap((skill) => (skill.dependencies ?? []).filter((dependency) => dependency.kind === 'integration').map((dependency) => dependency.id))
+        setRequiredIntegrationIds([...new Set(dependencyIds)])
         setError(undefined)
       })
       .catch((cause: unknown) => {
@@ -58,14 +70,16 @@ export function ConnectionGrantEditor({ employee, value, onChange }: ConnectionG
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [employee.workspaceId])
+  }, [employee.worldId, employee.workspaceId, skillIds?.join('\u0000')])
 
   const groups = useMemo<ConnectionGroup[]>(() => descriptors.map((descriptor) => ({
     descriptor,
     rows: items.filter((item) => item.integrationId === descriptor.id
       || (descriptor.id === WEB_SEARCH_TYPE_ID && item.integrationId === LEGACY_FIRECRAWL_TYPE_ID))
       .map((item) => toConnectionRow(item, descriptor)),
-  })), [descriptors, items])
+    required: requiredIntegrationIds.includes(descriptor.id)
+      || (descriptor.id === WEB_SEARCH_TYPE_ID && requiredIntegrationIds.includes(LEGACY_FIRECRAWL_TYPE_ID)),
+  })), [descriptors, items, requiredIntegrationIds])
   const connectionIds = useMemo(() => new Set(groups.flatMap((group) => group.rows.map((row) => row.id))), [groups])
   const selectableIds = useMemo(() => [...connectionIds], [connectionIds])
   // Grants whose device was deleted from the hub stay visible so the user can
@@ -82,9 +96,10 @@ export function ConnectionGrantEditor({ employee, value, onChange }: ConnectionG
     <section className="connection-grant-group" aria-labelledby="connection-grant-title">
       <header><div><h4 id="connection-grant-title">连接权限</h4><span>{value.filter((id) => connectionIds.has(id)).length} / {connectionIds.size} 项</span></div></header>
       <p className="connection-grant-editor__note">技能决定角色可以执行的工作，连接权限决定角色可以使用的搜索服务、设备与 MCP 服务。两项同时满足后，具体高风险动作仍会请求确认。</p>
+      {requiredIntegrationIds.length === 0 ? null : <div className="connection-grant-editor__dependencies" role="status"><strong>当前 Skill 需要的连接设置</strong><span>{requiredIntegrationIds.map((id) => descriptors.find((descriptor) => descriptor.id === id || (id === LEGACY_FIRECRAWL_TYPE_ID && descriptor.id === WEB_SEARCH_TYPE_ID))?.displayName ?? id).join('、')}</span></div>}
       <GrantCheckbox label="全部连接" detail="一次选择连接中心当前列出的所有类目与子项。" ids={selectableIds} value={value} onChange={onChange} className="connection-grant-row--all" />
-      {groups.map(({ descriptor, rows }) => <div key={descriptor.id} className="connection-grant-type">
-        <GrantCheckbox label={descriptor.displayName} detail={descriptor.summary} ids={rows.map((row) => row.id)} value={value} onChange={onChange} className="connection-grant-type__title" disabled={rows.length === 0} />
+      {groups.map(({ descriptor, rows, required }) => <div key={descriptor.id} className={`connection-grant-type${required ? ' is-required' : ''}`}>
+        <GrantCheckbox label={descriptor.displayName} detail={required ? `${descriptor.summary} · 当前 Skill 依赖` : descriptor.summary} ids={rows.map((row) => row.id)} value={value} onChange={onChange} className="connection-grant-type__title" disabled={rows.length === 0} />
         {rows.length === 0 ? <p className="connection-grant-group__empty">当前类目还没有连接子项。</p> : rows.map((row) => <ConnectionGrantRow key={row.id} row={row} granted={value.includes(row.id)} onChange={(checked) => onGrantChange(row.id, checked, value, onChange)} />)}
       </div>)}
     </section>

@@ -101,7 +101,7 @@ describe('world-scoped skill catalog UI', () => {
     expect(normalizeSkillCatalogEntry({ ...base, mcpService: 'github' })?.mcpService).toBeUndefined()
   })
 
-  it('renders every MCP tool as an independent Skill reference', async () => {
+  it('renders one aggregated MCP service reference while preserving tool ids', async () => {
     const mcpCatalog: SkillCatalogEntry[] = [
       mcpTool('mcp.playwright.browser_navigate', 'MCP · Playwright 浏览器 / browser_navigate', { id: 'playwright', label: 'Playwright 浏览器' }),
       mcpTool('mcp.playwright.browser_click', 'MCP · Playwright 浏览器 / browser_click', { id: 'playwright', label: 'Playwright 浏览器' }),
@@ -121,9 +121,10 @@ describe('world-scoped skill catalog UI', () => {
     await flush()
 
     const rows = Array.from(host.querySelectorAll('.skill-grant-row'))
-    expect(rows).toHaveLength(4)
-    expect(host.textContent).toContain('MCP · Playwright 浏览器 / browser_navigate')
-    expect(host.textContent).toContain('MCP · Playwright 浏览器 / browser_click')
+    expect(rows).toHaveLength(3)
+    expect(host.textContent).toContain('MCP · Playwright 浏览器')
+    expect(host.textContent).toContain('browser_navigate')
+    expect(host.textContent).toContain('browser_click')
 
     const rowFor = (text: string): HTMLInputElement => {
       const row = Array.from(host.querySelectorAll('.skill-grant-row')).find((item) => item.textContent?.includes(text))
@@ -132,8 +133,8 @@ describe('world-scoped skill catalog UI', () => {
       return checkbox
     }
 
-    expect(rowFor('MCP · GitHub MCP / create_issue').checked).toBe(true)
-    const navigateCheckbox = rowFor('MCP · Playwright 浏览器 / browser_navigate')
+    expect(rowFor('MCP · GitHub MCP').checked).toBe(true)
+    const navigateCheckbox = rowFor('MCP · Playwright 浏览器')
     expect(navigateCheckbox.checked).toBe(false)
     await act(async () => { navigateCheckbox.click() })
     expect(onChange).toHaveBeenLastCalledWith([
@@ -142,13 +143,13 @@ describe('world-scoped skill catalog UI', () => {
       'mcp.playwright.browser_navigate',
     ])
 
-    const githubCheckbox = rowFor('MCP · GitHub MCP / create_issue')
+    const githubCheckbox = rowFor('MCP · GitHub MCP')
     await act(async () => { githubCheckbox.click() })
     expect(onChange).toHaveBeenLastCalledWith(['mcp.playwright.browser_click'])
     await unmount(root, host)
   })
 
-  it('keeps dead MCP Skill references individually revocable', async () => {
+  it('keeps dead MCP Skill references revocable as one service', async () => {
     const mcpCatalog: SkillCatalogEntry[] = [
       mcpTool('mcp.github.create_issue', 'MCP · GitHub MCP / create_issue', { id: 'github', label: 'GitHub MCP' }),
     ]
@@ -167,14 +168,15 @@ describe('world-scoped skill catalog UI', () => {
     }))
     await flush()
 
-    expect(host.textContent).toContain('MCP 工具 · dead / tool_one')
-    expect(host.textContent).toContain('MCP 工具 · dead / tool_two')
+    expect(host.textContent).toContain('MCP · dead')
+    expect(host.textContent).toContain('tool_one')
+    expect(host.textContent).toContain('tool_two')
     expect(host.textContent).toContain('暂不可用')
-    const row = Array.from(host.querySelectorAll('.skill-grant-row')).find((item) => item.textContent?.includes('dead / tool_one'))!
+    const row = Array.from(host.querySelectorAll('.skill-grant-row')).find((item) => item.textContent?.includes('MCP · dead'))!
     const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!
     expect(checkbox.checked).toBe(true)
     await act(async () => { checkbox.click() })
-    expect(onChange).toHaveBeenLastCalledWith(['mcp.dead.tool_two', 'mcp.github.create_issue'])
+    expect(onChange).toHaveBeenLastCalledWith(['mcp.github.create_issue'])
     await unmount(root, host)
   })
 

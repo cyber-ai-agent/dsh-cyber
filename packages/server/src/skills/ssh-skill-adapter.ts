@@ -25,6 +25,7 @@ const DESCRIPTOR: CharacterSkillDescriptor = {
   summary: '在已连接并授权的设备上执行受控系统命令（查看状态、重启服务、管理软件包）。凭据只在宿主机加密保存。',
   routingHints: ['ssh', '设备', '主机', '服务器', '磁盘', '重启服务', '安装软件'],
   adapterId: SSH_COMMAND_ADAPTER_ID,
+  dependencies: [{ kind: 'integration', id: SSH_DEVICE_INTEGRATION_ID, required: true }],
   risks: ['external-side-effect'],
   supportsScheduling: false,
   // The command is derived from parameters; a persistent policy could not

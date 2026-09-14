@@ -18,6 +18,13 @@ import {
   orphanMcpServiceGroups,
   type McpServiceGroup,
 } from './mcp-skill-grouping.js'
+import {
+  groupSkillCatalog,
+  skillEntityMemberLabel,
+  skillEntitySelectionState,
+  toggleSkillEntity,
+  type SkillEntityGroup,
+} from './skill-entity-grouping.js'
 import { RuntimePermissionSelector } from './RuntimePermissionSelector.js'
 import { useI18n } from '../i18n/runtime.js'
 
@@ -201,16 +208,18 @@ export function RecruitmentDialog({ blueprints, initialBlueprintId, employees, w
 function blueprintKey(blueprint: EmployeeBlueprint): string { return `${blueprint.id}@${blueprint.version}` }
 
 /**
- * The template's requested skills, aggregated per MCP service: one "MCP ·
- * <connection name>" row grants every tool of that service; non-MCP skills
- * stay one row each. Requested MCP ids whose service no longer has a catalog
- * entry collapse to a single "暂不可用" service row, revocable in one click.
+ * The template's requested skills, aggregated per MCP service and Skill
+ * package. One service or package row grants every currently available member;
+ * exact member ids remain the values passed into the recruitment flow.
  */
 export function SkillApprovalGroup({ requested, descriptors, selected, onChange }: { requested: string[]; descriptors: SkillCatalogEntry[]; selected: string[]; onChange(next: string[]): void }) {
   const { t } = useI18n()
   const byId = new Map(descriptors.map((item) => [item.id, item]))
   const mcpRequested = requested.filter((id) => mcpServiceOfSkillId(id) !== undefined)
-  const plainRequested = requested.filter((id) => mcpServiceOfSkillId(id) === undefined)
+  const entityGroups = groupSkillCatalog(descriptors)
+  const packageGroups = entityGroups.filter((group) => group.kind === 'skill-package' && (group.entries.some((entry) => requested.includes(entry.id)) || group.entries.some((entry) => selected.includes(entry.id))))
+  const packageMemberIds = new Set(packageGroups.flatMap((group) => group.memberIds))
+  const plainRequested = requested.filter((id) => mcpServiceOfSkillId(id) === undefined && !packageMemberIds.has(id))
   const groups = groupMcpServices(descriptors, selected, requested)
   // The dialog is scoped to the template's requests: services the blueprint
   // requested and that still have catalog tools.
@@ -223,6 +232,7 @@ export function SkillApprovalGroup({ requested, descriptors, selected, onChange 
   const missingServiceRows = orphanMcpServiceGroups(mcpRequested, groups.map((group) => group.serviceId), selected)
   return <fieldset className="capability-approval-group"><legend>{t('workbench.recruitSkillsLegend', '角色技能')}</legend>{requested.length === 0 ? <span>{t('workbench.recruitNoSkills', '该角色模板未请求角色技能')}</span> : <>
     {[...liveServiceRows, ...deadServiceRows, ...missingServiceRows].map((group) => <McpServiceApprovalRow key={`service-${group.serviceId}`} group={group} requested={requested} selected={selected} onChange={onChange} />)}
+    {packageGroups.map((group) => <SkillPackageApprovalRow key={group.key} group={group} requested={requested} selected={selected} onChange={onChange} />)}
     {plainRequested.map((skillId) => {
       const descriptor = byId.get(skillId)
       const available = descriptor !== undefined && descriptor.worldAvailable && descriptor.availability === 'available'
@@ -230,6 +240,23 @@ export function SkillApprovalGroup({ requested, descriptors, selected, onChange 
       return <label key={skillId} className={!available ? 'is-unavailable' : ''}><input type="checkbox" checked={granted} disabled={!available && !granted} onChange={(event) => onChange(event.target.checked ? [...new Set([...selected, skillId])] : selected.filter((value) => value !== skillId))}/><span><strong>{descriptor?.displayName ?? skillId}</strong><small>{descriptor?.summary ?? '当前世界暂不可用，创建时不会新增这项角色技能。'}</small><em>{!available ? '暂不可用' : granted ? '已启用' : '推荐'}</em></span></label>
     })}
   </>}</fieldset>
+}
+
+function SkillPackageApprovalRow({ group, requested, selected, onChange }: { group: SkillEntityGroup; requested: string[]; selected: string[]; onChange(next: string[]): void }) {
+  const { checked, indeterminate, selectedCount } = skillEntitySelectionState(group, selected)
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (inputRef.current !== null) inputRef.current.indeterminate = indeterminate }, [indeterminate])
+  const available = group.availableIds.length > 0
+  const requestedCount = group.entries.filter((entry) => requested.includes(entry.id)).length
+  const status = !available ? '暂不可用' : checked ? '已授权' : indeterminate ? '部分授权' : '推荐'
+  return <div className={`capability-service-row capability-service-row--skill-package${checked || selectedCount > 0 ? ' is-granted' : ''}${available ? '' : ' is-unavailable'}`} data-skill-package={group.packageId ?? group.primaryId}>
+    <input ref={inputRef} type="checkbox" aria-label={`技能包 ${group.displayName}`} checked={checked} disabled={!available && selectedCount === 0} onChange={(event) => onChange(toggleSkillEntity(group, selected, event.target.checked))} />
+    <span>
+      <strong>{group.displayName}</strong>
+      <small>{available ? `共 ${group.entries.length} 项能力。勾选即授权此技能包的可用入口；每个外部动作仍按审批策略处理。` : '当前技能包不可用；取消勾选可撤销保留的授权。'}</small>
+      <span className="capability-service-row__meta"><em className={`capability-service-row__status capability-service-row__status--${!available ? 'unavailable' : checked ? 'granted' : indeterminate ? 'partial' : 'recommended'}`}>{status}</em><em>技能包</em>{requestedCount > 0 ? <em>模板请求 {requestedCount} 项</em> : null}{group.entries.length > 1 ? <details className="capability-service-row__tools"><summary>查看组成（{group.entries.length} 项）</summary><ul>{group.entries.map((entry) => <li key={entry.id} className={selected.includes(entry.id) ? 'is-granted' : ''}><code>{skillEntityMemberLabel(group, entry)}</code><span>{entry.worldAvailable === false || entry.availability === 'unavailable' ? '暂不可用' : selected.includes(entry.id) ? '已授权' : requested.includes(entry.id) ? '模板请求' : '可用'}</span></li>)}</ul></details> : null}</span>
+    </span>
+  </div>
 }
 
 function McpServiceApprovalRow({ group, requested, selected, onChange }: { group: McpServiceGroup; requested: string[]; selected: string[]; onChange(next: string[]): void }) {

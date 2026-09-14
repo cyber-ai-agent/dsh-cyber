@@ -44,3 +44,25 @@ export async function installSkillPackage(workspaceId: string, manifest: CyberPa
     throw error
   }
 }
+
+export async function importSkillPackage(workspaceId: string, files: File[], worldId?: string): Promise<void> {
+  if (files.length === 0) throw new Error('请选择 ZIP 或技能包文件夹。')
+  const form = new FormData()
+  const relativePaths = files.map((file) => {
+    const candidate = file as File & { webkitRelativePath?: string }
+    return candidate.webkitRelativePath || file.name
+  })
+  files.forEach((file) => form.append('files', file, file.name))
+  form.append('relativePaths', JSON.stringify(relativePaths))
+  if (worldId !== undefined) form.append('worldId', worldId)
+  await requestForm(`/api/workspaces/${encodeURIComponent(workspaceId)}/skill-authoring/import`, form)
+}
+
+async function requestForm(path: string, body: FormData): Promise<unknown> {
+  const response = await fetch(path, { method: 'POST', body })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined
+    throw new Error(payload?.error?.message ?? `Request failed: ${response.status}`)
+  }
+  return response.json().catch(() => undefined)
+}
