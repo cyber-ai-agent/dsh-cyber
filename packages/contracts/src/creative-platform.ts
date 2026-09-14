@@ -88,6 +88,10 @@ export interface ConversationHubItem {
   canonicalCharacterId?: string
   /** Compact preview of the most recent owner prompt, capped server-side. */
   lastPrompt?: string
+  /** True when the session has employee messages the owner hasn't marked read. */
+  unread?: boolean
+  /** Sequence of the latest employee message; clients use it to mark a session read. */
+  lastEmployeeSequence?: number
 }
 
 // Compatibility re-exports. Skill Runtime is a core host capability and must

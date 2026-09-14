@@ -7,7 +7,7 @@ import {
   UserCircle,
   X,
 } from '@phosphor-icons/react'
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, lazy, Suspense, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { WorkMessage, WorkSession } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
@@ -16,7 +16,12 @@ import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
 import { isChatMessage } from './ChatWorkbench.js'
 
+const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
+
 export const MESSAGE_PAGE_SIZE = 20
+
+/** 折叠卡片超过该字符数后，显示“…（点击展开）”提示并截取预览。 */
+const COLLAPSE_PREVIEW_CHARS = 80
 
 interface MessageHistoryDialogProps {
   demoMode: boolean
@@ -45,7 +50,9 @@ export function MessageHistoryDialog({ demoMode, session, employees, demoMessage
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [reloadRequest, setReloadRequest] = useState(0)
+  const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => new Set())
   const requestIdRef = useRef(0)
+  const todayStr = new Date().toISOString().slice(0, 10)
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const requestId = requestIdRef.current + 1
@@ -154,9 +161,25 @@ export function MessageHistoryDialog({ demoMode, session, employees, demoMessage
                 {group.items.map((message) => {
                   const employee = employees.find((item) => item.id === message.senderId)
                   const owner = message.senderKind === 'owner'
-                  return <li key={message.id} className={owner ? 'message-history-item message-history-item--owner' : 'message-history-item'}>
+                  const isToday = message.createdAt.slice(0, 10) === todayStr
+                  const isExpanded = expandedMessageIds.has(message.id)
+                  const toggleExpand = () => setExpandedMessageIds((current) => {
+                    const next = new Set(current)
+                    if (next.has(message.id)) next.delete(message.id)
+                    else next.add(message.id)
+                    return next
+                  })
+                  const displayDate = isToday ? formatTime(message.createdAt) : formatDetailedDateTime(message.createdAt)
+                  const plainContent = message.content.replace(/\s+/g, ' ').trim()
+                  const hasMore = !isExpanded && plainContent.length > COLLAPSE_PREVIEW_CHARS
+                  const itemClass = owner ? 'message-history-item message-history-item--owner' : 'message-history-item'
+                  return <li key={message.id} className={itemClass} onClick={toggleExpand} role="button" aria-expanded={isExpanded}>
                     {owner ? <span className="message-history-item__avatar message-history-item__avatar--owner" aria-label="我的头像"><UserCircle size={24} weight="fill" /></span> : <Avatar index={employee?.avatarIndex ?? 7} size="sm" label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} assetUrl={employee?.avatarAssetUrl} rendererKind={employee?.avatarProfile?.rendererKind} />}
-                    <div className="message-history-item__content"><div><strong>{owner ? '我' : employee?.displayName ?? '角色'}{owner ? null : <AuthorityBadge role={employee?.authorityRole} />}</strong><time>{formatTime(message.createdAt)}</time></div><p>{highlightMessage(message.content, search)}</p></div>
+                    <div className="message-history-item__content"><div><strong>{owner ? '我' : employee?.displayName ?? '角色'}{owner ? null : <AuthorityBadge role={employee?.authorityRole} />}</strong><time>{displayDate}</time></div>
+                      {isExpanded
+                        ? <div className="message-history-item__text message-history-item__text--expanded"><Suspense fallback={<div className="markdown-body"><p>{message.content}</p></div>}><MarkdownMessage value={message.content} worldId={session.worldId} /></Suspense></div>
+                        : <p className="message-history-item__text">{highlightMessage(hasMore ? plainContent.slice(0, COLLAPSE_PREVIEW_CHARS) : message.content, search)}{hasMore ? <span className="message-history-item__expand-hint">…（点击展开）</span> : null}</p>}
+                    </div>
                   </li>
                 })}
               </ol>
@@ -187,6 +210,19 @@ function formatDateHeading(value: string): string {
 function formatTime(value: string): string {
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatDetailedDateTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  const h = String(date.getHours()).padStart(2, '0')
+  const min = String(date.getMinutes()).padStart(2, '0')
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  const weekday = weekdays[date.getDay()] ?? ''
+  return `${y}-${m}-${d} ${h}:${min} ${weekday}`
 }
 
 function highlightMessage(content: string, query: string): ReactNode {

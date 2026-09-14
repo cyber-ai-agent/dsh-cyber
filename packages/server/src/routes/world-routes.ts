@@ -125,7 +125,19 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     if (body.hidden !== undefined && typeof body.hidden !== 'boolean') throw new HttpError(422, 'invalid_hidden', 'hidden must be boolean')
     if (body.pinned !== undefined) await conversationHub.setPinned(session.id, body.pinned)
     if (body.hidden !== undefined) await conversationHub.setHidden(session.id, body.hidden)
+    if (body.lastReadSeq !== undefined && typeof body.lastReadSeq !== 'number') throw new HttpError(422, 'invalid_last_read_seq', 'lastReadSeq must be a number')
+    if (body.lastReadSeq !== undefined) await conversationHub.setLastReadSeq(session.id, body.lastReadSeq)
     writeJson(response, 200, { items: await conversationHub.list(session.worldId) })
+  })
+
+  router.post(/^\/api\/sessions\/([^/]+)\/read$/, async ({ request, response, params }) => {
+    const session = store.getSession(params[0]!)
+    if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
+    await worldAccess?.assertUnlocked(session.worldId, request)
+    const body = await readJson(request)
+    if (body.sequence !== undefined && typeof body.sequence !== 'number') throw new HttpError(422, 'invalid_sequence', 'sequence must be a number')
+    if (body.sequence !== undefined) await conversationHub.setLastReadSeq(session.id, body.sequence)
+    writeJson(response, 200, { ok: true })
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/recruit$/, async ({ request, response, params }) => {

@@ -999,7 +999,27 @@ function formatPermissionExpiry(value: string): string {
   return Number.isNaN(date.valueOf()) ? value : formatDateTime(date, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function displayTime(message: WorkMessage): string { const metadataTime = message.metadata.displayTime; return typeof metadataTime === 'string' ? metadataTime : formatTime(message.createdAt) }
+function displayTime(message: WorkMessage): string {
+  const date = new Date(message.createdAt)
+  const today = new Date()
+  if (date.toDateString() === today.toDateString()) {
+    const metadataTime = message.metadata.displayTime
+    return typeof metadataTime === 'string' ? metadataTime : formatTime(date)
+  }
+  // Non-today messages always show the detailed date regardless of cached metadata.
+  return formatDetailedDateTime(date)
+}
+
+function formatDetailedDateTime(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  const h = String(date.getHours()).padStart(2, '0')
+  const min = String(date.getMinutes()).padStart(2, '0')
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  const weekday = weekdays[date.getDay()] ?? ''
+  return `${y}-${m}-${d} ${h}:${min} ${weekday}`
+}
 function currentMention(value: string): string | undefined { return /@([^\s@]*)$/.exec(value)?.[1] }
 /**
  * Is there a finished character reply here worth keeping as a document?

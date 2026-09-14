@@ -11,6 +11,7 @@ import { ServiceError } from './service-error.js'
 interface ConversationEntryState {
   pinned?: boolean
   hidden?: boolean
+  lastReadSeq?: number
 }
 
 interface ConversationHubState {
@@ -83,6 +84,11 @@ export class ConversationHubService {
       const explicit = state.entries[session.id]
       const pinned = explicit?.pinned ?? character?.blueprintId === 'core.butler'
       const lastPrompt = compactPromptPreview(this.#store.latestMessageBySender(session.id, 'owner')?.content)
+      const lastOwnerSeq = this.#store.latestMessageBySender(session.id, 'owner')?.sequence
+      const lastEmployee = this.#store.latestMessageBySender(session.id, 'employee')
+      const lastReadSeq = explicit?.lastReadSeq
+      const unread = lastEmployee !== undefined
+        && (lastReadSeq === undefined || lastEmployee.sequence > lastReadSeq)
       items.push({
         session,
         participantIds,
@@ -90,6 +96,8 @@ export class ConversationHubService {
         hidden: explicit?.hidden ?? false,
         ...(canonicalCharacterId === undefined ? {} : { canonicalCharacterId }),
         ...(lastPrompt === undefined ? {} : { lastPrompt }),
+        ...(unread ? { unread: true } : {}),
+        ...(lastEmployee === undefined ? {} : { lastEmployeeSequence: lastEmployee.sequence }),
       })
     }
     return items.sort((left, right) => {
@@ -123,6 +131,14 @@ export class ConversationHubService {
     if (state.entries[session.id]?.hidden !== true) return
     state.entries[session.id] = { ...state.entries[session.id], hidden: false }
     await this.#write(session.worldId, state)
+  }
+
+  async setLastReadSeq(sessionId: string, sequence: number): Promise<ConversationHubItem[]> {
+    const session = this.#requireSession(sessionId)
+    const state = await this.#read(session.worldId)
+    state.entries[session.id] = { ...state.entries[session.id], lastReadSeq: sequence }
+    await this.#write(session.worldId, state)
+    return this.list(session.worldId)
   }
 
   #requireSession(sessionId: string) {
