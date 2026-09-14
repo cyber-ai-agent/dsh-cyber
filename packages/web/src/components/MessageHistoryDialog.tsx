@@ -52,7 +52,7 @@ export function MessageHistoryDialog({ demoMode, session, employees, demoMessage
   const [reloadRequest, setReloadRequest] = useState(0)
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => new Set())
   const requestIdRef = useRef(0)
-  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayStr = localDateKey(new Date())
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const requestId = requestIdRef.current + 1
@@ -161,7 +161,7 @@ export function MessageHistoryDialog({ demoMode, session, employees, demoMessage
                 {group.items.map((message) => {
                   const employee = employees.find((item) => item.id === message.senderId)
                   const owner = message.senderKind === 'owner'
-                  const isToday = message.createdAt.slice(0, 10) === todayStr
+                  const isToday = localDateKey(new Date(message.createdAt)) === todayStr
                   const isExpanded = expandedMessageIds.has(message.id)
                   const toggleExpand = () => setExpandedMessageIds((current) => {
                     const next = new Set(current)
@@ -173,7 +173,7 @@ export function MessageHistoryDialog({ demoMode, session, employees, demoMessage
                   const plainContent = message.content.replace(/\s+/g, ' ').trim()
                   const hasMore = !isExpanded && plainContent.length > COLLAPSE_PREVIEW_CHARS
                   const itemClass = owner ? 'message-history-item message-history-item--owner' : 'message-history-item'
-                  return <li key={message.id} className={itemClass} onClick={toggleExpand} role="button" aria-expanded={isExpanded}>
+                  return <li key={message.id} className={itemClass} onClick={(event) => { if ((event.target as HTMLElement).closest('a, button')) return; toggleExpand() }} onKeyDown={(event) => { if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault(); toggleExpand() }} role="button" tabIndex={0} aria-expanded={isExpanded} aria-label={`${owner ? '我' : employee?.displayName ?? '角色'}的消息，${isExpanded ? '收起全文' : '展开全文'}`}>
                     {owner ? <span className="message-history-item__avatar message-history-item__avatar--owner" aria-label="我的头像"><UserCircle size={24} weight="fill" /></span> : <Avatar index={employee?.avatarIndex ?? 7} size="sm" label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} assetUrl={employee?.avatarAssetUrl} rendererKind={employee?.avatarProfile?.rendererKind} />}
                     <div className="message-history-item__content"><div><strong>{owner ? '我' : employee?.displayName ?? '角色'}{owner ? null : <AuthorityBadge role={employee?.authorityRole} />}</strong><time>{displayDate}</time></div>
                       {isExpanded
@@ -223,6 +223,11 @@ function formatDetailedDateTime(value: string): string {
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
   const weekday = weekdays[date.getDay()] ?? ''
   return `${y}-${m}-${d} ${h}:${min} ${weekday}`
+}
+
+function localDateKey(date: Date): string {
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
 }
 
 function highlightMessage(content: string, query: string): ReactNode {

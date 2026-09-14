@@ -60,12 +60,40 @@ export function NavigationPane({
     return () => { cancelled = true }
   }, [world.id, sessions.length, employees.length, activityPulse])
 
+  const activeHubItem = hubItems?.find((item) => item.session.id === activeSessionId)
+  const activeHidden = activeHubItem?.hidden === true
+  const activeUnread = activeHubItem?.unread === true
+  const activeLastEmployeeSequence = activeHubItem?.lastEmployeeSequence
+
   useEffect(() => {
-    if (activeSessionId === undefined || hubItems === undefined) return
-    const selected = hubItems.find((item) => item.session.id === activeSessionId)
-    if (selected?.hidden !== true) return
-    void updatePreference(activeSessionId, { hidden: false }).then(setHubItems).catch(() => undefined)
-  }, [activeSessionId, hubItems])
+    if (activeSessionId === undefined || (!activeHidden && !activeUnread)) return
+    let cancelled = false
+    const synchronizeActiveSession = async () => {
+      let nextItems: ConversationHubItem[] | undefined
+      let unread = activeUnread
+      let sequence = activeLastEmployeeSequence
+      if (activeHidden) {
+        const result = await api<{ items: ConversationHubItem[] }>(`/api/sessions/${encodeURIComponent(activeSessionId)}/conversation-preferences`, {
+          method: 'PUT',
+          body: JSON.stringify({ hidden: false }),
+        })
+        nextItems = result.items
+        const activeItem = nextItems.find((item) => item.session.id === activeSessionId)
+        unread = activeItem?.unread === true
+        sequence = activeItem?.lastEmployeeSequence
+      }
+      if (unread && sequence !== undefined) {
+        const result = await api<{ items: ConversationHubItem[] }>(`/api/sessions/${encodeURIComponent(activeSessionId)}/read`, {
+          method: 'POST',
+          body: JSON.stringify({ sequence }),
+        })
+        nextItems = result.items
+      }
+      if (!cancelled && nextItems !== undefined) setHubItems(nextItems)
+    }
+    void synchronizeActiveSession().catch(() => undefined)
+    return () => { cancelled = true }
+  }, [activeHidden, activeLastEmployeeSequence, activeSessionId, activeUnread])
 
   const fallbackItems = useMemo((): ConversationHubItem[] => {
     const sessionItems: ConversationHubItem[] = sessions.map((session) => ({

@@ -84,7 +84,6 @@ export class ConversationHubService {
       const explicit = state.entries[session.id]
       const pinned = explicit?.pinned ?? character?.blueprintId === 'core.butler'
       const lastPrompt = compactPromptPreview(this.#store.latestMessageBySender(session.id, 'owner')?.content)
-      const lastOwnerSeq = this.#store.latestMessageBySender(session.id, 'owner')?.sequence
       const lastEmployee = this.#store.latestMessageBySender(session.id, 'employee')
       const lastReadSeq = explicit?.lastReadSeq
       const unread = lastEmployee !== undefined
@@ -134,9 +133,14 @@ export class ConversationHubService {
   }
 
   async setLastReadSeq(sessionId: string, sequence: number): Promise<ConversationHubItem[]> {
+    if (!Number.isSafeInteger(sequence) || sequence < 0) throw new ServiceError('invalid', 'invalid_sequence', 'Read sequence must be a non-negative safe integer')
     const session = this.#requireSession(sessionId)
     const state = await this.#read(session.worldId)
-    state.entries[session.id] = { ...state.entries[session.id], lastReadSeq: sequence }
+    const latestEmployeeSequence = this.#store.latestMessageBySender(session.id, 'employee')?.sequence ?? 0
+    const savedSequence = state.entries[session.id]?.lastReadSeq
+    const currentSequence = typeof savedSequence === 'number' && Number.isSafeInteger(savedSequence) && savedSequence >= 0 ? savedSequence : 0
+    const lastReadSeq = Math.max(currentSequence, Math.min(sequence, latestEmployeeSequence))
+    state.entries[session.id] = { ...state.entries[session.id], lastReadSeq }
     await this.#write(session.worldId, state)
     return this.list(session.worldId)
   }

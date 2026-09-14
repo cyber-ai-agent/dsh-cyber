@@ -1704,26 +1704,6 @@ export default function App() {
     }
   }, [activeSessionId, messages.length, sessionParticipants])
 
-  const lastReadSeqRef = useRef<number | undefined>(undefined)
-  const markActiveSessionRead = useCallback((sessionId: string, sequence: number) => {
-    lastReadSeqRef.current = Math.max(lastReadSeqRef.current ?? 0, sequence)
-    void api(`/api/sessions/${encodeURIComponent(sessionId)}/read`, {
-      method: 'POST',
-      body: JSON.stringify({ sequence: lastReadSeqRef.current }),
-    }).catch(() => undefined)
-  }, [])
-
-  // Mark the active session read when the session changes. The sequence to
-  // record is the highest employee message in the current transcript, so a
-  // red dot only re-appears when a reply arrives after the user left.
-  useEffect(() => {
-    if (activeSessionId === undefined || demoMode) return
-    lastReadSeqRef.current = undefined
-    const lastSeq = messages.filter((message) => message.senderKind === 'employee')
-      .reduce<number | undefined>((max, message) => (max === undefined ? message.sequence : Math.max(max, message.sequence)), undefined)
-    if (lastSeq !== undefined) markActiveSessionRead(activeSessionId, lastSeq)
-  }, [activeSessionId, demoMode, messages, markActiveSessionRead])
-
   const loadOlderMessages = useCallback(async () => {
     if (activeSessionId === undefined || messagePage.loading) return
     const sessionId = activeSessionId

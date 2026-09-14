@@ -29,4 +29,14 @@ describe('NavigationPane conversation rows', () => {
     expect(html).toContain('大家晚上好')
     expect(html).toContain(`dateTime="${updatedAt}"`)
   })
+
+  it('shows the unread indicator only while the conversation is inactive', () => {
+    const updatedAt = '2026-09-14T01:47:00.000Z'
+    const session = { id: 'session-unread', workspaceId: 'workspace-nav', worldId: 'world-nav', kind: 'direct', title: '未读会话', status: 'open', createdAt: updatedAt, updatedAt } as WorkSession
+    const item = { session, participantIds: [], pinned: false, hidden: false, unread: true, lastEmployeeSequence: 4 } as ConversationHubItem
+    const props = { item, employees: [], onClick: () => undefined }
+
+    expect(renderToStaticMarkup(createElement(SessionRow, { ...props, active: false }))).toContain('aria-label="未读消息"')
+    expect(renderToStaticMarkup(createElement(SessionRow, { ...props, active: true }))).not.toContain('aria-label="未读消息"')
+  })
 })
