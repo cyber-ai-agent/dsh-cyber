@@ -127,10 +127,10 @@ const MAX_ACTIVE_LANES_PER_EMPLOYEE = 2
 
 /**
  * Estimated tokens of the exact model-facing `tools` array emitted by the
- * pinned DSH 0.1.2-rc.1 worker profile. The real loopback Harness test guards
+ * pinned DSH 0.1.5-rc.2 worker profile. The real loopback Harness test guards
  * this value against schema drift. A DSH/profile upgrade must refresh both.
  */
-export const PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS = 9_570
+export const PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS = 8_671
 /** Additional pinned DSH system instructions beyond `DSH_SYSTEM_PROMPT`. */
 export const PINNED_HARNESS_NATIVE_SYSTEM_OVERHEAD_TOKENS = 1_400
 /** Per-turn runtime-context snapshot injected as a separate user message. */
@@ -383,7 +383,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       lane.hasWorldDirectory = request.worldDirectory !== undefined
       lane.runtime = runtime
     }
-    // The 0.1.2-rc.1 SDK server creates its session through
+    // The 0.1.5-rc.2 SDK server creates its session through
     // ctx.agents.create. SessionStore.prepare rejects a live collision but does
     // not restore a JSONL log created by an earlier worker process. Every
     // conversation therefore gets a brand-new random id the first time it runs
@@ -737,7 +737,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       env: environment,
       cwd: spec.workspacePath,
       provider: this.#options.provider ?? 'deepseek-official',
-      model: this.#options.model ?? 'deepseek-v4-flash',
+      model: this.#options.model ?? 'deepseek-flash',
       initializeTimeoutMs: boundedInitializeTimeout(this.#options.initializeTimeoutMs),
     })
     return {
@@ -1283,6 +1283,10 @@ export function workerEnvironment(
     'LC_ALL',
     'DEEPSEEK_API_KEY',
     'DEEPSEEK_BASE_URL',
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'ALL_PROXY',
+    'NO_PROXY',
   ] as const
   const environment: NodeJS.ProcessEnv = {}
   for (const key of allowed) {

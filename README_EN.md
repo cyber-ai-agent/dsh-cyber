@@ -101,7 +101,9 @@ flowchart TB
 | `packages/web`, `packages/world-runtime` | Workspace UI and world runtime |
 | `packages/package-runtime`, `packages/catalog`, `marketplace` | Extension packages and built-in catalogs |
 
-DSH is pinned to `0.1.2-rc.1`. Upstream has no stable release yet. Runtime upgrades require compatibility checks and real worker tests.
+DSH is pinned to `0.1.5-rc.2`. Upstream remains in prerelease status. Runtime upgrades require compatibility checks and real worker tests.
+
+See [`docs/development/deepseek-harness-compatibility-2026-09-14.md`](./docs/development/deepseek-harness-compatibility-2026-09-14.md) for the compatibility matrix and upgrade evidence.
 
 ## Quick start
 

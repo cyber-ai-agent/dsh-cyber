@@ -1196,6 +1196,10 @@ describe('Harness profile and adapter', () => {
       {
         PATH: 'bin',
         DEEPSEEK_API_KEY: 'configured-locally',
+        HTTP_PROXY: 'http://127.0.0.1:8080',
+        HTTPS_PROXY: 'http://127.0.0.1:8080',
+        ALL_PROXY: 'socks5://127.0.0.1:1080',
+        NO_PROXY: '127.0.0.1,localhost',
         RANDOM_SECRET: 'must-not-pass',
       },
       {
@@ -1209,6 +1213,10 @@ describe('Harness profile and adapter', () => {
     )
     expect(environment.PATH).toBe('bin')
     expect(environment.DEEPSEEK_API_KEY).toBe('configured-locally')
+    expect(environment.HTTP_PROXY).toBe('http://127.0.0.1:8080')
+    expect(environment.HTTPS_PROXY).toBe('http://127.0.0.1:8080')
+    expect(environment.ALL_PROXY).toBe('socks5://127.0.0.1:1080')
+    expect(environment.NO_PROXY).toBe('127.0.0.1,localhost')
     expect(environment.RANDOM_SECRET).toBeUndefined()
     expect(environment.DSH_PERMISSION_MODE).toBe('read-only')
     expect(environment.DSH_SYSTEM_PROMPT).toContain('小刘')
@@ -1273,7 +1281,7 @@ describe('Harness profile and adapter', () => {
       await mkdir(packageDirectory, { recursive: true })
       await writeFile(
         join(packageDirectory, 'package.json'),
-        `${JSON.stringify({ name: packageName, version: '0.1.2-rc.1' })}\n`,
+        `${JSON.stringify({ name: packageName, version: '0.1.5-rc.2' })}\n`,
         'utf8',
       )
     }
@@ -1285,7 +1293,7 @@ describe('Harness profile and adapter', () => {
     expect(report).toMatchObject({
       ok: true,
       supported: true,
-      version: '0.1.2-rc.1',
+      version: '0.1.5-rc.2',
       contractId: 'dsh-session-events-v1',
       checks: {
         packageVersions: true,
@@ -1294,7 +1302,7 @@ describe('Harness profile and adapter', () => {
       },
     })
     expect(report.profile?.profileDir).toContain('candidates')
-    expect(report.profile?.profileDir).toContain('dsh-cyber-candidate-0-1-2-rc-1')
+    expect(report.profile?.profileDir).toContain('dsh-cyber-candidate-0-1-5-rc-2')
 
     const mismatchedManifest = join(
       candidateRoot,

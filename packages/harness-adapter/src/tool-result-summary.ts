@@ -46,7 +46,7 @@ export function summarizeToolResult(data: Record<string, unknown>, subject?: Too
   let truncated = false
   const surface = Array.isArray(message?.content) ? message.content : []
   const callId = object(message?.source)?.callId
-  // rc.1 represents tool output as user-message -> tool-result -> text.
+  // 0.1.5-rc.2 represents tool output as user-message -> tool-result -> text.
   // Unwrap this documented layer only; never descend into images or arbitrary JSON.
   const blocks = surface.slice(0, 64).flatMap((value) => {
     const block = object(value)

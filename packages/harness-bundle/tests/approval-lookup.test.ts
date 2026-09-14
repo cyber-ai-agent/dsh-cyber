@@ -10,7 +10,7 @@ function session(events: Array<{ type: string; data: Record<string, unknown> }>)
 }
 const ask = (id: string, toolName = 'bash') => ({ type: 'approval/asked', data: { id, toolName } })
 
-describe('rc.1 approval lookup', () => {
+describe('current approval lookup', () => {
   it('uses seq/eventAt without a Session.events array', () => {
     expect(latestApprovalRequestId({ agent: { session: session([ask('a')]) }, toolName: 'bash' })).toBe('a')
   })

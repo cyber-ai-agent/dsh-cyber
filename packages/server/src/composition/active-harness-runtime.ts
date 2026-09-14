@@ -7,16 +7,10 @@ import {
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 /**
- * The compatibility matrix intentionally still lists older Harness releases,
- * so it cannot decide whether *this* build can drive an already-activated
- * runtime: the launch path only speaks the version this build pins. Validating
- * against the matrix therefore let an older activated runtime boot and fail on
- * the first turn as an unexplained model error.
- *
- * The activated runtime is checked against the pinned version instead, and a
- * mismatch fails the boot closed with the version and the recovery command
- * spelled out. That check does not read the matrix, so it behaves the same
- * before and after older entries are retired from it.
+ * The compatibility matrix records the launchable Harness release. An active
+ * runtime pointer is checked against the exact pinned version before the server
+ * exposes any model route, so an incompatible runtime produces recovery
+ * instructions at boot.
  */
 export async function resolveActiveRuntime(
   store: SqliteStore,

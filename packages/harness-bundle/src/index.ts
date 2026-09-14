@@ -110,7 +110,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
 export function latestApprovalRequestId(request: NativeApprovalRequest): string | undefined {
   const session = request.agent.session
   const decided = new Set<string>()
-  // rc.1 removed Session.events. Read backwards without copying the full log,
+  // 0.1.5-rc.2 keeps Session.events private. Read backwards without copying the full log,
   // and never attach an approval to an earlier turn or a settled question.
   for (let index = Number(session.seq) - 1; index >= 0; index -= 1) {
     const event = session.eventAt(SessionSeq(index))
