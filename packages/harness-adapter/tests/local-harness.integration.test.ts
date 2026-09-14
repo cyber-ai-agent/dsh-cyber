@@ -287,7 +287,7 @@ describe('real Harness worker with a loopback model provider', () => {
     expect(requests).toHaveLength(5)
   }, 90_000)
 
-  it('prunes an oversized PowerShell result before the next model request', async () => {
+  it('prunes an oversized shell result before the next model request', async () => {
     const requests: Array<Record<string, unknown>> = []
     let requestCount = 0
     const provider = createServer((request, response) => {
@@ -299,6 +299,10 @@ describe('real Harness worker with a loopback model provider', () => {
         requests.push(await readJson(request))
         requestCount += 1
         const envelope = { id: `pruner-${requestCount}`, object: 'chat.completion.chunk', created: 1_777_777_777, model: 'local-test' }
+        const shellTool = process.platform === 'win32' ? 'pwsh' : 'bash'
+        const shellCommand = process.platform === 'win32'
+          ? "Write-Output 'RESULT-HEAD'; Write-Output ('x' * 10000); Write-Output 'RESULT-TAIL'"
+          : `node -e "process.stdout.write('RESULT-HEAD\\n' + 'x'.repeat(10000) + '\\nRESULT-TAIL\\n')"`
         const delta = requestCount === 1
           ? {
               role: 'assistant',
@@ -307,8 +311,8 @@ describe('real Harness worker with a loopback model provider', () => {
                 id: 'pruner-call-1',
                 type: 'function',
                 function: {
-                  name: 'pwsh',
-                  arguments: JSON.stringify({ command: "Write-Output 'RESULT-HEAD'; Write-Output ('x' * 10000); Write-Output 'RESULT-TAIL'", description: '生成大输出验证裁剪' }),
+                  name: shellTool,
+                  arguments: JSON.stringify({ command: shellCommand, description: '生成大输出验证裁剪' }),
                 },
               }],
             }
