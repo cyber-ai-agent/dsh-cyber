@@ -17,6 +17,7 @@ import {
   isManagedModelCredentialName,
   type ModelCredentialService,
 } from '../services/model-credential-service.js'
+import type { CredentialManager } from '../services/credential-manager.js'
 import type { ModelCatalogService } from '../services/model-catalog-service.js'
 import type { ModelInteractionService } from '../services/model-interaction-service.js'
 import {
@@ -30,12 +31,13 @@ import { ServiceError } from '../services/service-error.js'
 export interface ModelRoutesDependencies {
   store: SqliteStore
   credentials: ModelCredentialService
+  credentialManager?: Pick<CredentialManager, 'invalidate'>
   modelCatalog: ModelCatalogService
   interactions: ModelInteractionService
 }
 
 export function registerModelRoutes(router: Router, dependencies: ModelRoutesDependencies): void {
-  const { store, credentials, modelCatalog, interactions } = dependencies
+  const { store, credentials, credentialManager, modelCatalog, interactions } = dependencies
 
   router.get(/^\/api\/workspaces\/([^/]+)\/model-profiles$/, ({ response, params }) => {
     const workspaceId = params[0]!
@@ -90,6 +92,7 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     let credentialEnvName = existing?.credentialEnvName
     if (apiKey !== undefined) {
       credentialEnvName = await credentials.set(profileId, apiKey)
+      credentialManager?.invalidate()
     } else if (body.credentialEnvName !== undefined) {
       credentialEnvName = nullableString(body.credentialEnvName) ?? undefined
     } else if (clearCredential) {
@@ -135,11 +138,13 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
       if (apiKey !== undefined) {
         if (previousManagedSecret === undefined) await credentials.delete(profileId)
         else await credentials.set(profileId, previousManagedSecret)
+        credentialManager?.invalidate()
       }
       throw error
     }
     if (apiKey === undefined && (body.credentialEnvName !== undefined || clearCredential)) {
       await credentials.delete(profileId)
+      credentialManager?.invalidate()
     }
     writeJson(response, 201, { profile })
   })
@@ -220,7 +225,10 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
   router.delete(/^\/api\/workspaces\/([^/]+)\/model-profiles\/([^/]+)$/, async ({ response, params }) => {
     const workspaceId = params[0]!
     const profile = store.getModelProfile(params[1]!)
-    if (profile?.workspaceId === workspaceId) await credentials.delete(profile.id)
+    if (profile?.workspaceId === workspaceId) {
+      await credentials.delete(profile.id)
+      credentialManager?.invalidate()
+    }
     const removed = store.deleteModelProfile(workspaceId, params[1]!)
     writeJson(response, 200, {
       removed,

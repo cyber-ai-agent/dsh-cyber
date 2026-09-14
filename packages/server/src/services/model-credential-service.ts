@@ -24,6 +24,13 @@ interface CredentialVaultFile {
   entries: Record<string, EncryptedCredential>
 }
 
+/** In-memory managed credential value for the host redaction boundary. */
+export interface ManagedModelCredentialValue {
+  profileId: string
+  envName: string
+  value: string
+}
+
 /**
  * Keeps model credentials out of SQLite and HTTP responses. The vault is local
  * to the server state directory, encrypted with a random key stored in a
@@ -72,6 +79,20 @@ export class ModelCredentialService {
     this.#assertOpen()
     if (!this.has(profileId)) return undefined
     return process.env[managedCredentialEnvName(profileId)]
+  }
+
+  /**
+   * Enumerate managed values for one short-lived redaction snapshot. The
+   * result stays inside the server process and carries the same environment
+   * reference used by the Harness worker.
+   */
+  managedValues(): ManagedModelCredentialValue[] {
+    this.#assertOpen()
+    return Object.keys(this.#entries).flatMap((profileId) => {
+      const envName = managedCredentialEnvName(profileId)
+      const value = process.env[envName]
+      return value === undefined || value.trim() === '' ? [] : [{ profileId, envName, value }]
+    })
   }
 
   async set(profileId: string, apiKey: string): Promise<string> {

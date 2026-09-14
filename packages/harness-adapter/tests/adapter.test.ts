@@ -624,7 +624,7 @@ describe('Harness profile and adapter', () => {
     await adapter.close()
   })
 
-  it('normalizes Harness facts and carries the raw tool arguments into tool.started', () => {
+  it('normalizes Harness facts and sanitizes tool arguments before tool.started', () => {
     const events = normalizeHarnessNotification({
       method: 'session.event',
       params: {
@@ -652,9 +652,9 @@ describe('Harness profile and adapter', () => {
         callId: 'call-1',
       }),
     ])
-    // Raw parameters travel verbatim so the trace panel can expand them.
-    expect(events[0]!.metadata.toolDetail).toBe('{"apiKey":"must-not-leak"}')
-    expect(events[0]!.metadata.toolSummary).toBe('{"apiKey":"must-not-leak"}')
+    expect(events[0]!.metadata.toolDetail).toBe('{"apiKey":[已隐藏敏感信息]}')
+    expect(events[0]!.metadata.toolSummary).toBe('{"apiKey":[已隐藏敏感信息]}')
+    expect(events[0]!.metadata.toolDetailRedacted).toBe(true)
     expect(JSON.stringify(events)).not.toContain('"arguments"')
   })
 

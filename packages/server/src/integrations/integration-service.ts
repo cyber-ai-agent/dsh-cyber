@@ -16,6 +16,14 @@ interface StructuredSecrets { version: 1; values: Record<string, string> }
 
 const SECRET_PAYLOAD_PREFIX = 'dsh-secrets:'
 
+/** In-memory values exposed only to the host credential redaction boundary. */
+export interface IntegrationCredentialValue {
+  workspaceId: string
+  connectionId: string
+  field: string
+  value: string
+}
+
 export class IntegrationService {
   readonly #path: string
   readonly #registry: IntegrationRegistry
@@ -97,6 +105,24 @@ export class IntegrationService {
     const raw = this.#vault.resolve(connection.id)
     if (raw === undefined) return undefined
     return decodeSecrets(this.#registry.require(connection.integrationId), raw)
+  }
+
+  /**
+   * Return the current vault values for host-side redaction and variable
+   * resolution. Callers must keep the result in memory and must not persist or
+   * return it through an HTTP response.
+   */
+  credentialValues(): IntegrationCredentialValue[] {
+    const values: IntegrationCredentialValue[] = []
+    for (const connection of this.#connections.values()) {
+      const raw = this.#vault.resolve(connection.id)
+      if (raw === undefined) continue
+      const secrets = decodeSecrets(this.#registry.require(connection.integrationId), raw)
+      for (const [field, value] of Object.entries(secrets)) {
+        if (value.trim() !== '') values.push({ workspaceId: connection.workspaceId, connectionId: connection.id, field, value })
+      }
+    }
+    return values
   }
 
   async storeMcpPayload(value: JsonObject, now = new Date()): Promise<string> {

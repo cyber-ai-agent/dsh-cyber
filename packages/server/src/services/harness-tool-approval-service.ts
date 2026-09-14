@@ -25,17 +25,19 @@ export class HarnessToolApprovalService {
   readonly #runtime: AgentRuntimePort
   readonly #details = new Map<string, ToolApprovalDetails>()
   readonly #settling = new Set<string>()
-  readonly #sanitizer = new TraceSanitizer()
+  readonly #sanitizer: TraceSanitizer
   readonly #onChanged: (worldId: string, payload: JsonObject) => void
   readonly #expiryTimer: NodeJS.Timeout
 
   constructor(options: {
     store: SqliteStore
     runtime: AgentRuntimePort
+    sanitizer?: TraceSanitizer
     onChanged?: (worldId: string, payload: JsonObject) => void
   }) {
     this.#store = options.store
     this.#runtime = options.runtime
+    this.#sanitizer = options.sanitizer ?? new TraceSanitizer()
     this.#onChanged = options.onChanged ?? (() => undefined)
 
     // A worker restart ends every in-turn question. Close stale cards so a

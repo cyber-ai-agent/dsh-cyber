@@ -6,9 +6,9 @@ import { formatDuration } from '../../i18n/format.js'
 const PREVIEW_LINES = 5
 
 /**
- * One tool step in the trace: the raw command and the raw result live together
- * in a single evidence box. Collapsed it previews the first five lines; when
- * the content runs longer, clicking the box expands the bounded evidence view.
+ * One tool step in the trace: the bounded command and credential-safe result
+ * live together in a single evidence box. Collapsed it previews the first five
+ * lines; when the content runs longer, clicking the box expands the evidence.
  * There is no copy affordance; the owner selects text to take it away.
  */
 export function WorldTraceToolItem({ tool }: { tool: WorldTraceToolStep }) {
@@ -39,6 +39,7 @@ export function WorldTraceToolItem({ tool }: { tool: WorldTraceToolStep }) {
         {tool.exitCode !== undefined ? <small>退出码：{tool.exitCode}</small> : null}
       </div>
       {publication ? <small>清单写入与宿主校验、产物登记是不同步骤；登记结果见产出记录。</small> : null}
+      {tool.inputRedacted || tool.outputRedacted ? <small>凭证已变量化，原文未进入上下文。</small> : null}
       {!(hasInput || hasOutput) && tool.description ? <small>{tool.description}</small> : null}
       {hasInput || hasOutput ? <div
         className={`world-trace-tool__evidence${clamped ? ' is-clickable' : ''}`}

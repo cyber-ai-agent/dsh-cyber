@@ -99,12 +99,13 @@ export class ContextInspectionService {
    * conversation map, so a busy world cannot grow it without limit.
    */
   readonly #byRun = new Map<string, ContextInspection>()
-  readonly #sanitizer = new TraceSanitizer()
+  readonly #sanitizer: TraceSanitizer
   readonly #limit: number
 
-  constructor(options: { maxConversations?: number } = {}) {
+  constructor(options: { maxConversations?: number; sanitizer?: TraceSanitizer } = {}) {
     const limit = options.maxConversations
     this.#limit = Number.isSafeInteger(limit) && limit! > 0 ? limit! : MAX_TRACKED_CONVERSATIONS
+    this.#sanitizer = options.sanitizer ?? new TraceSanitizer()
   }
 
   /** Projects and stores one turn's context. Never throws into the turn. */
@@ -134,12 +135,30 @@ export class ContextInspectionService {
 
   /** The most recent composed context, or `undefined` when none was recorded. */
   latest(conversationId: string): ContextInspection | undefined {
-    return this.#byConversation.get(conversationId.trim())
+    const inspection = this.#byConversation.get(conversationId.trim())
+    return inspection === undefined ? undefined : this.#resanitize(inspection)
   }
 
   /** The context composed for one run, or `undefined` when this process never recorded it. */
   forRun(agentRunId: string): ContextInspection | undefined {
-    return this.#byRun.get(agentRunId.trim())
+    const inspection = this.#byRun.get(agentRunId.trim())
+    return inspection === undefined ? undefined : this.#resanitize(inspection)
+  }
+
+  #resanitize(inspection: ContextInspection): ContextInspection {
+    return {
+      ...inspection,
+      employeeName: this.#sanitizer.redact(inspection.employeeName),
+      layers: inspection.layers.map((layer) => ({
+        ...layer,
+        preview: boundedRedacted(this.#sanitizer.redact(layer.preview), MAX_LAYER_PREVIEW_CHARS),
+      })),
+      memoryHits: inspection.memoryHits.map((hit) => ({
+        ...hit,
+        reason: boundedRedacted(this.#sanitizer.redact(hit.reason), MAX_MEMORY_SUMMARY_CHARS),
+        summary: boundedRedacted(this.#sanitizer.redact(hit.summary), MAX_MEMORY_SUMMARY_CHARS),
+      })),
+    }
   }
 
   #project(conversationId: string, capture: ContextInspectionCapture): ContextInspection {
@@ -280,6 +299,10 @@ export class ContextInspectionService {
   #redact(value: string, maxCharacters: number): string {
     return this.#sanitizer.text(value.replace(ENVIRONMENT_CREDENTIAL, REDACTED), maxCharacters)
   }
+}
+
+function boundedRedacted(value: string, maximum: number): string {
+  return value.length <= maximum ? value : `${value.slice(0, Math.max(0, maximum - 1))}…`
 }
 
 function sourceRefKey(ref: import('@dsh-cyber/contracts').ContextSourceRef): string {

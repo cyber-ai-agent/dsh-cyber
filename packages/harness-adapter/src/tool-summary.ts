@@ -1,20 +1,19 @@
 /**
- * Raw tool-call parameter text for the owner's trace.
- *
- * The trace panel shows the tool's actual parameters and result verbatim in
- * an expandable box: no secret masking, no argument allow-listing, no home
- * folding. Values are only clipped to a bounded length so a single call
- * cannot bloat the trace or the persisted message metadata.
+ * Bounded tool-call parameter text for the owner's trace. Credential values
+ * become stable variables before the detail is clipped or persisted.
  */
 import { clipToolEvidence } from './evidence-bounds.js'
+import { CredentialRedactor } from '@dsh-cyber/contracts'
 
 export interface ToolCallSummary {
   /** One short display line for the target row (the command, or the compact record). */
   summary: string
-  /** The full raw parameter text for the expandable view. */
+  /** The bounded, credential-safe parameter text for the expandable view. */
   detail: string
   /** Whether the expandable detail contains a bounded head/tail view. */
   truncated?: true
+  /** Whether a credential value or credential-shaped value was replaced. */
+  redacted?: true
 }
 
 const COMMAND_KEYS = ['command', 'cmd', 'script'] as const
@@ -52,10 +51,13 @@ function firstLine(value: string): string {
  * Display the direct command parameters of a tool call.
  *
  * Command-shaped records show the command string; anything else shows the
- * exact argument payload (the runtime's own JSON for string payloads, a
- * pretty-printed record otherwise). Nothing is redacted.
+ * exact credential-safe argument payload (the runtime's own JSON for string
+ * payloads, a pretty-printed record otherwise).
  */
-export function summarizeToolCall(rawArguments: unknown): ToolCallSummary | undefined {
+export function summarizeToolCall(
+  rawArguments: unknown,
+  redactText: (value: string) => string = defaultRedactor.text.bind(defaultRedactor),
+): ToolCallSummary | undefined {
   if (rawArguments === undefined) return undefined
   const record = argsRecord(rawArguments)
   const detail = typeof rawArguments === 'string'
@@ -66,10 +68,15 @@ export function summarizeToolCall(rawArguments: unknown): ToolCallSummary | unde
   const summarySource = record !== undefined
     ? (take(record, COMMAND_KEYS) ?? (typeof rawArguments === 'string' ? trimmed : JSON.stringify(record)))
     : firstLine(trimmed)
-  const bounded = clipToolEvidence(detail)
+  const redactedDetail = redactText(detail)
+  const redactedSummary = redactText(summarySource)
+  const bounded = clipToolEvidence(redactedDetail)
   return {
-    summary: clip(summarySource, MAX_SUMMARY),
+    summary: clip(redactedSummary, MAX_SUMMARY),
     detail: bounded.value,
     ...(bounded.truncated ? { truncated: true } : {}),
+    ...(redactedDetail !== detail || redactedSummary !== summarySource ? { redacted: true } : {}),
   }
 }
+
+const defaultRedactor = new CredentialRedactor()

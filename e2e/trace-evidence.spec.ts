@@ -37,7 +37,7 @@ test.beforeAll(async () => {
 })
 test.afterAll(async () => { await server.close(); await rm(stateRoot, { recursive: true, force: true }) })
 
-test('expands and reads raw event evidence, survives reload, and fits three viewports', async ({ page }, info) => {
+test('expands and reads sanitized event evidence, survives reload, and fits three viewports', async ({ page }, info) => {
   const consoleIssues: string[] = []
   attachAppConsoleRecorder(page, consoleIssues)
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -59,19 +59,21 @@ test('expands and reads raw event evidence, survives reload, and fits three view
   await openTraceTab()
   let entry = await openTraceEntry(dock, '完成处理')
   // The redundant target command line is gone; one merged evidence box holds
-  // the raw command and the raw result together.
+  // the sanitized command and result together.
   await expect(entry.locator('.world-trace-tool__target')).toHaveCount(0)
   let box = entry.locator('.world-trace-tool__evidence')
   await expect(box).toHaveCount(1)
-  // Collapsed: a five-line preview, raw and unmasked, with an expand affordance.
+  // Collapsed: a five-line preview with credential-shaped content sanitized.
   await expect(box).toHaveClass(/is-clickable/)
   const preview = box.locator('pre')
   await expect(preview).toContainText('character-profile-runtime.ts')
-  await expect(preview).toContainText('LOCAL-FIXTURE-SECRET')
+  await expect(preview).not.toContainText('LOCAL-FIXTURE-SECRET')
+  await expect(preview).toContainText('[已隐藏敏感信息]')
+  await expect(entry.getByText('凭证已变量化，原文未进入上下文。', { exact: true })).toBeVisible()
   await expect(preview).not.toContainText('body-6')
   // The copy affordances are gone: select text in the box instead.
   await expect(entry.getByRole('button', { name: /复制/ })).toHaveCount(0)
-  // Clicking the box expands the full raw command and result.
+  // Clicking the box expands the bounded command and result evidence.
   await preview.click()
   await expect(box).toHaveText(/命令/)
   await expect(box).toHaveText(/结果/)
@@ -87,10 +89,10 @@ test('expands and reads raw event evidence, survives reload, and fits three view
   await page.setViewportSize({ width: 1440, height: 900 })
   await openTraceTab()
   entry = await openTraceEntry(dock, '完成处理')
-  // Persisted evidence reloads collapsed again; expand to the full raw text.
+  // Persisted evidence reloads collapsed again; expand to the sanitized text.
   box = entry.locator('.world-trace-tool__evidence')
   await expect(box).toHaveClass(/is-clickable/)
-  await expect(box.locator('pre')).toContainText('LOCAL-FIXTURE-SECRET')
+  await expect(box.locator('pre')).not.toContainText('LOCAL-FIXTURE-SECRET')
   await box.locator('pre').click()
   await expect(box.locator('.world-trace-tool__part pre').last()).toContainText('body-6')
   await page.setViewportSize({ width: 912, height: 921 })

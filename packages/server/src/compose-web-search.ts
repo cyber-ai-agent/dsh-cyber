@@ -28,6 +28,7 @@ export async function createWebSearchWiring(
   integrations: IntegrationService,
   originProvider?: () => string | undefined,
   connectionGrantsFor?: (characterId: string) => readonly string[] | undefined,
+  redactText?: (value: string, workspaceId?: string) => string,
 ): Promise<WebSearchWiring> {
   const catalogSource = await createWebSearchCatalog()
   const catalog: WebSearchCatalog = catalogSource
@@ -39,7 +40,7 @@ export async function createWebSearchWiring(
   }
   return {
     register(router: Router): void {
-      registerWebSearchRoutes(router, { integrations, workerToken: bridge.workerToken, catalog: () => catalog.catalog() })
+      registerWebSearchRoutes(router, { integrations, workerToken: bridge.workerToken, catalog: () => catalog.catalog(), ...(redactText === undefined ? {} : { redactText }) })
     },
     resolveWebSearchPlan(request, route): ReturnType<typeof resolveWebSearchPlan> {
       if (!request.revision.skillGrants.includes('web.search.firecrawl')) return { kind: 'disabled' }

@@ -56,6 +56,8 @@ export interface SshSkillAdapterOptions {
   environment?: {
     applySignals?(signals: readonly { toolName?: string; command?: string; failed: boolean; exitCode?: number; output?: string }[], profileId?: string): Promise<unknown>
   }
+  /** Fresh credential redaction for remote command output and diagnostics. */
+  redactText?: (value: string, workspaceId?: string) => string
 }
 
 /** Minimal store shape the grants resolver needs (SqliteStore satisfies it). */
@@ -91,6 +93,7 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
   readonly #connectionGrantsFor: ((characterId: string) => readonly string[] | undefined) | undefined
   readonly #sessions: SshSessionPool | undefined
   readonly #environment: SshSkillAdapterOptions['environment']
+  readonly #redactText: (value: string, workspaceId?: string) => string
 
   constructor(options: SshSkillAdapterOptions) {
     this.#store = options.store
@@ -98,6 +101,7 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
     this.#connectionGrantsFor = options.connectionGrantsFor
     this.#sessions = options.sessions
     this.#environment = options.environment
+    this.#redactText = options.redactText ?? ((value) => value)
   }
 
   /**
@@ -206,16 +210,16 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
       const command = sshCommandFor(op, os)
       if (command === undefined) return { status: 'failed', detail: `当前设备系统暂不支持该操作（detected ${os}）` }
       const result = await exec(command)
-      await this.#recordEnvironment(connectionId, command, result)
-      return { status: 'executed', detail: summarize(op.summary, result.stdout, result.stderr, result.code) }
+      await this.#recordEnvironment(workspaceId, connectionId, command, result)
+      return { status: 'executed', detail: summarize(op.summary, result.stdout, result.stderr, result.code, (value) => this.#redactText(value, workspaceId)) }
     } catch (error) {
       if (error instanceof SshError) {
         if (error.kind === 'auth-failed' || error.kind === 'unreachable') {
-          return { status: 'failed', detail: error.message }
+          return { status: 'failed', detail: this.#redactText(error.message, workspaceId) }
         }
-        return { status: 'outcome-unknown', detail: `${error.message}；不得自动重试` }
+        return { status: 'outcome-unknown', detail: `${this.#redactText(error.message, workspaceId)}；不得自动重试` }
       }
-      return { status: 'failed', detail: error instanceof Error ? error.message : 'SSH 操作失败' }
+      return { status: 'failed', detail: this.#redactText(error instanceof Error ? error.message : 'SSH 操作失败', workspaceId) }
     }
   }
 
@@ -247,7 +251,7 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
    * changes the action's outcome: a failed write is the host's problem, not
    * the command's.
    */
-  async #recordEnvironment(connectionId: string, command: string, result: { code: number | null; stdout: string; stderr: string }): Promise<void> {
+  async #recordEnvironment(workspaceId: string, connectionId: string, command: string, result: { code: number | null; stdout: string; stderr: string }): Promise<void> {
     if (this.#environment?.applySignals === undefined) return
     try {
       await this.#environment.applySignals([{
@@ -255,7 +259,7 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
         command,
         failed: result.code !== 0,
         ...(result.code === null ? {} : { exitCode: result.code }),
-        output: `${result.stdout}\n${result.stderr}`,
+        output: this.#redactText(`${result.stdout}\n${result.stderr}`, workspaceId),
       }], `ssh:${connectionId}`)
     } catch {
       /* the machine profile is an optimisation of the prompt, not a turn dependency */
@@ -309,7 +313,7 @@ function parseOperationParams(parameters: JsonObject): SshOperation | undefined 
   return { op: op as SshOperation['op'], summary, params }
 }
 
-function summarize(label: string, stdout: string, stderr: string, code: number | null): string {
-  const body = (stdout.trim() || stderr.trim() || `（无输出，exit ${code ?? 'unknown'}）`).slice(0, 800)
+function summarize(label: string, stdout: string, stderr: string, code: number | null, redactText: (value: string) => string): string {
+  const body = redactText(stdout.trim() || stderr.trim() || `（无输出，exit ${code ?? 'unknown'}）`).slice(0, 800)
   return `${label}：\n${body}`
 }

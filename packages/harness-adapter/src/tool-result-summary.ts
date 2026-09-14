@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto'
-import type { JsonObject } from '@dsh-cyber/contracts'
+import { CredentialRedactor, isSensitiveCredentialKey, type JsonObject, type JsonValue } from '@dsh-cyber/contracts'
 import { BoundedEvidenceCollector } from './evidence-bounds.js'
 
 interface ToolSubject { name: string }
+
+export type ToolEvidenceRedactor = (value: string) => string
 
 /**
  * One instance per AgentRun. Results are only claimed by the session and
@@ -11,6 +13,17 @@ interface ToolSubject { name: string }
 export class ToolTraceSubjects {
   readonly #subjects = new Map<string, ToolSubject>()
   readonly #outputReferences = new Map<string, string>()
+  readonly #redactor: ToolEvidenceRedactor
+
+  constructor(redactor: ToolEvidenceRedactor = defaultRedactor.text.bind(defaultRedactor)) {
+    this.#redactor = redactor
+  }
+
+  redact(value: string): string { return this.#redactor(value) }
+
+  redactJson(value: JsonObject): JsonObject {
+    return redactJsonValue(value, this.#redactor) as JsonObject
+  }
 
   start(sessionId: string, callId: string, name: string): void {
     this.#subjects.set(JSON.stringify([sessionId, callId]), { name: name.slice(0, 160) })
@@ -43,13 +56,15 @@ export class ToolTraceSubjects {
 }
 
 /**
- * Extract the actual text a tool call returned.
- *
- * The trace panel shows this verbatim in the expandable "查看结果" box, so no
- * secret masking and no per-tool allow-listing happens here. Only a call that
- * was never started in this session has no text claimed for it.
+ * Extract the bounded text a tool call returned. Credential values are replaced
+ * before hashing, clipping and persistence. Only a call that was never started
+ * in this session has no text claimed for it.
  */
-export function summarizeToolResult(data: Record<string, unknown>, subject?: ToolSubject): JsonObject {
+export function summarizeToolResult(
+  data: Record<string, unknown>,
+  subject?: ToolSubject,
+  redactText: ToolEvidenceRedactor = defaultRedactor.text.bind(defaultRedactor),
+): JsonObject {
   const result: JsonObject = {}
   const message = object(data.message)
   const output = object(data.result)
@@ -61,6 +76,7 @@ export function summarizeToolResult(data: Record<string, unknown>, subject?: Too
   const hash = createHash('sha256')
   let hasOutput = false
   let truncated = false
+  let redacted = false
   const surface = Array.isArray(message?.content) ? message.content : []
   const callId = object(message?.source)?.callId
   if (surface.length > 64) truncated = true
@@ -76,7 +92,9 @@ export function summarizeToolResult(data: Record<string, unknown>, subject?: Too
   for (const value of blocks.slice(0, 64)) {
     const block = object(value)
     if (block?.type !== 'text' || typeof block.text !== 'string') continue
-    appendEvidence(collector, hash, block.text, 'text', hasOutput)
+    const safeText = redactText(block.text)
+    if (safeText !== block.text) redacted = true
+    appendEvidence(collector, hash, safeText, 'text', hasOutput)
     hasOutput = true
   }
   // A small number of providers report a single plain output rather than blocks.
@@ -84,7 +102,10 @@ export function summarizeToolResult(data: Record<string, unknown>, subject?: Too
     for (const key of ['stdout', 'stderr', 'output', 'text'] as const) {
       const value = output?.[key] ?? data[key]
       if (typeof value !== 'string' || !value.trim()) continue
-      appendEvidence(collector, hash, `${key}:\n${value}`, key, hasOutput)
+      const evidence = `${key}:\n${value}`
+      const safeEvidence = redactText(evidence)
+      if (safeEvidence !== evidence) redacted = true
+      appendEvidence(collector, hash, safeEvidence, key, hasOutput)
       hasOutput = true
     }
   }
@@ -95,10 +116,13 @@ export function summarizeToolResult(data: Record<string, unknown>, subject?: Too
     for (const raw of meta.diffs.slice(0, 4)) {
       const diff = object(raw)
       if (typeof diff?.path !== 'string' || typeof diff.oldText !== 'string' || typeof diff.newText !== 'string') continue
+      const evidence = `[实际变更片段] ${diff.path}\n--- 修改前\n${diff.oldText}\n+++ 修改后\n${diff.newText}`
+      const safeEvidence = redactText(evidence)
+      if (safeEvidence !== evidence) redacted = true
       appendEvidence(
         collector,
         hash,
-        `[实际变更片段] ${diff.path}\n--- 修改前\n${diff.oldText}\n+++ 修改后\n${diff.newText}`,
+        safeEvidence,
         'diff',
         hasOutput,
       )
@@ -110,6 +134,7 @@ export function summarizeToolResult(data: Record<string, unknown>, subject?: Too
   result.toolOutput = bounded.value
   result.toolOutputHash = hash.digest('hex').slice(0, 16)
   if (truncated || bounded.truncated) result.toolOutputTruncated = true
+  if (redacted) result.toolOutputRedacted = true
   return result
 }
 
@@ -131,4 +156,21 @@ function appendEvidence(
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown> : undefined
+}
+
+const defaultRedactor = new CredentialRedactor()
+
+function redactJsonValue(value: JsonValue, redactText: ToolEvidenceRedactor): JsonValue {
+  if (typeof value === 'string') return redactText(value)
+  if (Array.isArray(value)) return value.map((item) => redactJsonValue(item, redactText))
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+      if (isSensitiveCredentialKey(key) && typeof item === 'string') {
+        const safe = redactText(item)
+        return [key, safe === item ? '[已隐藏敏感信息]' : safe]
+      }
+      return [key, redactJsonValue(item, redactText)]
+    }))
+  }
+  return value
 }

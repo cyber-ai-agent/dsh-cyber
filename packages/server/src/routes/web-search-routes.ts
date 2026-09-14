@@ -16,6 +16,8 @@ export interface WebSearchRoutesDependencies {
   catalog(): WebSearchProviderCatalog
   /** Injectable transport (tests stub the Firecrawl call). */
   fetch?: typeof globalThis.fetch
+  /** Redacts upstream snippets before they cross into the worker context. */
+  redactText?: (value: string, workspaceId?: string) => string
 }
 
 /**
@@ -56,7 +58,9 @@ export function registerWebSearchRoutes(router: Router, dependencies: WebSearchR
         apiKey,
         query,
         limit,
+        workspaceId,
         ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
+        ...(dependencies.redactText === undefined ? {} : { redactText: dependencies.redactText }),
       })
     } catch (error) {
       if (error instanceof FirecrawlClientError) {

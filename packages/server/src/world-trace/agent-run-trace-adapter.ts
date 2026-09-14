@@ -95,6 +95,7 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
         ...(description === undefined ? {} : { description }),
         ...(detail === undefined ? {} : { input: detail }),
         ...(message.metadata.toolDetailTruncated === true ? { inputTruncated: true } : {}),
+        ...(message.metadata.toolDetailRedacted === true ? { inputRedacted: true } : {}),
         status: current?.status ?? 'running',
         createdAt: message.createdAt,
         ...(current?.completedAt === undefined ? {} : { completedAt: current.completedAt }),

@@ -126,7 +126,8 @@ import { FirecrawlClient } from './integrations/firecrawl-client.js'
 import { OfficialMcpClientFactory, type McpClientFactory } from './integrations/mcp-client.js'
 import { MCP_INTEGRATION_ID } from './integrations/mcp-provider.js'
 import { McpSkillAdapter } from './skills/mcp-skill-adapter.js'
-
+import { composeCredentialBoundary } from './composition/compose-credentials.js'
+import { ContextInspectionService } from './services/context-inspection-service.js'
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 43123
 
@@ -216,7 +217,6 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     store.recruitEmployee({ workspaceId: local.id, worldId: world.id, blueprintId: 'core.butler', blueprintVersion: 1, displayName: '管家' })
   }
   const worldSimulation = new WorldSimulationStore(store)
-
   const worldRoots = new WorldRootService(stateRoot)
   const worldLifecycle = new WorldLifecycleService({ store, roots: worldRoots })
   // Finish a delete interrupted between the SQLite commit and the file removal.
@@ -276,32 +276,29 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   })
   const mcpClients = options.mcpClientFactory ?? new OfficialMcpClientFactory()
   const integrations = await IntegrationService.open(stateRoot, createBuiltinIntegrationRegistry(mcpClients))
-  const firecrawlClient = new FirecrawlClient({ integrations })
+  const { manager: credentialManager, sanitizer: traceSanitizer } = composeCredentialBoundary({ store, credentials, integrations })
+  const firecrawlClient = new FirecrawlClient({ integrations, redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId) })
   const knowledgeWeb = new KnowledgeWebImportService({
     client: firecrawlClient,
     library: worldKnowledge,
   })
   const sshSessions = new SshSessionPool()
-
-  const connectionGrantsFor = createConnectionGrantsResolver(store); const webSearch = await createWebSearchWiring(integrations, () => startedAddress?.origin, connectionGrantsFor)
+  const connectionGrantsFor = createConnectionGrantsResolver(store); const webSearch = await createWebSearchWiring(integrations, () => startedAddress?.origin, connectionGrantsFor, (value, workspaceId) => credentialManager.redactText(value, workspaceId))
   const worldManagementHost = createWorldManagementHost({ store, worldSettings, worldPackages, authority })
-
   const environments = createEnvironmentService(stateRoot, { devices: composeSshEnvironmentDeviceSource({ store, integrations }) })
-
   const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry({
     firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), connectionGrantsFor },
-    browser: { store, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), publishScreenshot: (input) => worldArtifacts.publishBrowserScreenshot(input), ...(options.browserClientFactory === undefined ? {} : { clientFactory: options.browserClientFactory }), ...(options.browserPolicy === undefined ? {} : { policy: options.browserPolicy }) },
+    browser: { store, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), publishScreenshot: (input) => worldArtifacts.publishBrowserScreenshot(input), redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId), ...(options.browserClientFactory === undefined ? {} : { clientFactory: options.browserClientFactory }), ...(options.browserPolicy === undefined ? {} : { policy: options.browserPolicy }) },
     worldManagement: worldManagementHost,
-    ssh: { store, integrations, sessions: sshSessions, connectionGrantsFor, environment: environments },
+    ssh: { store, integrations, sessions: sshSessions, connectionGrantsFor, environment: environments, redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId) },
   })
-  const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients, connectionGrantsFor }) : undefined
+  const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients, connectionGrantsFor, credentials: credentialManager }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
   const skillScopes = new SkillScopeSettingsRepository(store.database); const skillCatalog = new SkillCatalogService({ store, registry: skillRegistry, worldPackages, scopeSettings: skillScopes })
   // Production uses the derived World Catalog by default; tests and legacy embedders may inject a narrower port explicitly.
   const skillAvailability = options.skillAvailability ?? skillCatalog
-
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
-  const interactions = new ModelInteractionService(store)
+  const interactions = new ModelInteractionService(store, { redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId) })
   const knowledgeGraphRuntime = createWorldKnowledgeGraphRuntime({
     store,
     libraryRepository: worldKnowledgeRepository,
@@ -311,13 +308,16 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     ...(options.knowledgeExtractionPort === undefined ? {} : { extractionPort: options.knowledgeExtractionPort }),
     publish: (worldId, payload) => publishKnowledgeChanged?.(worldId, payload),
   })
-  const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, request) }, resolveWebSearchPlan: webSearch.resolveWebSearchPlan })
+  const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, request) }, resolveWebSearchPlan: webSearch.resolveWebSearchPlan, credentialRedactor: (workspaceId) => credentialManager.redactor(workspaceId) })
   // World settings and the host-probed machine profile are rendered by the runtime into the cacheable prefix.
-  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings, runFileEvidence, environments)
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, new ContextInspectionService({ sanitizer: traceSanitizer }), worldSettings, runFileEvidence, environments, {
+    redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId),
+    redactRuntimeEvent: (event, workspaceId) => credentialManager.redactRuntimeEvent(event, workspaceId),
+  })
   const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
   const loggingRuntime = new TurnInteractionLoggingRuntime({ inner: contextRuntime, service: interactions, resolveRoute(request) { return resolveHarnessRoute(store, request) } })
   // Image-model turns branch before the chat stack: the prompt goes to the images endpoint.
-  const runtime = createImageAwareRuntime({ inner: loggingRuntime, store, credentials, images: new ImageGenerationService(), worldFiles, interactions })
+  const runtime = createImageAwareRuntime({ inner: loggingRuntime, store, credentials, images: new ImageGenerationService(), worldFiles, interactions, redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId) })
   const completionWorker = composeCompletionWorker(store, worldArtifacts)
   const groupTurnPlanner = composeGroupTurnPlanner(store, credentials, options.groupTurnPlanner)
   const orchestrator = new ConversationOrchestrator({
@@ -329,6 +329,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     completionJobType: 'world-artifact-publication',
     onCompletionJobQueued: () => completionWorker.wake(),
     groupTurnPlanner,
+    redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId),
   })
   const peerCollaboration = new PeerCollaborationService({
     store,
@@ -352,7 +353,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   publishArtifactChanged = (worldId, payload) => worldRuntime.publishArtifactChanged(worldId, payload)
   publishKnowledgeChanged = (worldId, payload) => worldRuntime.publishKnowledgeChanged(worldId, payload)
   publishDecisionChanged = (worldId, payload) => worldRuntime.publishDecisionChanged(worldId, payload)
-  const toolApprovals = new HarnessToolApprovalService({ store, runtime, onChanged: (worldId, payload) => publishDecisionChanged?.(worldId, payload) })
+  const toolApprovals = new HarnessToolApprovalService({ store, runtime, sanitizer: traceSanitizer, onChanged: (worldId, payload) => publishDecisionChanged?.(worldId, payload) })
   const worldRuntimeContext = new WorldRuntimeContextComposer({
     contributors: [knowledgeGraphRuntime.contributor, new WorldKnowledgeRuntimeContextContributor(
       new WorldKnowledgeRetrievalService({ search: worldKnowledgeSearch }),
@@ -431,6 +432,8 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     actions: skillActions,
     worldPermissions,
     skillAvailability,
+    redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId),
+    redactJson: (value, workspaceId) => credentialManager.redactJson(value, workspaceId),
   })
   const turnContinuations = new TurnAwareApprovalContinuationService({
     store,
@@ -440,7 +443,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     worldPackages,
     worldPermissions,
   })
-  const { worldTrace, contextSnapshots } = composeWorldTrace({ store, actions: skillActions, artifacts: worldArtifacts })
+  const { worldTrace, contextSnapshots } = composeWorldTrace({ store, actions: skillActions, artifacts: worldArtifacts, sanitizer: traceSanitizer })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
   const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity, skills: skillRuntime, continuations: turnContinuations })
@@ -449,7 +452,6 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   const applicationAccess = new ApplicationAccessService(stateRoot)
   const assets = new AssetService(store, stateRoot)
   const localTtsAssets = new LocalTtsAssetService(stateRoot)
-
   const router = new Router()
   const { work: workSystem, taskIntent } = composeWorkSystem({ store, credentials, groupTasks, router, worldAccess, worldRuntime, skillRuntime, continuations: turnContinuations, ...(options.conversationTaskIntent === undefined ? {} : { intentClassifier: options.conversationTaskIntent }) })
   registerApplicationAccessRoutes(router, applicationAccess)
@@ -458,13 +460,14 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
   composeGenerators({ store, credentials, skillCatalog, packageCatalog, packageManager, worldPackages, worldAccess, marketplace: generatedMarketplace, overrides: options }).registerGeneratorRoutes(router)
   registerWorkspaceRoutes(router, { store })
-  registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
-  registerModelHubRoutes(router, { store, credentials, modelCatalog, providerCatalog: modelHub.providerCatalog, balance: modelHub.balance, probe: modelHub.probe })
+  registerModelRoutes(router, { store, credentials, credentialManager, modelCatalog, interactions })
+  registerModelHubRoutes(router, { store, credentials, credentialManager, modelCatalog, providerCatalog: modelHub.providerCatalog, balance: modelHub.balance, probe: modelHub.probe })
   registerIntegrationRoutes(router, {
     store,
     integrations,
     environments,
     onChanged: async (integrationId) => {
+      credentialManager.invalidate()
       if (integrationId === MCP_INTEGRATION_ID && mcpAdapter !== undefined) await refreshMcpCatalog(mcpAdapter, skillRegistry)
     },
   })
@@ -504,7 +507,6 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     ownerRuntimeAccess,
     skillAvailability,
   })
-
   const httpServer = createServer((request, response) => {
     void (async () => {
       await assertApplicationAccess(applicationAccess, request)
@@ -588,7 +590,6 @@ async function sweepOrphanedPackageStaging(store: SqliteStore, worldPackages: Wo
 }
 
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error) }
-
 function resolveHarnessRoute(store: SqliteStore, request: AgentTurnRequest): HarnessModelRoute | undefined {
   const temporary = request.modelProfileId === undefined ? undefined : store.getModelProfile(request.modelProfileId)
   const profile = temporary?.workspaceId === request.agent.workspaceId

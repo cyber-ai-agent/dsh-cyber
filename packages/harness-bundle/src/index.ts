@@ -11,11 +11,12 @@ import type { ToolResultPruner } from '@deepseek-ai/dsh-compaction-tool-result-p
 import type { ApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
 
 import { registerFirecrawlWebSearch } from './web-search-firecrawl.js'
+import { registerCredentialRedaction } from './credential-redaction.js'
 
 export { Config, type JsonRpcConfig }
 
 export const name = 'dsh-cyber-sdk-jsonrpc'
-export const inject = ['agents', 'approval', 'tools', 'web']
+export const inject = ['agents', 'approval', 'tools', 'web', 'shellEnv']
 
 interface NativeApprovalRequest extends Pick<ApprovalRequestEvent, 'toolName' | 'callId' | 'signal'> {
   agent: {
@@ -38,6 +39,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
   // The 连接中心「联网搜索」Firecrawl backend. Dormant unless the host injects
   // the loopback coordinates; the DSH `web` seam selects it via `searchProvider`.
   registerFirecrawlWebSearch(ctx)
+  registerCredentialRedaction(ctx)
   registerEagerToolResultPruning(ctx)
   const rootFiber = ctx.root.fiber
   const input = config.input ?? process.stdin

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
 import { DeepSeekHarness, type HarnessNotification } from '@deepseek-ai/dsh-sdk-client'
@@ -15,10 +15,11 @@ import type {
   EmployeeInstance,
   EmployeeRevision,
   JsonObject,
+  JsonValue,
   ModelTokenUsage,
   RuntimeContextUsage,
 } from '@dsh-cyber/contracts'
-import { ContextInputTooLargeError, estimateTextTokens, planContextBudget } from '@dsh-cyber/contracts'
+import { ContextInputTooLargeError, CredentialRedactor, CREDENTIAL_VARIABLES_ENV, credentialVariableForEnvironment, estimateTextTokens, planContextBudget } from '@dsh-cyber/contracts'
 
 import { projectRecoveredHistoryPrompt, unseenHistory } from './history-prompt.js'
 import { resolveHarnessPromptCache } from './prompt-cache.js'
@@ -151,6 +152,8 @@ export interface HarnessAdapterOptions {
    * bundle default (an embedded/test harness with no web-search backend).
    */
   webSearchPlan?: WorkerWebSearchPlan
+  /** Fresh host-side credential snapshot used for event and result redaction. */
+  credentialRedactor?: (workspaceId?: string) => CredentialRedactor
   dshBinPath?: string
   /** Test/custom-runtime schema cost. Production uses the pinned real-worker value. */
   nativeToolSchemaTokens?: number
@@ -195,7 +198,8 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       ...(request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
     }
     if (request.onEvent !== undefined) {
-      const toolSubjects = new ToolTraceSubjects()
+      const redactor = this.#options.credentialRedactor?.(request.agent.workspaceId) ?? new CredentialRedactor()
+      const toolSubjects = new ToolTraceSubjects(redactor.text.bind(redactor))
       employeeRequest.onNotification = (notification) => {
         for (const event of normalizeHarnessTraceNotification(notification, toolSubjects)) {
           request.onEvent?.(event)
@@ -260,6 +264,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     task: LaneTask,
   ): Promise<EmployeeTurnResult> {
     assertLaneTaskActive(task)
+    const redactor = this.#options.credentialRedactor?.(request.employee.workspaceId) ?? new CredentialRedactor()
     const permissionMode = request.permissionMode ?? 'read-only'
     const workspacePath = resolve(request.workspacePath)
     // A changed persona, permission mode or cwd requires a new process and a
@@ -412,13 +417,18 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       ? undefined
       : (notification: HarnessNotification) => {
           observedNotification = true
-          request.onNotification?.(notification)
+          request.onNotification?.(redactHarnessNotification(notification, redactor))
         }
     try {
       assertLaneTaskActive(task)
       const result = await lane.runtime!.run(agentSessionId, prepared.prompt, onNotification, request.worldDirectory)
-      lane.retainedContextTokens += estimateRetainedTurnTokens(prepared.prompt, result) + nativeContext.retainedPerTurnTokens
-      return { agentSessionId, ...result, contextUsage: prepared.contextUsage }
+      const safeResult = {
+        ...result,
+        finalResponse: redactor.text(result.finalResponse),
+        notifications: result.notifications.map((notification) => redactHarnessNotification(notification, redactor)),
+      }
+      lane.retainedContextTokens += estimateRetainedTurnTokens(prepared.prompt, safeResult) + nativeContext.retainedPerTurnTokens
+      return { agentSessionId, ...safeResult, contextUsage: prepared.contextUsage }
     } catch (error) {
       if (task.aborted) throw error
       // The SDK server's session-create path does not resume a persisted log
@@ -718,15 +728,14 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   #createRuntime(spec: HarnessRuntimeSpec): HarnessRuntime {
+    const credentialEnvironmentNames = workerCredentialEnvironmentNames(this.#options)
     const environment = workerEnvironment(
       this.#options.inheritedEnvironment ?? process.env,
       spec,
-      [...new Set([
-        this.#options.providerProfile?.apiKeyEnv,
-        this.#options.providerProfile?.webSearch?.apiKeyEnv,
-      ].filter((value): value is string => value !== undefined))],
+      credentialEnvironmentNames,
     )
     applyWebSearchPlanToEnvironment(environment, this.#options.webSearchPlan)
+    configureCredentialVariableEnvironment(environment, credentialEnvironmentNames)
     const harness = new DeepSeekHarness({
       ...(this.#options.dshBinPath === undefined
         ? {}
@@ -780,6 +789,7 @@ export function normalizeHarnessTraceNotification(
   const sourceSessionId = stringValue(notification.params.sessionId) ?? 'unknown-session'
   const sourceSequence = numberValue(event.seq)
   const sourceTime = numberValue(event.time)
+  const redactor = toolSubjects ?? new ToolTraceSubjects()
   const make = (
     kind: AgentRuntimeEvent['kind'],
     extra: Partial<AgentRuntimeEvent> = {},
@@ -787,14 +797,14 @@ export function normalizeHarnessTraceNotification(
     const normalized: AgentRuntimeEvent = {
       kind,
       source: 'deepseek-harness',
-      sourceSessionId,
-      metadata: (extra.metadata as JsonObject | undefined) ?? {},
+      sourceSessionId: redactor.redact(sourceSessionId),
+      metadata: redactor.redactJson((extra.metadata as JsonObject | undefined) ?? {}),
     }
     if (sourceSequence !== undefined) normalized.sourceSequence = sourceSequence
     if (sourceTime !== undefined) normalized.sourceTime = sourceTime
-    if (extra.content !== undefined) normalized.content = extra.content
-    if (extra.toolName !== undefined) normalized.toolName = extra.toolName
-    if (extra.callId !== undefined) normalized.callId = extra.callId
+    if (extra.content !== undefined) normalized.content = redactor.redact(extra.content)
+    if (extra.toolName !== undefined) normalized.toolName = redactor.redact(extra.toolName)
+    if (extra.callId !== undefined) normalized.callId = redactor.redact(extra.callId)
     if (extra.failed !== undefined) normalized.failed = extra.failed
     return normalized
   }
@@ -808,11 +818,11 @@ export function normalizeHarnessTraceNotification(
       const chunkType = stringValue(chunk.type)
       if (chunkType === 'reasoning-delta') {
         const content = stringValue(chunk.text)
-        return content ? [make('reasoning.delta', { content })] : []
+        return content ? [make('reasoning.delta', { content: redactor.redact(content) })] : []
       }
       if (chunkType === 'text-delta') {
         const content = stringValue(chunk.text)
-        return content ? [make('text.delta', { content })] : []
+        return content ? [make('text.delta', { content: redactor.redact(content) })] : []
       }
       return []
     }
@@ -827,9 +837,9 @@ export function normalizeHarnessTraceNotification(
         const content = stringValue(block.text)
         if (!content) continue
         if (blockType === 'reasoning') {
-          normalized.push(make('assistant.reasoning', { content }))
+          normalized.push(make('assistant.reasoning', { content: redactor.redact(content) }))
         } else if (blockType === 'text') {
-          normalized.push(make('assistant.message', { content }))
+          normalized.push(make('assistant.message', { content: redactor.redact(content) }))
         }
       }
       return normalized
@@ -841,7 +851,7 @@ export function normalizeHarnessTraceNotification(
       const metadata: JsonObject = { approvalRequestId }
       const reason = stringValue(data.reason)
       const callId = stringValue(data.callId)
-      if (reason !== undefined) metadata.reason = reason
+      if (reason !== undefined) metadata.reason = redactor.redact(reason)
       return [make('approval.requested', {
         toolName,
         ...(callId === undefined ? {} : { callId }),
@@ -861,14 +871,13 @@ export function normalizeHarnessTraceNotification(
       const toolName = stringValue(data.name) ?? 'unknown-tool'
       const callId = stringValue(data.callId) ?? 'unknown-call'
       const metadata: JsonObject = { turn: numberValue(data.turn) ?? 0, step: numberValue(data.step) ?? 0 }
-      // The raw parameter text (clipped, never redacted) travels as the
-      // trace's "查看参数" evidence for this call.
       toolSubjects?.start(sourceSessionId, callId, toolName)
-      const summary = summarizeToolCall(data.arguments)
+      const summary = summarizeToolCall(data.arguments, redactor.redact.bind(redactor))
       if (summary !== undefined) {
         metadata.toolSummary = summary.summary
         metadata.toolDetail = summary.detail
         if (summary.truncated === true) metadata.toolDetailTruncated = true
+        if (summary.redacted === true) metadata.toolDetailRedacted = true
       }
       return [
         make('tool.started', {
@@ -885,7 +894,7 @@ export function normalizeHarnessTraceNotification(
       const failure = record(data.error)
       const failed = failure !== undefined
       const subject = toolSubjects?.complete(sourceSessionId, callId)
-      const summary = summarizeToolResult(data, subject)
+      const summary = summarizeToolResult(data, subject, redactor.redact.bind(redactor))
       const metadata: JsonObject = {
         failed,
         ...(toolSubjects === undefined ? summary : toolSubjects.deduplicateToolResult(callId, summary)),
@@ -1195,6 +1204,13 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+function redactHarnessNotification(
+  notification: HarnessNotification,
+  redactor: CredentialRedactor,
+): HarnessNotification {
+  return redactor.json(notification as unknown as JsonValue) as unknown as HarnessNotification
+}
+
 function numericMetadata(
   value: Record<string, unknown>,
   keys: readonly string[],
@@ -1338,6 +1354,41 @@ export function workerEnvironment(
   environment.DSH_TELEMETRY_DISABLED = '1'
   environment.DSH_PERMISSION_MODE = spec.permissionMode
   return environment
+}
+
+function workerCredentialEnvironmentNames(options: HarnessAdapterOptions): string[] {
+  return [...new Set([
+    'DEEPSEEK_API_KEY',
+    'DSH_CYBER_WORKER_TOKEN',
+    options.providerProfile?.apiKeyEnv,
+    options.providerProfile?.webSearch?.apiKeyEnv,
+    options.webSearchPlan?.kind === 'deepseek' ? options.webSearchPlan.apiKeyEnv : undefined,
+  ].filter((value): value is string => value !== undefined && /^[A-Z_][A-Z0-9_]*$/.test(value)))]
+}
+
+/** Add descriptor-only worker metadata and a safe prompt hint for variables. */
+function configureCredentialVariableEnvironment(
+  environment: NodeJS.ProcessEnv,
+  names: readonly string[],
+): void {
+  const descriptors = names
+    .filter((name) => typeof environment[name] === 'string' && environment[name]!.trim() !== '')
+    .map((name) => {
+      const alias = credentialEnvironmentAlias(name)
+      environment[alias] = environment[name]
+      const base = credentialVariableForEnvironment(name)
+      return { ...base, envName: alias }
+    })
+  environment[CREDENTIAL_VARIABLES_ENV] = JSON.stringify(descriptors)
+  if (descriptors.length === 0) return
+  const namesForPrompt = descriptors
+    .filter((descriptor) => descriptor.ref !== 'environment:DSH_CYBER_WORKER_TOKEN')
+    .flatMap((descriptor) => descriptor.envName === undefined ? [] : [`${descriptor.variable}（工具环境变量 ${descriptor.envName}）`])
+  environment.DSH_SYSTEM_PROMPT = `${environment.DSH_SYSTEM_PROMPT ?? ''}\n\n宿主凭证变量：${namesForPrompt.join('、')}。凭证只在受控工具边界解析；工具输出中的凭证会自动恢复为变量引用。`
+}
+
+export function credentialEnvironmentAlias(envName: string): string {
+  return `DSH_CYBER_CREDENTIAL_${createHash('sha256').update(envName).digest('hex').slice(0, 20).toUpperCase()}`
 }
 
 function employeeSystemPrompt(employee: EmployeeInstance, revision: EmployeeRevision): string {
