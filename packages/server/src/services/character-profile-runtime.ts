@@ -164,12 +164,18 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       worldId: agent.worldId,
       skillIds: revision.skillGrants,
     })
-    const recipeInstructions = this.#skills?.instructionsForCharacter({
+    const registryInstructions = this.#skills?.instructionsForCharacter({
       worldId: agent.worldId,
       characterId: agent.id,
       workspaceId: agent.workspaceId,
       grantedSkillIds,
     }) ?? []
+    const packageInstructions = await this.#skillAvailability?.instructionsForWorld?.({
+      workspaceId: agent.workspaceId,
+      worldId: agent.worldId,
+      skillIds: grantedSkillIds,
+    }) ?? []
+    const recipeInstructions = [...registryInstructions, ...packageInstructions]
     const profiledPersona = profile === undefined ? revision.persona : composeCharacterPersona(revision.persona, profile)
     // Once the authority service is composed, the compatibility pointer is no
     // longer an authorization source. The fallback only keeps isolated legacy

@@ -6,7 +6,7 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
-import { optionalString, packageManifest, readJson, requiredString } from '../http/request.js'
+import { optionalString, optionalStringArray, packageManifest, readJson, requiredEnum, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { loadInstalledBlueprints, loadInstalledPromptTransformCommands, loadInstalledSkins, type InstalledSkinManifest } from '../installed-package-runtime.js'
 import { AvatarBasePackService, OFFICIAL_AVATAR_BASE_PACK_ID } from '../services/avatar-base-pack-service.js'
@@ -176,6 +176,35 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     const workspaceId = params[0]!
     if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
     writeJson(response, 200, { items: await skillCatalog.listWorkspace(workspaceId) })
+  })
+
+  router.get(/^\/api\/workspaces\/([^/]+)\/skill-settings$/, async ({ response, params }) => {
+    const workspaceId = params[0]!
+    if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
+    writeJson(response, 200, await skillCatalog.listSettings(workspaceId))
+  })
+
+  router.put(/^\/api\/workspaces\/([^/]+)\/skill-settings$/, async ({ request, response, params }) => {
+    const workspaceId = params[0]!
+    if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
+    const body = await readJson(request)
+    const scope = requiredEnum(body, 'scope', ['workspace', 'world'])
+    const scopeId = requiredString(body, 'scopeId')
+    if (body.skillIds !== undefined && (!Array.isArray(body.skillIds) || body.skillIds.some((item) => typeof item !== 'string' || item.trim() === ''))) {
+      throw new HttpError(422, 'skill_settings_invalid', 'skillIds must be an array of non-empty Skill ids')
+    }
+    try {
+      writeJson(response, 200, await skillCatalog.saveSettings({ workspaceId, scope, scopeId, skillIds: optionalStringArray(body.skillIds), inherit: body.inherit === true }))
+    } catch (error) {
+      throw new HttpError(422, 'skill_settings_invalid', error instanceof Error ? error.message : '技能设置无效')
+    }
+  })
+
+  router.get(/^\/api\/workspaces\/([^/]+)\/skills\/([^/]+)\/detail$/, async ({ response, params }) => {
+    const workspaceId = params[0]!
+    if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
+    try { writeJson(response, 200, await skillCatalog.detailWorkspace(workspaceId, decodeURIComponent(params[1]!))) }
+    catch (error) { throw new HttpError(404, 'skill_not_found', error instanceof Error ? error.message : 'Skill not found') }
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/skill-catalog$/, async ({ request, response, params }) => {

@@ -3,17 +3,19 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { Router } from '../http/router.js'
 import { registerCharacterGeneratorRoutes, type CharacterGeneratorRoutesDependencies } from '../routes/character-generator-routes.js'
 import { registerPluginGeneratorRoutes, type PluginGeneratorRoutesDependencies } from '../routes/plugin-generator-routes.js'
+import { registerSkillAuthoringRoutes, type SkillAuthoringRoutesDependencies } from '../routes/skill-authoring-routes.js'
 import { registerSkinGeneratorRoutes, type SkinGeneratorRoutesDependencies } from '../routes/skin-generator-routes.js'
 import { registerWorldGeneratorRoutes, type WorldGeneratorRoutesDependencies } from '../routes/world-generator-routes.js'
 import type { composeCharacterGeneratorMarketplace } from '../services/character-generator-marketplace.js'
 import { CharacterImportAnalyzer, type CharacterImportAnalyzerPort } from '../services/character-import-analyzer.js'
 import type { ModelCredentialService } from '../services/model-credential-service.js'
 import { PluginImportAnalyzer, type PluginImportAnalyzerPort } from '../services/plugin-import-analyzer.js'
+import { SkillAuthoringAnalyzer, type SkillAuthoringAnalyzerPort } from '../services/skill-authoring-analyzer.js'
 import { SkinImportAnalyzer, type SkinImportAnalyzerPort } from '../services/skin-import-analyzer.js'
 import type { SkillCatalogService } from '../services/skill-catalog-service.js'
 import { WorldImportAnalyzer, type WorldImportAnalyzerPort } from '../services/world-import-analyzer.js'
 
-export type { CharacterImportAnalyzerPort, PluginImportAnalyzerPort, SkinImportAnalyzerPort, WorldImportAnalyzerPort }
+export type { CharacterImportAnalyzerPort, PluginImportAnalyzerPort, SkillAuthoringAnalyzerPort, SkinImportAnalyzerPort, WorldImportAnalyzerPort }
 
 /** Analyzer overrides; tests and CI pass deterministic stubs so no run calls a cloud model. */
 export interface GeneratorAnalyzerOverrides {
@@ -21,6 +23,7 @@ export interface GeneratorAnalyzerOverrides {
   worldImportAnalyzer?: WorldImportAnalyzerPort
   skinImportAnalyzer?: SkinImportAnalyzerPort
   pluginImportAnalyzer?: PluginImportAnalyzerPort
+  skillAuthoringAnalyzer?: SkillAuthoringAnalyzerPort
 }
 
 /**
@@ -36,7 +39,7 @@ export function composeGenerators(options: {
   store: SqliteStore
   credentials: ModelCredentialService
   skillCatalog: SkillCatalogService
-  packageCatalog: CharacterGeneratorRoutesDependencies['packageCatalog'] & WorldGeneratorRoutesDependencies['packageCatalog'] & SkinGeneratorRoutesDependencies['packageCatalog'] & PluginGeneratorRoutesDependencies['packageCatalog']
+  packageCatalog: CharacterGeneratorRoutesDependencies['packageCatalog'] & WorldGeneratorRoutesDependencies['packageCatalog'] & SkinGeneratorRoutesDependencies['packageCatalog'] & PluginGeneratorRoutesDependencies['packageCatalog'] & SkillAuthoringRoutesDependencies['packageCatalog']
   marketplace: Awaited<ReturnType<typeof composeCharacterGeneratorMarketplace>>
   overrides: GeneratorAnalyzerOverrides
 }): { registerGeneratorRoutes(router: Router): void } {
@@ -45,6 +48,7 @@ export function composeGenerators(options: {
   const worldAnalyzer = overrides.worldImportAnalyzer ?? new WorldImportAnalyzer(store, credentials, skillCatalog)
   const skinAnalyzer = overrides.skinImportAnalyzer ?? new SkinImportAnalyzer(store, credentials)
   const pluginAnalyzer = overrides.pluginImportAnalyzer ?? new PluginImportAnalyzer(store, credentials)
+  const skillAnalyzer = overrides.skillAuthoringAnalyzer ?? new SkillAuthoringAnalyzer(store, credentials)
   const roots = { resolveMarketplaceRoot: marketplace.resolveMarketplaceRoot, containmentRoot: marketplace.containmentRoot }
   return {
     registerGeneratorRoutes(router) {
@@ -52,6 +56,7 @@ export function composeGenerators(options: {
       registerWorldGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: worldAnalyzer, ...roots })
       registerSkinGeneratorRoutes(router, { store, packageCatalog, analyzer: skinAnalyzer, ...roots })
       registerPluginGeneratorRoutes(router, { store, packageCatalog, analyzer: pluginAnalyzer, ...roots })
+      registerSkillAuthoringRoutes(router, { store, packageCatalog, analyzer: skillAnalyzer, ...roots })
     },
   }
 }

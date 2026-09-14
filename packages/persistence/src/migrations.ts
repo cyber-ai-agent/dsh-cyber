@@ -2505,6 +2505,30 @@ const MIGRATIONS: readonly Migration[] = [
         );
     `,
   },
+  {
+    version: 54,
+    name: 'skill-scope-settings',
+    sql: `
+      CREATE TABLE IF NOT EXISTS skill_scope_settings (
+        workspace_id TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (scope IN ('workspace', 'world')),
+        scope_id TEXT NOT NULL,
+        world_id TEXT,
+        skill_ids_json TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (workspace_id, scope, scope_id),
+        CHECK (
+          (scope = 'workspace' AND scope_id = workspace_id AND world_id IS NULL)
+          OR (scope = 'world' AND scope_id = world_id)
+        ),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id, world_id) REFERENCES worlds(workspace_id, id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS skill_scope_settings_workspace_scope_idx
+        ON skill_scope_settings(workspace_id, scope, scope_id);
+    `,
+  },
 ]
 
 /**

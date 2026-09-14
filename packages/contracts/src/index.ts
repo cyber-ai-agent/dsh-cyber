@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 53 as const
+export const CYBER_SCHEMA_VERSION = 54 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -1547,6 +1547,7 @@ export * from './character-generator.js'
 export * from './world-generator.js'
 export * from './skin-generator.js'
 export * from './plugin-generator.js'
+export * from './skill-center.js'
 export * from './context-budget.js'
 export * from './context-envelope.js'
 export * from './environment-profile.js'

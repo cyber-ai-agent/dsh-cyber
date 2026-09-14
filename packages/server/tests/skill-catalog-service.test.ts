@@ -146,6 +146,43 @@ describe('SkillCatalogService', () => {
     })
     expect(item?.routingHints).toEqual(['搜索官网', 'firecrawl search'])
   })
+
+  it('applies global defaults and exact World overrides without copying Skill definitions', async () => {
+    const workspace: Workspace = { id: 'workspace-scope', name: '技能范围', status: 'active', createdAt: '2026-09-14T00:00:00.000Z', updatedAt: '2026-09-14T00:00:00.000Z' }
+    const world: World = { id: 'world-scope', workspaceId: workspace.id, name: '研发世界', templateId: 'personal-world', status: 'active', createdAt: workspace.createdAt, updatedAt: workspace.updatedAt }
+    const records = new Map<string, { workspaceId: string; scope: 'workspace' | 'world'; scopeId: string; skillIds: string[]; updatedAt: string }>()
+    const scopeSettings = {
+      get: (_workspaceId: string, scope: 'workspace' | 'world', scopeId: string) => records.get(`${scope}:${scopeId}`),
+      save: (input: { workspaceId: string; scope: 'workspace' | 'world'; scopeId: string; skillIds: readonly string[] }) => { const value = { ...input, skillIds: [...input.skillIds], updatedAt: workspace.updatedAt }; records.set(`${input.scope}:${input.scopeId}`, value); return value },
+      clear: (_workspaceId: string, scope: 'workspace' | 'world', scopeId: string) => records.delete(`${scope}:${scopeId}`),
+    }
+    const service = new SkillCatalogService({
+      store: { getWorkspace: (id: string) => id === workspace.id ? workspace : undefined, getWorld: (id: string) => id === world.id ? world : undefined, listWorlds: () => [world], listInstalledPackages: () => [] },
+      registry: { list: () => [descriptor('coding', '软件实现', 'builtin.recipe', 'recipe'), descriptor('testing', '测试验证', 'builtin.recipe', 'recipe')] },
+      worldPackages: { listRuntimePackages: async () => [] }, scopeSettings,
+    })
+    await service.saveSettings({ workspaceId: workspace.id, scope: 'workspace', scopeId: workspace.id, skillIds: ['coding'] })
+    expect(Object.fromEntries((await service.listWorld(world.id)).map((item) => [item.id, item.worldAvailable]))).toEqual({ coding: true, testing: false })
+    await service.saveSettings({ workspaceId: workspace.id, scope: 'world', scopeId: world.id, skillIds: ['testing'] })
+    expect(Object.fromEntries((await service.listWorld(world.id)).map((item) => [item.id, item.worldAvailable]))).toEqual({ coding: false, testing: true })
+    expect((await service.listSettings(workspace.id)).worlds[0]).toMatchObject({ configured: true, inherited: false, skillIds: ['testing'] })
+  })
+
+  it('loads generated declarative recipes without an executable Adapter and exposes their file tree', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-skill-recipe-')); roots.push(root)
+    const workspace: Workspace = { id: 'workspace-recipe', name: '技能编写', status: 'active', createdAt: '2026-09-14T00:00:00.000Z', updatedAt: '2026-09-14T00:00:00.000Z' }
+    const world: World = { id: 'world-recipe', workspaceId: workspace.id, name: '技能世界', templateId: 'personal-world', status: 'active', createdAt: workspace.createdAt, updatedAt: workspace.updatedAt }
+    const installed = await recipePackage(root, workspace.id)
+    const service = new SkillCatalogService({
+      store: { getWorkspace: (id: string) => id === workspace.id ? workspace : undefined, getWorld: (id: string) => id === world.id ? world : undefined, listWorlds: () => [world], listInstalledPackages: () => [installed] },
+      registry: { list: () => [] }, worldPackages: { listRuntimePackages: async () => [installed] },
+    })
+    expect(await service.listWorld(world.id)).toContainEqual(expect.objectContaining({ id: 'custom.release-check', kind: 'recipe', adapterId: 'builtin.recipe', worldAvailable: true }))
+    expect(await service.instructionsForWorld({ workspaceId: workspace.id, worldId: world.id, skillIds: ['custom.release-check'] })).toEqual(['发布检查：核对测试、版本和回滚方案。'])
+    const detail = await service.detailWorkspace(workspace.id, 'custom.release-check')
+    expect(detail).toMatchObject({ editable: true, packageId: installed.packageId, tree: expect.arrayContaining([{ path: 'SKILL.md', kind: 'file' }]) })
+    expect(detail.files.find((file) => file.path === 'SKILL.md')?.content).toContain('## 使用说明')
+  })
 })
 
 function find(items: SkillCatalogEntry[], id: string): SkillCatalogEntry {
@@ -193,4 +230,12 @@ async function skillPackage(root: string, packageId = 'official-firecrawl-search
     installedPath: root, capabilities: manifest.capabilities, manifest,
     installedAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z',
   }
+}
+
+async function recipePackage(root: string, workspaceId: string): Promise<InstalledPackage> {
+  const skill = JSON.stringify({ schemaVersion: 1, id: 'custom.release-check', displayName: '发布检查', summary: '检查发布条件。', routingHints: ['发布'], integrationId: 'builtin.recipe', dataEgress: [], instructions: '核对测试、版本和回滚方案。' }, null, 2)
+  const markdown = '# 发布检查\n\n## 使用说明\n\n核对测试、版本和回滚方案。\n'
+  await writeFile(join(root, 'skill.json'), skill, 'utf8'); await writeFile(join(root, 'SKILL.md'), markdown, 'utf8')
+  const manifest: CyberPackageManifest = { schemaVersion: 1, id: 'generated.skill.release-check', version: '1.0.0', kind: 'skill', displayName: '发布检查', summary: '检查发布条件。', license: 'MIT', publisher: 'DSH Cyber Skill Center', capabilities: ['skill:recipe'], dataEgress: [], files: [{ path: 'skill.json', sha256: createHash('sha256').update(skill).digest('hex') }, { path: 'SKILL.md', sha256: createHash('sha256').update(markdown).digest('hex') }], entrypoints: [{ id: 'custom.release-check', kind: 'skill', path: 'skill.json' }] }
+  return { workspaceId, packageId: manifest.id, version: manifest.version, kind: 'skill', status: 'active', installedPath: root, capabilities: manifest.capabilities, manifest, installedAt: '2026-09-14T00:00:00.000Z', updatedAt: '2026-09-14T00:00:00.000Z' }
 }
