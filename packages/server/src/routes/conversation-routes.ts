@@ -442,6 +442,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     try {
     let result
     let responseStatus = 200
+    let effectiveGroupMode: WorkSessionCollaborationMode | undefined
     if (employeeIds.length === 1) {
       const character = store.getEmployee(employeeIds[0]!)
       if (character === undefined || character.worldId !== world.id) {
@@ -694,6 +695,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     } else {
       if (!claimedGroup) startTaskIntent()
       const effectiveCollaborationMode = collaborationMode ?? 'discussion'
+      effectiveGroupMode = effectiveCollaborationMode
       // The host intent core is authoritative for this turn. Client hints and
       // a legacy session mode cannot make a discussion look like a task (or
       // vice versa) in durable history.
@@ -821,6 +823,20 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           employeeIds: immediateEmployeeIds,
           runtimePrompt: await runtimeContext.composeGroupRuntimePrompt(world.id, transformedPrompt),
         })
+      }
+    }
+    const resultRecord = record(result)
+    const resultSession = record(resultRecord?.session)
+    const resultSessionId = typeof resultSession?.id === 'string' ? resultSession.id : undefined
+    if (effectiveGroupMode !== undefined && resultSessionId !== undefined) {
+      const session = store.getSession(resultSessionId)
+      if (session?.kind === 'group') {
+        const updated = store.updateSessionCollaborationMode({
+          sessionId: resultSessionId,
+          collaborationMode: effectiveGroupMode,
+          actorId: 'owner',
+        })
+        result = { ...resultRecord, session: updated }
       }
     }
     // An immediate send has already waited for the turn the classification was

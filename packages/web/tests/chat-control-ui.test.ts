@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
-import { ChatWorkbench } from '../src/components/ChatWorkbench.js'
+import { ChatWorkbench, summarizeChatQueue } from '../src/components/ChatWorkbench.js'
 import type { ComposerAttachmentDraft } from '../src/composer-draft-store.js'
 import type { CyberEmployee } from '../src/types.js'
 
@@ -15,6 +15,19 @@ afterEach(() => {
 })
 
 describe('Chat control UI', () => {
+  it('derives active, queued and saturated composer state in one stable projection', () => {
+    const createdAt = new Date(0).toISOString()
+    const summary = summarizeChatQueue([
+      { id: 'running-a', queueKey: 'group:one', worldId: 'world-1', employeeIds: ['employee-a'], title: '运行 A', status: 'running', createdAt },
+      { id: 'running-b', queueKey: 'group:one', worldId: 'world-1', employeeIds: ['employee-a'], title: '运行 B', status: 'running', createdAt },
+      { id: 'queued-low', queueKey: 'group:one', worldId: 'world-1', employeeIds: ['employee-a'], title: '普通', status: 'queued', createdAt, priority: 0 },
+      { id: 'queued-high', queueKey: 'group:one', worldId: 'world-1', employeeIds: ['employee-a'], title: '优先', status: 'queued', createdAt, priority: 2 },
+    ])
+    expect(summary.activeTurn?.id).toBe('running-a')
+    expect(summary.queuedTurns.map((turn) => turn.id)).toEqual(['queued-high', 'queued-low'])
+    expect(summary).toMatchObject({ hasRunningTurn: true, saturatedWaiting: true })
+  })
+
   it('uploads an image pasted into the composer and shows it as an attachment', async () => {
     const employee = { id: 'employee-paste', displayName: '粘贴角色', role: '分析', avatarIndex: 0, currentActivity: '等待处理' } as CyberEmployee
     const world = { id: 'world-paste', workspaceId: 'workspace-paste', name: '粘贴测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World

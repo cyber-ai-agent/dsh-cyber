@@ -65,14 +65,12 @@ test('routes task collaboration to matching roles while discussion keeps all rou
   expect(taskPlanResponse.plan.steps.flatMap((step) => step.assignedEmployeeIds)).toEqual(expect.arrayContaining([employees[0]!.id, employees[1]!.id]))
   expect(taskPlanResponse.plan.steps.flatMap((step) => step.assignedEmployeeIds)).not.toContain(employees[2]!.id)
   expect(taskPlanResponse.plan.steps.flatMap((step) => step.requiredSkills)).toEqual(expect.arrayContaining(['web.search.firecrawl', 'coding']))
-  await expect(page.getByRole('region', { name: '当前世界多角色会话' }).locator('.task-collaboration-summary')).toHaveCount(0)
+  const collaborationSummary = page.getByRole('region', { name: '当前世界多角色会话' }).getByRole('region', { name: '协作分配' })
+  await expect(collaborationSummary).toBeVisible()
+  await expect(collaborationSummary).toContainText('网络研究员')
+  await expect(collaborationSummary).toContainText('软件实现员')
+  await expect(page.getByRole('region', { name: '当前世界多角色会话' }).locator('.chat-header__identity p')).toContainText('协作')
   expect(await page.locator('.message').evaluateAll((items) => items.some((item) => /tool-call|reasoning|调用工具|推理/.test(item.textContent ?? '')))).toBe(false)
-
-  runtime.requests.length = 0
-  const discussionChat = await postJson(`${origin}/api/worlds/${world.id}/chat`, { sessionId: taskSession!.id, employeeIds: employees.map((employee) => employee.id), prompt: '讨论官网分析页的方向' })
-  expect(discussionChat.status).toBe(200)
-  await expect.poll(() => runtime.requests.length).toBe(3)
-  expect(runtime.requests.map((request) => request.agent.id)).toEqual(expect.arrayContaining(employees.map((employee) => employee.id)))
 
   const screenshotRoot = join(process.cwd(), 'artifacts', 'group-task-router')
   await mkdir(screenshotRoot, { recursive: true })
@@ -81,15 +79,36 @@ test('routes task collaboration to matching roles while discussion keeps all rou
     const region = page.getByRole('region', { name: '当前世界多角色会话' })
     const layout = await region.evaluate((element) => {
       const bounds = element.getBoundingClientRect()
+      const composer = element.querySelector<HTMLElement>('.composer-zone')?.getBoundingClientRect()
       const offenders = [...element.querySelectorAll<HTMLElement>('*')]
         .filter((child) => child.getBoundingClientRect().right > bounds.right + 1)
         .slice(0, 8)
         .map((child) => ({ className: child.className, right: Math.round(child.getBoundingClientRect().right), width: Math.round(child.getBoundingClientRect().width) }))
-      return { scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, offenders }
+      return {
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+        regionTop: Math.round(bounds.top),
+        regionBottom: Math.round(bounds.bottom),
+        composerTop: composer === undefined ? undefined : Math.round(composer.top),
+        composerBottom: composer === undefined ? undefined : Math.round(composer.bottom),
+        offenders,
+      }
     })
     expect(layout.scrollWidth, JSON.stringify(layout)).toBeLessThanOrEqual(layout.clientWidth + 1)
+    expect(layout.composerTop, JSON.stringify(layout)).toBeGreaterThanOrEqual(layout.regionTop)
+    expect(layout.composerBottom, JSON.stringify(layout)).toBeLessThanOrEqual(layout.regionBottom + 1)
     await page.screenshot({ path: join(screenshotRoot, `group-task-${viewport.label}.png`) })
   }
+
+  runtime.requests.length = 0
+  const discussionChat = await postJson(`${origin}/api/worlds/${world.id}/chat`, { sessionId: taskSession!.id, employeeIds: employees.map((employee) => employee.id), prompt: '讨论官网分析页的方向' })
+  expect(discussionChat.status).toBe(200)
+  await expect.poll(() => runtime.requests.length).toBe(3)
+  expect(runtime.requests.map((request) => request.agent.id)).toEqual(expect.arrayContaining(employees.map((employee) => employee.id)))
+  await page.reload()
+  await expect(page.locator('.workbench-shell')).toBeVisible()
+  await expect(page.getByRole('region', { name: '当前世界多角色会话' }).locator('.chat-header__identity p')).toContainText('讨论')
+  await expect(page.getByRole('region', { name: '当前世界多角色会话' }).getByRole('region', { name: '协作分配' })).toHaveCount(0)
   await writeFile(join(screenshotRoot, 'console.log'), consoleIssues.length === 0 ? 'No console errors or warnings.\n' : `${consoleIssues.join('\n')}\n`, 'utf8')
   expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
 })
