@@ -37,9 +37,12 @@ import { ComposerReplySpeaker } from '../features/voice/ComposerReplySpeaker.js'
 import type { SpeechInputSurface } from '../features/voice/SpeechCoordinator.js'
 import { VoiceConversationControl } from '../features/voice/VoiceConversationControl.js'
 import type { ComposerAttachmentDraft } from '../composer-draft-store.js'
+import { collaborationModeOf } from './group-collaboration.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
 const ArtifactReferenceCards = lazy(async () => ({ default: (await import('../features/artifacts/ArtifactCenter.js')).ArtifactReferenceCards }))
+const TaskCollaborationSummary = lazy(async () => ({ default: (await import('./TaskCollaborationSummary.js')).TaskCollaborationSummary }))
+const EMPTY_PARTICIPANT_IDS: string[] = []
 
 interface ChatWorkbenchProps {
   demoMode: boolean
@@ -96,7 +99,7 @@ interface ChatWorkbenchProps {
   speechConversationKey?: string
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onEditQueuedTurn, onPromoteQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = EMPTY_PARTICIPANT_IDS, messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onEditQueuedTurn, onPromoteQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -159,27 +162,22 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [topicNotice, setTopicNotice] = useState(false)
   const experience = worldExperience(world)
+  const employeeById = useMemo(() => new Map(employees.map((employee) => [employee.id, employee])), [employees])
   const mention = useMemo(() => currentMention(draft), [draft])
   const suggestions = useMemo(() => mention === undefined ? [] : employees.filter((employee) => employee.displayName.includes(mention)).slice(0, 6), [employees, mention])
-  const participantEmployees = participantIds.map((employeeId) => employees.find((employee) => employee.id === employeeId)).filter((employee): employee is CyberEmployee => employee !== undefined)
+  const participantEmployees = useMemo(() => participantIds
+    .map((employeeId) => employeeById.get(employeeId))
+    .filter((employee): employee is CyberEmployee => employee !== undefined), [employeeById, participantIds])
   const conversationKind = session?.kind ?? intent?.kind
+  const collaborationMode = collaborationModeOf(session)
   const directEmployee = conversationKind === 'direct' ? participantEmployees[0] : undefined
   const conversationTitle = conversationKind === 'direct'
     ? directEmployee?.displayName ?? displayDirectConversationTitle(session?.title ?? intent?.title) ?? '选择角色开始对话'
     : session?.title ?? intent?.title ?? '选择角色开始对话'
   const visibleMessages = useMemo(() => messages.filter(isChatMessage), [messages])
-  const runningLaneCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const turn of queueItems) if (turn.status === 'running') for (const employeeId of turn.employeeIds) counts.set(employeeId, (counts.get(employeeId) ?? 0) + 1)
-    return counts
-  }, [queueItems])
-  const saturatedWaiting = queueItems.some((turn) => turn.status === 'queued' && turn.employeeIds.some((employeeId) => (runningLaneCounts.get(employeeId) ?? 0) >= 2))
-  const activeTurn = useMemo(() => queueItems.find((turn) => turn.status === 'running' || turn.status === 'waiting-approval'), [queueItems])
-  const queuedTurns = useMemo(() => queueItems
-    .filter((turn) => turn.status === 'queued')
-    .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0) || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)), [queueItems])
-  const canStopCurrentTurn = activeTurn !== undefined && onStopTurn !== undefined
-  const hasRunningTurn = queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping')
+  const queueSummary = useMemo(() => summarizeChatQueue(queueItems), [queueItems])
+  const { activeTurn, hasRunningTurn, queuedTurns, saturatedWaiting } = queueSummary
+  const canStopCurrentTurn = activeTurn !== undefined && activeTurn.status !== 'stopping' && onStopTurn !== undefined
   const insertsNext = hasRunningTurn || queuedTurns.length > 0
   const nextQueueMode = hasRunningTurn && queuedTurns.length === 0 ? 'next' : 'normal'
   const readyAttachments = attachments.flatMap((item) => item.status === 'ready' && item.attachment !== undefined ? [item.attachment] : [])
@@ -188,6 +186,19 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     ? undefined
     : attachmentError.message
   const showStopButton = canStopCurrentTurn && draft.trim().length === 0 && attachments.length === 0
+  const groupModeLabel = collaborationMode === 'task'
+    ? t('workbench.groupModeTask', '协作')
+    : t('workbench.groupModeDiscussion', '讨论')
+  const activeTurnLabel = activeTurn?.status === 'waiting-approval'
+    ? t('status.waiting-approval', '等待审批')
+    : activeTurn?.status === 'stopping'
+      ? t('status.interrupted', '正在停止')
+      : activeTurn === undefined ? undefined : t('status.running', '进行中')
+  const conversationSubtitle = conversationKind === undefined
+    ? '从左侧会话列表进入私聊，或创建群聊'
+    : conversationKind === 'group'
+      ? `群聊 · ${world.name} · ${groupModeLabel}${activeTurnLabel === undefined ? '' : ` · ${activeTurnLabel}`}`
+      : `私聊 · ${world.name}`
 
   useEffect(() => {
     setAttachmentError(undefined)
@@ -577,7 +588,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               ? <button className="chat-header__avatar-button" type="button" onClick={() => onOpenDossier(directEmployee.id)} aria-label={`打开${directEmployee.displayName}角色`} title={`打开${directEmployee.displayName}角色`}><Avatar index={directEmployee.avatarIndex} size="sm" label={directEmployee.displayName} authorityRole={directEmployee.authorityRole} assetUrl={directEmployee.avatarAssetUrl} rendererKind={directEmployee.avatarProfile?.rendererKind} /></button>
               : <GroupAvatar participants={participantEmployees} size="md" />}
           </span>
-          <span><h1>{conversationTitle}{conversationKind === 'direct' ? <AuthorityBadge role={directEmployee?.authorityRole} /> : null}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${world.name}`}</p></span>
+          <span><h1>{conversationTitle}{conversationKind === 'direct' ? <AuthorityBadge role={directEmployee?.authorityRole} /> : null}</h1><p aria-live="polite">{conversationSubtitle}</p></span>
         </div>
         <div className="chat-header__actions">
           {onOpenHistory === undefined || session === undefined ? null : <button className="chat-header__history" type="button" aria-label={t('workbench.history', '查看历史消息')} title={t('workbench.history', '查看历史消息')} onClick={onOpenHistory}><ClockCounterClockwise size={19} /><span>{t('workbench.history', '查看历史消息')}</span></button>}
@@ -586,6 +597,9 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
 
       <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={pendingCount > 0 || sending} onScroll={updateScrollIntent} onWheelCapture={(event) => { if (event.deltaY < 0) shouldFollowOutputRef.current = false }}>
         <div className="conversation-column">
+          {conversationKind === 'group' && collaborationMode === 'task' && session !== undefined
+            ? <Suspense fallback={<p className="task-collaboration-summary task-collaboration-summary__empty" role="status">正在读取任务分配…</p>}><TaskCollaborationSummary sessionId={session.id} employees={employees} demoMode={demoMode} /></Suspense>
+            : null}
           {hasOlderMessages && onLoadOlderMessages !== undefined ? <button className="message-history-more" type="button" disabled={loadingOlderMessages} onClick={loadOlderMessages}>{loadingOlderMessages ? <CircleNotch size={15} className="spin" /> : <ArrowUp size={15} />}<span>{loadingOlderMessages ? '正在加载更早消息…' : '加载更早消息'}</span></button> : null}
           {visibleMessages.length === 0 ? (
             <div className="conversation-empty">
@@ -594,7 +608,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '发送消息后，系统会根据意图自动组织讨论或分工协作；执行细节统一进入轨迹。' : conversationKind === 'direct' ? t('workbench.startChatHint', '历史记录保留在当前世界；发送消息后角色才会开始处理。') : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
             </div>
           ) : visibleMessages.map((message) => {
-            const employee = employees.find((item) => item.id === message.senderId)
+            const employee = employeeById.get(message.senderId)
             const owner = message.senderKind === 'owner'
             const streaming = message.metadata.streaming === true
             if (message.kind === 'system') return <div key={message.id} className="chat-system-notice" role="status">{message.content}</div>
@@ -703,6 +717,46 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </div>, document.body) : null}
     </section>
   )
+}
+
+export interface ChatQueueSummary {
+  activeTurn?: PendingChatTurn
+  queuedTurns: PendingChatTurn[]
+  hasRunningTurn: boolean
+  saturatedWaiting: boolean
+}
+
+/** Derive every composer queue state in one pass, then sort only queued rows. */
+export function summarizeChatQueue(queueItems: readonly PendingChatTurn[]): ChatQueueSummary {
+  const runningLaneCounts = new Map<string, number>()
+  const queuedTurns: PendingChatTurn[] = []
+  let activeTurn: PendingChatTurn | undefined
+  let hasRunningTurn = false
+  for (const turn of queueItems) {
+    if (turn.status === 'queued') {
+      queuedTurns.push(turn)
+      continue
+    }
+    if (turn.status !== 'running' && turn.status !== 'waiting-approval' && turn.status !== 'stopping') continue
+    hasRunningTurn = true
+    activeTurn ??= turn
+    if (turn.status !== 'running') continue
+    for (const employeeId of turn.employeeIds) {
+      runningLaneCounts.set(employeeId, (runningLaneCounts.get(employeeId) ?? 0) + 1)
+    }
+  }
+  queuedTurns.sort((left, right) =>
+    (right.priority ?? 0) - (left.priority ?? 0)
+    || left.createdAt.localeCompare(right.createdAt)
+    || left.id.localeCompare(right.id))
+  const saturatedWaiting = queuedTurns.some((turn) =>
+    turn.employeeIds.some((employeeId) => (runningLaneCounts.get(employeeId) ?? 0) >= 2))
+  return {
+    ...(activeTurn === undefined ? {} : { activeTurn }),
+    queuedTurns,
+    hasRunningTurn,
+    saturatedWaiting,
+  }
 }
 
 function displayDirectConversationTitle(title: string | undefined): string | undefined {

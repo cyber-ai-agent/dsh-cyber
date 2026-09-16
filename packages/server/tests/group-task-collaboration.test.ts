@@ -151,6 +151,7 @@ describe('Group Task Collaboration server flow', () => {
     }))
     expect(routedTask.response.status).toBe(200)
     expect(routedTask.body.collaborationMode).toBe('task')
+    expect(routedTask.body.session.collaborationMode).toBe('task')
 
     // A client task hint cannot turn an open-ended question into an execution.
     const discussionTurn = await json(origin, `/api/worlds/${world.id}/chat`, post({
@@ -162,6 +163,7 @@ describe('Group Task Collaboration server flow', () => {
     }))
     expect(discussionTurn.response.status).toBe(200)
     expect(discussionTurn.body.collaborationMode).toBeUndefined()
+    expect(discussionTurn.body.session.collaborationMode).toBe('discussion')
     const turns = await json(origin, `/api/sessions/${discussion.body.session.id}/turns`)
     expect(turns.response.status).toBe(200)
     expect(turns.body.items.map((turn: { interactionKind: string }) => turn.interactionKind)).toEqual(expect.arrayContaining(['task', 'meeting']))

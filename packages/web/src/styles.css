@@ -1757,7 +1757,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .task-collaboration-summary > header > div { display: grid; gap: 2px; }
 .task-collaboration-summary > header strong { color: var(--text); font-size: 13px; }
 .task-collaboration-summary > header span, .task-collaboration-summary__empty { color: var(--text-muted); font-size: 12px; }
-.task-collaboration-summary ol { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.task-collaboration-summary ol { max-height: min(220px, 34vh); display: grid; gap: 5px; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
 .task-collaboration-step { min-height: 44px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); background: var(--surface-0); }
 .task-collaboration-step__icon { display: grid; place-items: center; color: var(--accent-strong); }
 .task-collaboration-step__dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
