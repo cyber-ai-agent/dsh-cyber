@@ -6,7 +6,7 @@ import {
   type JsonRpcConfig,
 } from '@deepseek-ai/dsh-sdk-jsonrpc-server'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
-import { SessionSeq, type Session } from '@deepseek-ai/dsh-session'
+import type { Session } from '@deepseek-ai/dsh-session'
 import type { ToolResultPruner } from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import type { ApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
 
@@ -20,8 +20,14 @@ export const inject = ['agents', 'approval', 'tools', 'web', 'shellEnv']
 
 interface NativeApprovalRequest extends Pick<ApprovalRequestEvent, 'toolName' | 'callId' | 'signal'> {
   agent: {
-    session: Pick<Session, 'seq' | 'eventAt'>
+    session: Session
   }
+}
+
+export interface PendingApprovalQuestion {
+  id: string
+  toolName: string
+  callId?: string
 }
 
 interface PendingApproval {
@@ -41,6 +47,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
   registerFirecrawlWebSearch(ctx)
   registerCredentialRedaction(ctx)
   registerEagerToolResultPruning(ctx)
+  const approvalQuestions = registerApprovalQuestionTracking(ctx)
   const rootFiber = ctx.root.fiber
   const input = config.input ?? process.stdin
   const output = config.output ?? process.stdout
@@ -69,7 +76,10 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
 
   ctx.on('approval/request', async (request) => {
     if (request.signal?.aborted) return 'cancelled'
-    const approvalRequestId = latestApprovalRequestId(request)
+    const approvalRequestId = latestApprovalRequestId(
+      request,
+      approvalQuestions.get(request.agent.session) ?? [],
+    )
     if (approvalRequestId === undefined || pending.has(approvalRequestId)) return 'unavailable'
     return await new Promise<ApprovalOutcome>((resolvePromise) => {
       let settled = false
@@ -117,53 +127,65 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
  * request while preserving the package's durable shadow-price replacement.
  */
 function registerEagerToolResultPruning(ctx: Context): void {
-  const scannedThrough = new WeakMap<Session, number>()
+  const dirty = new WeakSet<Session>()
+  ctx.on('session/created', (session) => { dirty.add(session) }, { global: true })
+  ctx.on('session/event', (session, event) => {
+    if (event.type === 'tool/result') dirty.add(session)
+  }, { global: true })
   ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
-    if (!signal.aborted) {
-      const currentSeq = Number(agent.session.seq)
-      const previousSeq = scannedThrough.get(agent.session) ?? 0
-      let hasToolResult = false
-      for (let seq = previousSeq; seq < currentSeq; seq += 1) {
-        if (agent.session.eventAt(SessionSeq(seq))?.type === 'tool/result') {
-          hasToolResult = true
-          break
-        }
-      }
+    if (!signal.aborted && dirty.has(agent.session)) {
       const pruner = ctx.get('toolResultPruner') as ToolResultPruner | undefined
-      if (hasToolResult && pruner !== undefined) {
+      if (pruner !== undefined) {
         try {
           pruner.pruneSession(agent.session)
-          scannedThrough.set(agent.session, Number(agent.session.seq))
+          dirty.delete(agent.session)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           ctx.logger.warn(`early tool-result pruning failed: ${message}`)
         }
-      } else {
-        scannedThrough.set(agent.session, currentSeq)
       }
     }
     return next()
   })
 }
 
-export function latestApprovalRequestId(request: NativeApprovalRequest): string | undefined {
-  const session = request.agent.session
-  const decided = new Set<string>()
-  // 0.1.5-rc.2 keeps Session.events private. Read backwards without copying the full log,
-  // and never attach an approval to an earlier turn or a settled question.
-  for (let index = Number(session.seq) - 1; index >= 0; index -= 1) {
-    const event = session.eventAt(SessionSeq(index))
-    if (event?.type === 'turn/start' || event?.type === 'turn/end') break
-    if (event?.type === 'approval/decided') {
-      decided.add(event.data.id)
-      continue
+function registerApprovalQuestionTracking(ctx: Context): WeakMap<Session, PendingApprovalQuestion[]> {
+  const questions = new WeakMap<Session, PendingApprovalQuestion[]>()
+  ctx.on('session/event', (session, event) => {
+    if (event.type === 'turn/start' || event.type === 'turn/end') {
+      questions.delete(session)
+      return
     }
-    if (event?.type !== 'approval/asked') continue
-    if (event.data.toolName !== request.toolName) continue
-    if (request.callId !== undefined && event.data.callId !== request.callId) continue
-    const id = event.data.id
-    if (typeof id !== 'string' || id.length === 0 || decided.has(id)) continue
-    return id
+    if (event.type === 'approval/asked') {
+      const current = questions.get(session) ?? []
+      current.push({
+        id: event.data.id,
+        toolName: event.data.toolName,
+        ...(event.data.callId === undefined ? {} : { callId: event.data.callId }),
+      })
+      questions.set(session, current)
+      return
+    }
+    if (event.type === 'approval/decided') {
+      const current = questions.get(session)
+      if (current === undefined) return
+      const remaining = current.filter((question) => question.id !== event.data.id)
+      if (remaining.length === 0) questions.delete(session)
+      else questions.set(session, remaining)
+    }
+  }, { global: true })
+  return questions
+}
+
+export function latestApprovalRequestId(
+  request: Pick<NativeApprovalRequest, 'toolName' | 'callId'>,
+  questions: readonly PendingApprovalQuestion[],
+): string | undefined {
+  for (let index = questions.length - 1; index >= 0; index -= 1) {
+    const question = questions[index]!
+    if (question.toolName !== request.toolName) continue
+    if (request.callId !== undefined && question.callId !== request.callId) continue
+    if (question.id.length > 0) return question.id
   }
   return undefined
 }

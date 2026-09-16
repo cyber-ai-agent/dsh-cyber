@@ -18,21 +18,7 @@ await Promise.all([
   import('./i18n/shell-messages.js'),
   import('./i18n/workbench-messages.js'),
   import('./i18n/appearance-messages.js'),
-  import('./i18n/workshop-messages.js'),
-  import('./i18n/group-turn-messages.js'),
-  import('./i18n/world-settings-messages.js'),
   import('./i18n/world-library-messages.js'),
-  import('./i18n/world-scene-messages.js'),
-  import('./i18n/skin-editor-messages.js'),
-  import('./i18n/knowledge-messages.js'),
-  import('./i18n/context-inspector-messages.js'),
-  import('./i18n/character-generator-messages.js'),
-  import('./i18n/world-generator-messages.js'),
-  import('./i18n/skin-generator-messages.js'),
-  import('./i18n/plugin-generator-messages.js'),
-  import('./i18n/model-hub-messages.js'),
-  import('./i18n/connection-hub-messages.js'),
-  import('./i18n/machine-profile-messages.js'),
 ])
 
 const root = document.getElementById('root')

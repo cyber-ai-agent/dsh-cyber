@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -89,7 +89,7 @@ test('auto-registers real files from one BrowserRuntime run and keeps them isola
   const run = runtime.lastRequest
   expect(run).toBeDefined()
   expect(run?.agentRunId).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
-  expect(run?.workspacePath.toLowerCase()).toContain(join(stateRoot, 'worlds', encodeURIComponent(world.id), 'files').toLowerCase())
+  expect(await realpath(run!.workspacePath)).toBe(await realpath(join(stateRoot, 'worlds', encodeURIComponent(world.id), 'files')))
   const agentRunId = run!.agentRunId!
   const manifestPath = join(run!.workspacePath, '.dsh', 'artifacts', `${agentRunId}.json`)
   await expect(readFile(manifestPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })

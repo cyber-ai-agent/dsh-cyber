@@ -1,11 +1,14 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { World } from '@dsh-cyber/contracts'
 
 import { KnowledgeDock } from '../src/features/knowledge/KnowledgeDock.js'
 import { knowledgeDocumentPreviewPath, type KnowledgeDocument } from '../src/features/knowledge/useWorldKnowledge.js'
+import { setUiLocale } from '../src/i18n/runtime.js'
+
+beforeEach(() => setUiLocale('zh-CN'))
 
 const world: World = {
   id: 'world-preview',

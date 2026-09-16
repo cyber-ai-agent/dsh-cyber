@@ -56,7 +56,7 @@ test('keeps durable inserted follow-ups, reload state and stop facts visible acr
   const queue = await getJson<{ items: Array<{ id: string; serverQueueId?: string; status: string; workTurnId?: string }> }>(`${origin}/api/worlds/${world.id}/chat-queue`)
   const queued = queue.items.find((item) => item.status === 'queued')
   expect(queued).toBeDefined()
-  await insertedRegion.getByRole('button', { name: /撤销插入/ }).click()
+  await insertedRegion.getByRole('button', { name: /删除排队消息/ }).click()
   await expect(insertedRegion).toBeHidden()
   await expect.poll(async () => (await getJson<{ items: Array<{ status: string }> }>(`${origin}/api/worlds/${world.id}/chat-queue`)).items.some((item) => item.status === 'queued')).toBe(false)
 
@@ -154,7 +154,10 @@ class LaneRuntime implements AgentRuntimePort {
   async runTurn(request: AgentTurnRequest) {
     this.calls.push(request)
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, 10_000)
+      // Hold the lane until the test explicitly stops it. The UI exercise
+      // includes a reload and a real world renderer, so a short timer can let
+      // the queued turn start before the user-visible cancel action is clicked.
+      const timer = setTimeout(resolve, 120_000)
       if (request.agentRunId !== undefined) this.#pending.set(request.agentRunId, { timer, reject })
     }).finally(() => {
       if (request.agentRunId !== undefined) this.#pending.delete(request.agentRunId)

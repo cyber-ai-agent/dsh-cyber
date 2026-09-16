@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises'
+import { lstat, realpath } from 'node:fs/promises'
 import { join, parse, resolve, sep } from 'node:path'
 
 import { isPathWithin } from './world-root-service.js'
@@ -73,16 +73,28 @@ export async function resolveCanonicalPathWithoutSymlinkHops(candidate: string, 
     const platformRootAlias = process.platform !== 'win32'
       && index === 0
       && isPathWithin(canonicalFilesystemRoot, actual)
+    // Windows may return a DOS 8.3 spelling from os.tmpdir() (for example
+    // ADMINI~1) while realpath expands the same non-reparse directory to its
+    // long name. Admit that filesystem alias only when lstat confirms the
+    // named segment is an ordinary directory. Junctions and symlinks remain
+    // reparse points and continue through the rejection path below.
+    const windowsShortNameAlias = process.platform === 'win32'
+      && isWindowsShortName(segment)
+      && !(await lstat(lexicalPrefix)).isSymbolicLink()
     // The ancestor relaxation ends as soon as the walk has entered the managed
     // boundary. Otherwise a junction below `files` that points back to the
     // boundary root would be accepted because the target is its ancestor.
     const beforeBoundary = canonicalBoundary !== undefined && !isPathWithin(canonicalBoundary, canonicalPrefix)
     const stillAboveBoundary = beforeBoundary && isPathWithin(actual, canonicalBoundary!)
-    if (platformRootAlias || stillAboveBoundary) {
+    if (platformRootAlias || windowsShortNameAlias || stillAboveBoundary) {
       canonicalPrefix = actual
       continue
     }
     throw new SymlinkHopError(lexicalPrefix)
   }
   return canonicalPrefix
+}
+
+function isWindowsShortName(segment: string): boolean {
+  return /^[^./\\]{1,6}~[0-9](?:\.[^./\\]{1,3})?$/i.test(segment)
 }

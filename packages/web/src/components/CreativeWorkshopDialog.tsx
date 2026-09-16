@@ -7,6 +7,7 @@ import type {
 } from '@dsh-cyber/contracts/creative-platform'
 
 import { api, ApiError } from '../api.js'
+import '../i18n/workshop-messages.js'
 import { useI18n } from '../i18n/runtime.js'
 import { CreativeWorkshopEditor } from './creative-workshop/CreativeWorkshopEditor.js'
 import { CreativeWorkshopProjectLibrary } from './creative-workshop/CreativeWorkshopProjectLibrary.js'

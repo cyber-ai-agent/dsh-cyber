@@ -12,6 +12,7 @@ import {
 import type { World } from '@dsh-cyber/contracts'
 import { api } from '../api.js'
 import { getLocalizedThemeText } from '../i18n/appearance-messages.js'
+import '../i18n/skin-editor-messages.js'
 import { useI18n } from '../i18n/runtime.js'
 import {
   applyWorldTheme,

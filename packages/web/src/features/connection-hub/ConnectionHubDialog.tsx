@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from '@phosphor-icons/react'
 import type { Workspace } from '@dsh-cyber/contracts'
 
+import '../../i18n/connection-hub-messages.js'
 import { useI18n } from '../../i18n/runtime.js'
 import { useDialogFocusTrap } from '../../components/useDialogFocusTrap.js'
 

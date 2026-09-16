@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   AnalysisStep,
@@ -10,6 +10,9 @@ import {
 } from '../src/components/character-generator/CharacterGeneratorSteps.js'
 import type { CharacterBlueprintDraft, CharacterGeneratorCatalog } from '../src/components/character-generator/model.js'
 import { PackageMarketDialog } from '../src/components/PackageMarketDialog.js'
+import { setUiLocale } from '../src/i18n/runtime.js'
+
+beforeEach(() => setUiLocale('zh-CN'))
 
 const draft: CharacterBlueprintDraft = {
   schemaVersion: 1,

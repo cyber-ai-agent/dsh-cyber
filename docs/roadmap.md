@@ -2,7 +2,15 @@
 
 > The roadmap is directional, not a release promise. Priorities may change as architecture stabilizes.
 
-## Current phase — Pre-Alpha / Creative Platform V1
+## Current phase — Core conversation experience
+
+Harness `0.1.6-alpha.1` is the runtime baseline. The current product sequence is:
+
+1. Conversation performance, continuity, composer clarity and responsive interaction.
+2. Group-chat coordination, task routing, approval continuation and collaboration summaries.
+3. World-scene responsiveness, character interaction and factual runtime projection.
+4. Knowledge graph retrieval, provenance, consolidation and inspectable evidence.
+5. Artifact creation, delivery, review, versioning and conversation references.
 
 ### In progress
 
@@ -115,7 +123,7 @@ memory categories below remain future work and are not implied by the graph.
 - [ ] Backup / restore release gate
 - [ ] Windows validation matrix
 - [ ] macOS validation matrix
-- [ ] Harness compatibility matrix
+- [x] Harness compatibility matrix
 - [ ] Full E2E becomes Required
 
 ## Future — Optional cloud layer
@@ -144,7 +152,7 @@ Third-party IM and messaging-platform adapters are outside the product roadmap.
 8. Visual world state must reflect real domain state instead of fabricating work.
 9. Chat surfaces final conversational results; execution details belong to Trace.
 
-# 当前开发重点：Creative Workshop V2
+# 后续专项：Creative Workshop V2
 
 - AI 生成严格 JSON 草稿，进入人工审查而不是直接创建。
 - 世界与角色采用最小必填和渐进展开；草稿自动保存并可通过 JSON 双向编辑。

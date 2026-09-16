@@ -2,17 +2,20 @@ import { createElement } from 'react'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { World } from '@dsh-cyber/contracts'
 
 import { KnowledgeDock } from '../src/features/knowledge/KnowledgeDock.js'
+import { setUiLocale } from '../src/i18n/runtime.js'
 import {
   knowledgeSearchPath,
   normalizeKnowledgeSearchResults,
   type KnowledgeCollection,
   type KnowledgeDocument,
 } from '../src/features/knowledge/useWorldKnowledge.js'
+
+beforeEach(() => setUiLocale('zh-CN'))
 
 const world: World = {
   id: 'world-knowledge-test',

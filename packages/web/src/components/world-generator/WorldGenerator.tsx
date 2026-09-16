@@ -1,6 +1,7 @@
 import { ArrowLeft, Info } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CharacterBlueprintDraft, CharacterSourceInput, WorldGeneratorCatalog, WorldGeneratorSceneCatalogItem, WorldGeneratorSceneSelection, WorldThemeDraft } from '@dsh-cyber/contracts'
+import '../../i18n/world-generator-messages.js'
 import { useI18n } from '../../i18n/runtime.js'
 import { SourceStep } from '../character-generator/CharacterGeneratorSteps.js'
 import { CHARACTER_SOURCE_MAX_BYTES } from '../character-generator/model.js'
