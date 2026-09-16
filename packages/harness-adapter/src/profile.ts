@@ -6,11 +6,11 @@ import { randomUUID } from 'node:crypto'
 
 import type { WorkerWebSearchPlan } from './web-search.js'
 
-export const SUPPORTED_HARNESS_VERSION = '0.1.5-rc.2' as const
-export const SUPPORTED_HARNESS_RELEASE_TAG = 'dsh-v0.1.5-rc.2' as const
-export const SUPPORTED_HARNESS_RELEASE_DATE = '2026-09-10' as const
-export const SUPPORTED_HARNESS_RELEASE_COMMIT = 'fb2c4b9e698e30edb738bca4cf0618587db7d203' as const
-export const SUPPORTED_HARNESS_NPM_CHANNEL = 'next' as const
+export const SUPPORTED_HARNESS_VERSION = '0.1.6-alpha.1' as const
+export const SUPPORTED_HARNESS_RELEASE_TAG = 'dsh-v0.1.6-alpha.1' as const
+export const SUPPORTED_HARNESS_RELEASE_DATE = '2026-09-15' as const
+export const SUPPORTED_HARNESS_RELEASE_COMMIT = '0a15e36e7f82b6ed45af6fa9759f29b40dcd965d' as const
+export const SUPPORTED_HARNESS_NPM_CHANNEL = 'alpha' as const
 export const SUPPORTED_HARNESS_PROTOCOL_CONTRACT = 'dsh-session-events-v1' as const
 export const SUPPORTED_HARNESS_SESSION_FORMAT_VERSION = 3 as const
 export const SUPPORTED_HARNESS_FORMAT_MIGRATIONS = ['v2-to-v3'] as const

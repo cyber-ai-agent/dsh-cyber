@@ -1,8 +1,11 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import { resolveInheritedModel, WorldSettingsDialog } from '../src/components/WorldSettingsDialog.js'
+import { setUiLocale } from '../src/i18n/runtime.js'
+
+beforeEach(() => setUiLocale('zh-CN'))
 
 describe('WorldSettingsDialog permission layers', () => {
   it('keeps world settings focused on world configuration and role capability guidance', () => {

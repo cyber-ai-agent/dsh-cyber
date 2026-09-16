@@ -2,6 +2,7 @@ import { MagnifyingGlass, UsersThree, X } from '@phosphor-icons/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { CyberEmployee } from '../types.js'
+import '../i18n/group-turn-messages.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
 import { useI18n } from '../i18n/runtime.js'

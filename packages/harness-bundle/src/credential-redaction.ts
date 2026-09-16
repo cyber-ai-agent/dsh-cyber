@@ -168,6 +168,7 @@ function sanitizeResult(result: ToolExecutionResult, redactor: CredentialRedacto
 function sanitizePreDecision(decision: PreToolDecision, redactor: CredentialRedactor): PreToolDecision {
   if (decision.kind === 'allow') return decision
   if (decision.kind === 'deny') return { ...decision, reason: redactor.text(decision.reason) }
+  if (decision.kind === 'cancel') return decision
   return { ...decision, ...(decision.reason === undefined ? {} : { reason: redactor.text(decision.reason) }) }
 }
 

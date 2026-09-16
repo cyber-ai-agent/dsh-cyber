@@ -7,6 +7,7 @@ import {
   type KnowledgeCollection,
   type KnowledgeDocument,
 } from './useWorldKnowledge.js'
+import '../../i18n/knowledge-messages.js'
 import { useI18n } from '../../i18n/runtime.js'
 import './knowledge.css'
 

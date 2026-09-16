@@ -55,6 +55,18 @@
 - id: tool-fs
   disabled: false
 
+# DSH Cyber owns Skill installation, package activation and character/world
+# grants. Keep the upstream registry available for a future trusted provider,
+# while preventing ambient project/user directories from bypassing that chain.
+- id: skill-filesystem
+  config:
+    includeDefaultRoots: false
+    customSkillDirs: []
+    watch: false
+
+- id: tool-skill
+  disabled: true
+
 # Keep the live DSH surface below the provider's hard edge. The host already
 # performs its own context planning; this worker policy gives tool-heavy turns
 # earlier pruning and a compact recent tail.

@@ -5,6 +5,7 @@ import { ArrowCounterClockwise, ArrowLeft, ArrowsClockwise, CheckCircle, ImageSq
 
 import './model-hub.css'
 import { ModelStatsPanel } from './ModelStatsPanel.js'
+import '../../i18n/model-hub-messages.js'
 import { useI18n } from '../../i18n/runtime.js'
 import { ApiError } from '../../api.js'
 import {

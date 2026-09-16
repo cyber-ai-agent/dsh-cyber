@@ -1,6 +1,7 @@
 import { ArrowClockwise, ArrowLeft } from '@phosphor-icons/react'
 import type { ContextInspection, ContextSnapshotSummary } from '@dsh-cyber/contracts'
 
+import '../../i18n/context-inspector-messages.js'
 import { useI18n } from '../../i18n/runtime.js'
 import { CONTEXT_LAYER_LABELS } from './layer-labels.js'
 import { useContextInspection } from './useContextInspection.js'

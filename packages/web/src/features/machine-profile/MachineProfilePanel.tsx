@@ -2,6 +2,7 @@ import { ArrowsClockwise, Desktop, Info, Plus, Trash } from '@phosphor-icons/rea
 import { useCallback, useEffect, useState } from 'react'
 import type { EnvironmentProfile } from '@dsh-cyber/contracts'
 
+import '../../i18n/machine-profile-messages.js'
 import { useI18n } from '../../i18n/runtime.js'
 import {
   addCustomTool,

@@ -1,6 +1,7 @@
 import { ArrowLeft, Info } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CharacterSourceInput, CyberSkinPaletteV1, SkinDraft, SkinGeneratorBackdropSelection, SkinGeneratorCatalog } from '@dsh-cyber/contracts'
+import '../../i18n/skin-generator-messages.js'
 import { useI18n } from '../../i18n/runtime.js'
 import { SourceStep } from '../character-generator/CharacterGeneratorSteps.js'
 import { CHARACTER_SOURCE_MAX_BYTES } from '../character-generator/model.js'

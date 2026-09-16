@@ -1,6 +1,7 @@
 import { ArrowLeft, Info } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CharacterBlueprintDraft, CharacterGeneratorAvatarCatalogItem, CharacterGeneratorAvatarSelection, CharacterGeneratorCatalog, CharacterSourceInput } from '@dsh-cyber/contracts'
+import '../../i18n/character-generator-messages.js'
 import { useI18n } from '../../i18n/runtime.js'
 import { analyzeCharacterSource, loadCharacterGeneratorCatalog, publishCharacterDraft, readUploadedAvatar } from './api.js'
 import { AnalysisStep, PreviewStep, PublishStep, SourceStep } from './CharacterGeneratorSteps.js'

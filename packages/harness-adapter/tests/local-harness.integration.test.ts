@@ -281,7 +281,7 @@ describe('real Harness worker with a loopback model provider', () => {
     })
     expect(canary).toMatchObject({
       ok: true,
-      version: '0.1.5-rc.2',
+      version: '0.1.6-alpha.1',
       stableSession: true,
     })
     expect(canary.eventKinds).toEqual(expect.arrayContaining(['turn.started', 'assistant.message', 'turn.completed']))

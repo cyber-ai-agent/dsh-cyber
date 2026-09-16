@@ -163,9 +163,9 @@ flowchart TB
 | `packages/web`、`packages/world-runtime` | 工作台与世界运行时 |
 | `packages/package-runtime`、`packages/catalog`、`marketplace` | 扩展包、服务商目录与内置市场 |
 
-当前锁定 DeepSeek Harness `0.1.5-rc.2`。上游仍处于预发布阶段，升级候选需要经过合同测试、真实启动与回滚验证。
+当前锁定 DeepSeek Harness `0.1.6-alpha.1`。上游仍处于预发布阶段，升级候选需要经过合同测试、真实启动与回滚验证。
 
-兼容性矩阵与升级证据见 [`docs/development/deepseek-harness-compatibility-2026-09-14.md`](./docs/development/deepseek-harness-compatibility-2026-09-14.md)。
+兼容性矩阵与升级证据见 [`docs/development/deepseek-harness-compatibility-2026-09-16.md`](./docs/development/deepseek-harness-compatibility-2026-09-16.md)。
 
 ## 快速开始
 

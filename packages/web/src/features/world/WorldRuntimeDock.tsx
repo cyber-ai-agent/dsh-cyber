@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom'
 import type { EmployeeDossier, WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
+import '../../i18n/world-scene-messages.js'
 import { PeerCollaborationDialog, type PeerCollaborationDraft } from '../../components/PeerCollaborationDialog.js'
 import type { CyberEmployee } from '../../types.js'
 import { AmbientLifeDialog } from './AmbientLifeDialog.js'

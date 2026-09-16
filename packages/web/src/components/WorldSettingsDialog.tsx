@@ -19,6 +19,9 @@ import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 import { ModelPicker } from '../features/models/ModelPicker.js'
 import { MachineProfilePanel } from '../features/machine-profile/MachineProfilePanel.js'
 import { applyWorldTheme, DEFAULT_SKIN_ID, readWorldTheme, saveWorldTheme, themeRegistry } from '../features/world/world-themes.js'
+import '../i18n/machine-profile-messages.js'
+import '../i18n/world-scene-messages.js'
+import '../i18n/world-settings-messages.js'
 import { useI18n } from '../i18n/runtime.js'
 
 interface WorldSettingsDialogProps {

@@ -30,6 +30,10 @@ import type {
   PackageCatalogDiagnostic,
   World,
 } from '@dsh-cyber/contracts'
+import '../i18n/character-generator-messages.js'
+import '../i18n/plugin-generator-messages.js'
+import '../i18n/skin-generator-messages.js'
+import '../i18n/world-generator-messages.js'
 import { DEFAULT_SKIN_ID } from '../features/world/world-themes.js'
 import { useI18n } from '../i18n/runtime.js'
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
