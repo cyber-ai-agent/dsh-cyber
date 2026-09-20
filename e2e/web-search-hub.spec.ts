@@ -1,3 +1,4 @@
+import { openGlobalTool } from './global-tool-helpers.js'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,9 +36,7 @@ test.afterAll(async () => {
 
 async function openWebSearchSection(page: Page): Promise<Locator> {
   // 入口在正常视觉流中可见可点，不用隐藏镜像或脚本点击。
-  const entry = page.getByRole('button', { name: '连接中心', exact: true })
-  await expect(entry).toBeVisible()
-  await entry.click()
+  await openGlobalTool(page, '连接中心')
   const hub = page.getByRole('dialog', { name: '连接中心' })
   await expect(hub).toBeVisible()
   const webSearchItem = hub.locator('.integration-provider-list button', { hasText: '联网搜索' })
@@ -91,7 +90,7 @@ test('联网搜索主项：固定服务商卡片、接管 Firecrawl、跨卡片�
 
   // 关闭后入口仍在（信息架构不随弹窗关闭丢失）。
   await hub.getByRole('button', { name: '关闭连接中心' }).click()
-  await expect(page.getByRole('button', { name: '连接中心', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '工具', exact: true })).toBeVisible()
 
   expect(issues.filter((issue) => issue.startsWith('[console:error]') || issue.startsWith('[pageerror]'))).toEqual([])
 })

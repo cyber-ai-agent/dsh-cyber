@@ -1,5 +1,6 @@
 import {
   ArrowsOut,
+  ArrowsIn,
   Buildings,
   Chalkboard,
   ImageSquare,
@@ -75,6 +76,13 @@ interface WorldRuntimeDockProps {
 export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEnabled = true, sessionId, sessionKind, selectedEmployeeId, conversationEmployeeIds, latestUtterances, onSelectEmployee, onStartGroup, onManageAvatar, onVoiceFinal, onOpenDockTab }: WorldRuntimeDockProps) {
   const runtime = useWorldClient({ demoMode, world, employees, liveEnabled })
   const [fitRequest, setFitRequest] = useState(0)
+  const sectionRef = useRef<HTMLElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    const update = () => setExpanded(document.fullscreenElement === sectionRef.current)
+    document.addEventListener('fullscreenchange', update)
+    return () => document.removeEventListener('fullscreenchange', update)
+  }, [])
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
   const [selectedObjectId, setSelectedObjectId] = useState<string>()
   const [activeEmployeeId, setActiveEmployeeId] = useState<string | undefined>(selectedEmployeeId)
@@ -270,7 +278,8 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
 
   return (
     <>
-      <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
+      <section ref={sectionRef} className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
+        <header className="world-runtime-dock__intro"><div><h2>{world.name}</h2><p>{runtime.connected ? '角色在这里协作' : '正在重新连接世界…'}</p></div><button type="button" className="world-runtime-dock__expand" aria-label={expanded ? '退出全屏世界' : '展开世界'} title={expanded ? '退出全屏世界' : '展开世界'} onClick={() => { if (expanded) void document.exitFullscreen(); else void sectionRef.current?.requestFullscreen() }}>{expanded ? <ArrowsIn size={19} /> : <ArrowsOut size={19} />}</button></header>
         <div className="world-runtime-dock__canvas">
           <div className="world-runtime-dock__display-switch" role="tablist" aria-label="世界显示方式">
             <button type="button" role="tab" aria-selected={view.renderer === 'map'} className={view.renderer === 'map' ? 'is-active' : ''} onClick={() => selectRendererMode('map')}><MapTrifold size={15} aria-hidden="true" />平面</button>
@@ -338,6 +347,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
             />
           </Suspense> : null}
         </div>
+        <p className="world-runtime-dock__guide">单击聚焦角色，右键查看更多操作。</p>
       </section>
 
       {spatialOpen && spatialExtensionEnabled ? renderWorldOverlay(<Suspense fallback={<div className="modal-backdrop" role="status"><div className="world-runtime-dock world-runtime-dock--loading"><Buildings size={28} /><strong>正在加载 3D 扩展</strong><span>核心世界保持运行，Three.js 与 VRM 仅在此时加载…</span></div></div>}>

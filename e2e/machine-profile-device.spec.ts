@@ -1,3 +1,4 @@
+import { openGlobalTool } from './global-tool-helpers.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -68,7 +69,7 @@ test('shows the device profile block in the connection hub, and never in the sid
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
   await expect(dock.getByRole('button', { name: '机器档案' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: '连接中心', exact: true }).click()
+  await openGlobalTool(page, '连接中心')
   const hub = page.getByRole('dialog', { name: '连接中心' })
   await expect(hub).toBeVisible()
   await hub.getByRole('button', { name: /SSH 设备/ }).click()

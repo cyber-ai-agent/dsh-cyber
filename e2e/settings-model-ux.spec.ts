@@ -127,6 +127,7 @@ test('opens the model hub from settings, shows the pool and remains responsive',
   await expect(hub).toBeHidden()
   await expect(settings).toBeVisible()
   await settings.getByRole('button', { name: '关闭设置' }).click()
+  await page.getByRole('button', { name: '工具', exact: true }).click()
   await expect(page.getByRole('button', { name: '模型中心', exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '模型中心', exact: true }).click()

@@ -307,14 +307,14 @@ export const demoData: WorkbenchData = {
   preferences: {
     locale: 'zh-CN',
     workspaceId,
-    colorScheme: 'dark',
+    colorScheme: 'light',
     skinId: 'cyber-graphite',
     backgroundFit: 'cover',
     backgroundOpacity: 0.18,
     interfaceDensity: 'compact',
     motion: 'system',
     leftPaneWidth: 292,
-    rightPaneWidth: 550,
+    rightPaneWidth: 440,
     updatedAt: now,
   },
   modelProfiles: [{

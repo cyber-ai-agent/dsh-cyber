@@ -1,3 +1,4 @@
+import { openGlobalTool } from './global-tool-helpers.js'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -52,8 +53,7 @@ test('shows one row per MCP service and Skill package, with import controls and 
   })
 
   await page.goto(origin)
-  await expect(page.getByRole('button', { name: '技能中心' })).toBeVisible()
-  await page.getByRole('button', { name: '技能中心' }).click()
+  await openGlobalTool(page, '技能中心')
   const center = page.getByRole('dialog', { name: '技能中心' })
   await expect(center).toBeVisible()
   await expect(center.locator('.skill-center__skill-rows > button')).toHaveCount(3)

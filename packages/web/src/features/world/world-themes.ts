@@ -539,7 +539,7 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
   {
     id: DEFAULT_SKIN_ID,
     displayName: '默认皮肤',
-    description: 'DSH Cyber 原生深色工作台，保持清晰克制的默认阅读体验',
+    description: '支持明暗切换的原生工作台，保持清晰克制的阅读体验',
     author: '官方内置',
     source: 'builtin',
     tokens: {
@@ -919,6 +919,7 @@ export function saveWorldTheme(worldId: string, themeId: string): void {
  */
 export function applyWorldTheme(themeId: string): void {
   if (typeof document === 'undefined') return
+  if (themeId !== DEFAULT_SKIN_ID) void import('../../skin-decorations.css')
   const theme = themeRegistry.get(themeId)
   const root = document.documentElement
   const tokens = theme.tokens

@@ -113,6 +113,7 @@ import {
 } from './composer-draft-store.js'
 import { chatSubmissionStore, type ChatSubmission } from './chat-submission-store.js'
 import { deliverChatSubmission } from './chat-submission-delivery.js'
+import { WorkbenchToolsMenu } from './components/WorkbenchToolsMenu.js'
 
 const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
 const WorldSideDock = lazy(async () => ({ default: (await import('./components/WorldSideDock.js')).WorldSideDock }))
@@ -176,13 +177,6 @@ export default function App() {
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
-  const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>(() => readConversationModelProfiles())
-  useEffect(() => {
-    // Per-conversation model choice must survive a refresh, the same promise
-    // the permission selector makes; a deleted profile resolves nowhere and
-    // the composer falls back exactly as before.
-    writeConversationModelProfiles(conversationModelProfiles)
-  }, [conversationModelProfiles])
   const [discoveredCatalog] = useState<Record<string, CachedModelCatalog>>(() => loadDiscoveredModelsCache())
   const selectableModels = useMemo(() => {
     const configuredBaseUrls = new Set(
@@ -303,13 +297,6 @@ export default function App() {
   }, [activeComposerOwnerKey])
   const clearActiveComposerDraft = useCallback(() => {
     composerDraftStore.clear(activeComposerOwnerKey)
-    if (activeComposerOwnerKey === undefined) return
-    setConversationModelProfiles((current) => {
-      if (!(activeComposerOwnerKey in current)) return current
-      const next = { ...current }
-      delete next[activeComposerOwnerKey]
-      return next
-    })
   }, [activeComposerOwnerKey])
   const activePermissionKey = activeSessionId === undefined
     ? activeConversationKey
@@ -344,14 +331,6 @@ export default function App() {
   const activeRunningCount = activePendingTurns.filter((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
   const queuedInConversation = activePendingTurns.filter((turn) => turn.status === 'queued').length
   const activeQueuedCount = Math.max(0, queuedInConversation - (activeRunningCount === 0 && queuedInConversation > 0 ? 1 : 0))
-  const directEmployeeId = activeConversationKey !== undefined && activeConversationKey.startsWith('direct:') ? activeConversationKey.slice('direct:'.length) : undefined
-  // A direct conversation's model selector IS the character's assignment: one
-  // durable fact, two views (composer and model hub), no parallel override
-  // layer to fall out of sync. Group chats keep the transient per-conversation
-  // choice - several characters cannot share one "conversation model".
-  const conversationModelProfileId = directEmployeeId !== undefined
-    ? modelAssignments.find((assignment) => assignment.scope === 'employee' && assignment.scopeId === directEmployeeId)?.modelProfileId
-    : activeComposerDraft.modelProfileId ?? (activeComposerOwnerKey === undefined ? undefined : conversationModelProfiles[activeComposerOwnerKey])
   activeWorldRef.current = activeWorld
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
@@ -1887,7 +1866,6 @@ export default function App() {
         : compactPrompt(prompt))
     const queueKey = activeConversationKey ?? targetConversationQueueKey(targetIds, title)
     const capturedComposerOwnerKey = activeComposerOwnerKey
-    const capturedModelProfileId = conversationModelProfileId
     const startedFromWorldScratch = activeConversationKey === undefined
       && activeSessionId === undefined
       && conversationIntent === undefined
@@ -1987,7 +1965,6 @@ export default function App() {
       draft: {
         text: submittedDraft.text || prompt,
         attachments: submittedDraft.attachments.filter((item) => item.status === 'ready' && item.attachment !== undefined && submittedAssetIds.has(item.attachment.assetId)),
-        ...(capturedModelProfileId === undefined ? {} : { modelProfileId: capturedModelProfileId }),
       },
       body: JSON.stringify({
         prompt, clientTurnId, reasoningEffort, permissionMode: effectivePermissionMode,
@@ -1997,7 +1974,6 @@ export default function App() {
         employeeIds: targetIds,
         ...(conversationIntent === undefined ? {} : { title }),
         ...(capturedSessionId === undefined ? {} : { sessionId: capturedSessionId }),
-        ...(capturedModelProfileId === undefined ? {} : { modelProfileId: capturedModelProfileId }),
       }),
     })
 
@@ -2070,7 +2046,6 @@ export default function App() {
     activeWorld,
     bindConversationSession,
     conversationIntent,
-    conversationModelProfileId,
     demoMode,
     employees,
     conversationPermissionMode,
@@ -2239,7 +2214,7 @@ export default function App() {
 
   // The model hub writes providers/pool/assignments through its own routes;
   // when it closes, the shell re-pulls the profile list and the assignments so
-  // the composer's picker and every inheritance label see the new reality
+  // the settings panels and role assignments see the new configuration
   // without a page reload.
   const refreshModelProfiles = useCallback(async (): Promise<void> => {
     if (workspace === undefined || demoMode) return
@@ -2252,18 +2227,6 @@ export default function App() {
       // already surfaced any write error to the user.
     }
   }, [demoMode, workspace])
-
-  const assignEmployeeModel = useCallback(async (employeeId: string, modelProfileId: string | undefined): Promise<void> => {
-    if (workspace === undefined) throw new Error('请先创建工作区')
-    const endpoint = `/api/workspaces/${workspace.id}/model-assignments/employee/${encodeURIComponent(employeeId)}`
-    if (modelProfileId === undefined) {
-      await api<{ removed: boolean }>(endpoint, { method: 'DELETE' })
-      setModelAssignments((current) => current.filter((item) => !(item.scope === 'employee' && item.scopeId === employeeId)))
-      return
-    }
-    const result = await api<{ assignment: ModelAssignment }>(endpoint, { method: 'PUT', body: JSON.stringify({ modelProfileId }) })
-    setModelAssignments((current) => [...current.filter((item) => !(item.scope === 'employee' && item.scopeId === employeeId)), result.assignment])
-  }, [workspace])
 
   const saveModel = useCallback(async (profile: ModelProfileSaveDraft): Promise<ModelProfile> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -2443,23 +2406,25 @@ export default function App() {
           onExplore={() => void openPackageMarket('theme')}
           onManage={() => { clearError(); setWorldLibraryOpen(true) }}
         />
-        <WorldThemeSwitcher
-          key={`${activeWorld.id}:${skinRevision}`}
-          activeWorld={activeWorld}
-          installedSkinIds={installedSkinIds}
-          onThemeChange={() => {
-            setSkinRevision((value) => value + 1)
-            setWorldRuntimeRevision((value) => value + 1)
-          }}
-        />
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" aria-label={t('app.market', '市场')} title={t('app.market', '市场')} onClick={() => void openPackageMarket('theme')}><Storefront size={16} /><span>{t('app.market', '市场')}</span></button>
-          <SkillCenterLauncher world={activeWorld} worlds={worlds} onClosed={() => void loadWorld(activeWorld)} onOpenMarket={() => void openPackageMarket('plugin')} />
-          <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} onClosed={() => void refreshModelProfiles()} />
-          <ConnectionHubLauncher workspace={workspace} />
-          <button type="button" aria-label={`${t('app.systemStatus', '系统状态')}：${t('app.healthy', '良好')}`} title={`${t('app.systemStatus', '系统状态')}：${t('app.healthy', '良好')}`} onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" /><span>{t('app.healthy', '良好')}</span></button>
-          <button type="button" aria-label={t('app.settings', '设置')} title={t('app.settings', '设置')} onClick={() => { clearError(); setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} /><span>{t('app.settings', '设置')}</span></button>
+          <WorkbenchToolsMenu>
+            <WorldThemeSwitcher
+              key={`${activeWorld.id}:${skinRevision}`}
+              activeWorld={activeWorld}
+              installedSkinIds={installedSkinIds}
+              onThemeChange={() => {
+                setSkinRevision((value) => value + 1)
+                setWorldRuntimeRevision((value) => value + 1)
+              }}
+            />
+            <SkillCenterLauncher world={activeWorld} worlds={worlds} onClosed={() => void loadWorld(activeWorld)} onOpenMarket={() => void openPackageMarket('plugin')} />
+            <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} onClosed={() => void refreshModelProfiles()} />
+            <ConnectionHubLauncher workspace={workspace} />
+            <button type="button" aria-label={`${t('app.systemStatus', '系统状态')}：${t('app.healthy', '良好')}`} title={`${t('app.systemStatus', '系统状态')}：${t('app.healthy', '良好')}`} onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" /><span>{t('app.healthy', '良好')}</span></button>
+          </WorkbenchToolsMenu>
+          <button className="topbar__settings" type="button" aria-label={t('app.settings', '设置')} title={t('app.settings', '设置')} onClick={() => { clearError(); setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} /><span>{t('app.settings', '设置')}</span></button>
         </nav>
       </header>
       {error === undefined ? null : <div className="error-banner" role="alert">{error}<button type="button" onClick={clearError}>关闭</button></div>}
@@ -2498,73 +2463,10 @@ export default function App() {
             dossiers={dossiers}
             {...(activeConversationKey === undefined ? {} : { speechConversationKey: activeConversationKey })}
             installedPlugins={installedPluginCommands}
-            models={selectableModels}
-            modelAssignments={modelAssignments}
             {...(activeComposerOwnerKey === undefined ? {} : { composerOwnerKey: activeComposerOwnerKey })}
             attachments={activeComposerDraft.attachments}
             onAttachmentsChange={updateComposerAttachments}
             onClearDraft={clearActiveComposerDraft}
-            {...(conversationModelProfileId === undefined ? {} : { modelProfileId: conversationModelProfileId })}
-            onChangeModelProfile={async (modelProfileId) => {
-              if (activeComposerOwnerKey === undefined || activeConversationKey === undefined) return
-              let finalProfileId = modelProfileId
-              if (modelProfileId !== undefined && modelProfileId.startsWith('discovered:')) {
-                const parts = modelProfileId.split(':')
-                const baseProfileId = parts[1]
-                const rawModelId = parts.slice(2).join(':')
-                const baseProfile = models.find((m) => m.id === baseProfileId)
-                if (baseProfile !== undefined && rawModelId !== '') {
-                  try {
-                    const { contextWindow: _unusedContext, maxTokens: _unusedMaxTokens, ...cleanSettings } = baseProfile.settings
-                    const saved = await saveModel({
-                      displayName: rawModelId,
-                      modelId: rawModelId,
-                      providerKind: baseProfile.providerKind,
-                      baseUrl: baseProfile.baseUrl,
-                      api: baseProfile.api,
-                      isDefault: false,
-                      ...(baseProfile.credentialEnvName ? { credentialEnvName: baseProfile.credentialEnvName } : {}),
-                      ...(baseProfile.providerId !== undefined ? { providerId: baseProfile.providerId } : {}),
-                      settings: {
-                        ...cleanSettings,
-                        ...(baseProfile.providerId !== undefined ? { providerId: baseProfile.providerId } : {}),
-                        // Label by the provider connection, never by the base
-                        // profile's display name - that name is a model name.
-                        ...((baseProfile.providerName ?? (typeof baseProfile.settings?.providerName === 'string' ? baseProfile.settings.providerName : undefined)) !== undefined
-                          ? { providerName: baseProfile.providerName ?? (baseProfile.settings?.providerName as string) }
-                          : {}),
-                      },
-                    })
-                    finalProfileId = saved.id
-                  } catch (err) {
-                    console.error('Failed to auto-save discovered model:', err)
-                    return
-                  }
-                }
-              }
-              if (directEmployeeId !== undefined) {
-                if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return
-                await assignEmployeeModel(directEmployeeId, finalProfileId)
-                composerDraftStore.setModelProfile(activeComposerOwnerKey, undefined)
-                setConversationModelProfiles((current) => {
-                  if (!(activeComposerOwnerKey in current)) return current
-                  const next = { ...current }
-                  delete next[activeComposerOwnerKey]
-                  return next
-                })
-                return
-              }
-              composerDraftStore.setModelProfile(activeComposerOwnerKey, finalProfileId)
-              setConversationModelProfiles((current) => {
-                if (finalProfileId === undefined || finalProfileId.startsWith('discovered:')) {
-                  if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return current
-                  const next = { ...current }
-                  delete next[activeComposerOwnerKey]
-                  return next
-                }
-                return { ...current, [activeComposerOwnerKey]: finalProfileId }
-              })
-            }}
             pendingCount={activePendingCount}
             queuedCount={activeQueuedCount}
             queueItems={activePendingTurns}
@@ -2796,10 +2698,10 @@ export default function App() {
       {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开世界管理…</div>}>
           <WorldSettingsDialog
-            world={activeWorld}
-            value={worldSettings}
             models={selectableModels}
             modelAssignments={modelAssignments}
+            world={activeWorld}
+            value={worldSettings}
             installedSkinIds={installedSkinIds}
             saving={savingSettings}
             onClose={() => setWorldSettingsOpen(false)}
@@ -3237,30 +3139,6 @@ function defaultRolePermissionMode(
       : dossiers[employeeId]?.revisions.find((item) => item.revision === employee.currentRevision)
     return revision?.runtimePermissionMode ?? 'read-only'
   }).reduce<ConversationPermissionMode>((least, mode) => rank[mode] < rank[least] ? mode : least, 'danger-full-access')
-}
-
-// v2 includes the world in every owner key. The legacy key is deliberately
-// not migrated because its entries cannot be assigned to a world safely.
-const CONVERSATION_MODELS_STORAGE_KEY = 'dsh-cyber:conversation-models:v2'
-
-function readConversationModelProfiles(): Record<string, string> {
-  try {
-    const raw = window.localStorage.getItem(CONVERSATION_MODELS_STORAGE_KEY)
-    if (raw === null) return {}
-    const parsed: unknown = JSON.parse(raw)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
-  } catch {
-    return {}
-  }
-}
-
-function writeConversationModelProfiles(map: Record<string, string>): void {
-  try {
-    window.localStorage.setItem(CONVERSATION_MODELS_STORAGE_KEY, JSON.stringify(map))
-  } catch {
-    // localStorage may be unavailable (private mode); the in-memory choice still applies now.
-  }
 }
 
 function readConversationPermissionMode(worldId: string, permissionKey: string): ConversationPermissionMode | undefined {  try {

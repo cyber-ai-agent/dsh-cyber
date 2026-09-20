@@ -378,7 +378,7 @@ describe('Chat control UI', () => {
       onRecruit: vi.fn(),
     }))
     expect(html).toContain('消息已接收，正在等待角色处理')
-    expect(html).toContain('已接收 · 等待执行')
+    expect(html).toContain('已接收')
     expect(html).not.toContain('另有 1 条')
   })
 
@@ -414,9 +414,7 @@ describe('Chat control UI', () => {
     expect(html).toContain('待处理消息')
     expect(html).toContain('下一条消息')
     expect(html).not.toContain('send-button--stop')
-    expect(html).toContain('编辑排队消息')
-    expect(html).toContain('优先处理排队消息')
-    expect(html).toContain('取消排队消息')
+    expect(html).toContain('排队消息操作：下一条消息')
     expect(html).not.toContain('撤销插入')
     expect(html).toContain('排队发送')
     expect(html).not.toContain('队列操作')

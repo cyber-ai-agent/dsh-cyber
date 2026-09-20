@@ -907,14 +907,14 @@ export class SqliteStore {
     return {
       workspaceId: workspace.id,
       locale: 'zh-CN',
-      colorScheme: 'dark',
+      colorScheme: 'light',
       skinId: 'cyber-graphite',
       backgroundFit: 'cover',
       backgroundOpacity: 0.18,
       interfaceDensity: 'compact',
       motion: 'system',
       leftPaneWidth: 288,
-      rightPaneWidth: 660,
+      rightPaneWidth: 440,
       updatedAt: workspace.updatedAt,
     }
   }

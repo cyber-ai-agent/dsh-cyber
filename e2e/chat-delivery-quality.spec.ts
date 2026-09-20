@@ -77,6 +77,7 @@ async function upload(page: Page) {
   await expect(page.locator('.composer-attachment--ready')).toBeVisible()
 }
 async function daylight(page: Page) {
+  if (await page.locator('html').getAttribute('data-resolved-color-scheme') === 'light') return
   await click(page, '设置'); await click(page, '白天'); await click(page, '保存外观设置')
   await expect(page.locator('html')).toHaveAttribute('data-resolved-color-scheme', 'light')
 }
@@ -99,8 +100,8 @@ test('confirms IME input, queues a follow-up, switches conversations, reads and 
   await input.fill('补充：请在第二点加上负责人。')
   await click(page, '排队发送')
   const queue = page.getByRole('region', { name: '待处理消息' })
-  await expect(queue).toContainText('已接收 · 等待执行')
-  await expect(queue).toContainText('当前回复结束后，依次处理')
+  await expect(queue).toContainText('已接收')
+  await expect(queue).toContainText('当前回复结束后依次处理')
   await expect(page.locator('.message--owner').filter({ hasText: '补充：' })).toHaveCount(0)
   await input.fill(multiline)
   await expect.poll(() => input.evaluate((node) => node.clientHeight)).toBeGreaterThan(150)

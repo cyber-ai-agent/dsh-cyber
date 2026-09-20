@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { WORKSPACE_PREFERENCES_LIMITS } from '@dsh-cyber/contracts'
 
 interface ResizableShellProps {
@@ -27,10 +27,14 @@ export function ResizableShell({
   const resizeCleanupRef = useRef<(() => void) | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const paneScale = viewportWidth >= 3_200 ? 1.35 : viewportWidth >= 2_200 ? 1.18 : 1
+  const handleWidth = Math.round(5 * paneScale)
+  const displayedLeftWidth = Math.min(Math.round(leftWidth * paneScale), Math.floor(viewportWidth * .22))
+  const minimumCenterWidth = Math.min(Math.round(700 * paneScale), Math.max(440, viewportWidth - displayedLeftWidth - 310))
+  const displayedRightWidth = Math.max(300, Math.min(Math.round(rightWidth * paneScale), viewportWidth - displayedLeftWidth - handleWidth * 2 - minimumCenterWidth))
 
   useEffect(() => {
-    widthsRef.current = { leftWidth, rightWidth }
-  }, [leftWidth, rightWidth])
+    widthsRef.current = { leftWidth: displayedLeftWidth / paneScale, rightWidth: displayedRightWidth / paneScale }
+  }, [displayedLeftWidth, displayedRightWidth, paneScale])
 
   useEffect(() => {
     const updateViewport = () => setViewportWidth(window.innerWidth)
@@ -64,7 +68,7 @@ export function ResizableShell({
         ? clamp(
             initial.rightWidth - delta,
             WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.minimum,
-            Math.min(WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.maximum, shellWidth - 700),
+            Math.min(WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.maximum, shellWidth - initial.leftWidth - minimumCenterWidth / paneScale - 10),
           )
         : initial.rightWidth
       onResize(nextLeft, nextRight)
@@ -88,12 +92,7 @@ export function ResizableShell({
     window.addEventListener('pointercancel', onEnd)
     window.addEventListener('blur', cleanup)
     window.addEventListener('lostpointercapture', onEnd)
-  }, [onResize, paneScale])
-
-  const handleWidth = Math.round(5 * paneScale)
-  const minimumCenterWidth = Math.round(440 * paneScale)
-  const displayedLeftWidth = Math.round(leftWidth * paneScale)
-  const displayedRightWidth = Math.round(rightWidth * paneScale)
+  }, [minimumCenterWidth, onResize, paneScale])
 
   return (
     <div
@@ -101,7 +100,8 @@ export function ResizableShell({
       className={`workbench-shell${rightCollapsed ? ' workbench-shell--dock-collapsed' : ''}${rightPrimary ? ' workbench-shell--right-primary' : ''}`}
       style={{
         gridTemplateColumns: `${displayedLeftWidth}px ${handleWidth}px minmax(${minimumCenterWidth}px, 1fr) ${rightCollapsed ? '0 0' : `${handleWidth}px ${displayedRightWidth}px`}`,
-      }}
+        '--workbench-columns': `${displayedLeftWidth}px ${handleWidth}px minmax(${minimumCenterWidth}px, 1fr) ${rightCollapsed ? '0 0' : `${handleWidth}px ${displayedRightWidth}px`}`,
+      } as CSSProperties}
     >
       <aside className="left-pane">{left}</aside>
       <button

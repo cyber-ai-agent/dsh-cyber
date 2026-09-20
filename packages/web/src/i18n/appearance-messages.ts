@@ -1161,7 +1161,7 @@ type BuiltinThemeId = typeof BUILTIN_THEME_IDS[number]
 
 const BUILTIN_THEME_TEXT = {
   'zh-CN': {
-    default: { displayName: '默认皮肤', description: 'DSH Cyber 原生深色工作台，保持清晰克制的默认阅读体验。' },
+    default: { displayName: '默认皮肤', description: '支持明暗切换的原生工作台，保持清晰克制的阅读体验。' },
     'maid-atelier': { displayName: '深海女仆工坊', description: '深海宫殿、蓝金微晶、月光大厅与双女仆立绘。' },
     'cyber-company': { displayName: '赛博原厂', description: '黑曜高光与冷色全息办公室，适合专注协作。' },
     'orca-link': { displayName: '虎鲸链路', description: '深海舰桥、电蓝链路与虎鲸导航全景。' },
@@ -1173,7 +1173,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: '漆黑虎鲸', description: '深渊机能、虎鲸电光与未来深潜舰桥。' },
   },
   'zh-TW': {
-    default: { displayName: '預設皮膚', description: 'DSH Cyber 原生深色工作台，維持清晰克制的預設閱讀體驗。' },
+    default: { displayName: '預設皮膚', description: '支援明暗切換的原生工作台，維持清晰克制的閱讀體驗。' },
     'maid-atelier': { displayName: '深海女僕工坊', description: '深海宮殿、藍金微晶、月光大廳與雙女僕立繪。' },
     'cyber-company': { displayName: '賽博原廠', description: '黑曜高光與冷色全息辦公室，適合專注協作。' },
     'orca-link': { displayName: '虎鯨鏈路', description: '深海艦橋、電藍鏈路與虎鯨導航全景。' },
@@ -1185,7 +1185,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: '漆黑虎鯨', description: '深淵機能、虎鯨電光與未來深潛艦橋。' },
   },
   'en-US': {
-    default: { displayName: 'Default skin', description: 'Native dark DSH Cyber workbench with a clear, restrained reading experience.' },
+    default: { displayName: 'Default skin', description: 'Native DSH Cyber workspace with light and dark modes for clear, focused conversations.' },
     'maid-atelier': { displayName: 'Deep-sea maid atelier', description: 'Deep-sea palace, blue-gold crystal, moonlit hall, and two maid portraits.' },
     'cyber-company': { displayName: 'Cyber original', description: 'Obsidian highlights and a cool holographic office for focused collaboration.' },
     'orca-link': { displayName: 'Orca link', description: 'Deep-sea bridge, electric-blue links, and an orca navigation panorama.' },
@@ -1197,7 +1197,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: 'Black orca', description: 'Abyssal utility, orca light, and a future deep-diving bridge.' },
   },
   'ja-JP': {
-    default: { displayName: 'デフォルトスキン', description: 'DSH Cyber 本来のダークなワークベンチ。読みやすく落ち着いた標準表示です。' },
+    default: { displayName: 'デフォルトスキン', description: 'ライトとダークを切り替えられる、読みやすく落ち着いた DSH Cyber ワークスペース。' },
     'maid-atelier': { displayName: '深海メイド工房', description: '深海宮殿、青金の結晶、月明かりのホールと二人のメイド。' },
     'cyber-company': { displayName: 'サイバー本社', description: '黒曜のハイライトと寒色ホログラムのオフィス。集中した協働に向きます。' },
     'orca-link': { displayName: 'オルカリンク', description: '深海ブリッジ、電青のリンク、シャチの航行パノラマ。' },
@@ -1209,7 +1209,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: '漆黒のシャチ', description: '深淵の機能美、シャチの電光、未来の深海ブリッジ。' },
   },
   'ko-KR': {
-    default: { displayName: '기본 스킨', description: 'DSH Cyber의 기본 어두운 워크벤치로, 선명하고 절제된 읽기 환경을 제공합니다.' },
+    default: { displayName: '기본 스킨', description: '밝은 모드와 어두운 모드를 지원하는 DSH Cyber 기본 작업 공간입니다.' },
     'maid-atelier': { displayName: '심해 메이드 공방', description: '심해 궁전, 청금색 크리스털, 달빛 홀과 두 메이드 초상화.' },
     'cyber-company': { displayName: '사이버 본사', description: '흑요석 하이라이트와 차가운 홀로그램 사무실로 집중 협업에 적합합니다.' },
     'orca-link': { displayName: '범고래 링크', description: '심해 브리지, 전기빛 링크와 범고래 항해 파노라마.' },
@@ -1221,7 +1221,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: '칠흑 범고래', description: '심연의 기능미, 범고래 전광과 미래형 잠수 브리지.' },
   },
   'es-ES': {
-    default: { displayName: 'Estilo predeterminado', description: 'Espacio de trabajo oscuro de DSH Cyber, claro y sobrio para leer.' },
+    default: { displayName: 'Estilo predeterminado', description: 'Espacio de trabajo de DSH Cyber con modos claro y oscuro para leer con comodidad.' },
     'maid-atelier': { displayName: 'Atelier de sirenas', description: 'Palacio submarino, cristal azul y dorado, salón lunar y dos retratos.' },
     'cyber-company': { displayName: 'Sede ciber', description: 'Oficina holográfica fría con reflejos de obsidiana para colaborar con concentración.' },
     'orca-link': { displayName: 'Enlace orca', description: 'Puente submarino, enlaces azul eléctrico y panorama de navegación de una orca.' },
@@ -1233,7 +1233,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: 'Orca negra', description: 'Funcionalidad abisal, luz de orca y puente de inmersión futurista.' },
   },
   'fr-FR': {
-    default: { displayName: 'Thème par défaut', description: 'Espace de travail sombre DSH Cyber, clair et sobre pour la lecture.' },
+    default: { displayName: 'Thème par défaut', description: 'Espace de travail DSH Cyber avec modes clair et sombre pour une lecture confortable.' },
     'maid-atelier': { displayName: 'Atelier des abysses', description: 'Palais sous-marin, cristaux bleu et or, salle au clair de lune et deux portraits.' },
     'cyber-company': { displayName: 'Siège cyber', description: 'Bureau holographique froid aux reflets d’obsidienne, idéal pour collaborer.' },
     'orca-link': { displayName: 'Liaison orque', description: 'Passerelle sous-marine, liaisons bleu électrique et panorama de navigation.' },
@@ -1245,7 +1245,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: 'Orque noire', description: 'Fonctionnalité abyssale, lumière d’orque et passerelle de plongée futuriste.' },
   },
   'de-DE': {
-    default: { displayName: 'Standard-Skin', description: 'Dunkler DSH-Cyber-Arbeitsbereich mit klarer, zurückhaltender Lesedarstellung.' },
+    default: { displayName: 'Standard-Skin', description: 'DSH-Cyber-Arbeitsbereich mit hellem und dunklem Modus für konzentriertes Lesen.' },
     'maid-atelier': { displayName: 'Tiefsee-Maidatelier', description: 'Tiefseepalast, blau-goldene Kristalle, Mondlichtsaal und zwei Maid-Porträts.' },
     'cyber-company': { displayName: 'Cyber-Zentrale', description: 'Kühles holografisches Büro mit Obsidian-Glanz für konzentrierte Zusammenarbeit.' },
     'orca-link': { displayName: 'Orca-Verbindung', description: 'Tiefsee-Brücke, elektrisch blaue Verbindungen und Orca-Navigationspanorama.' },
@@ -1257,7 +1257,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: 'Schwarzer Orca', description: 'Abyssale Funktionalität, Orca-Licht und futuristische Tauchbrücke.' },
   },
   'pt-BR': {
-    default: { displayName: 'Skin padrão', description: 'Workbench escura nativa do DSH Cyber, com leitura clara e equilibrada.' },
+    default: { displayName: 'Skin padrão', description: 'Área de trabalho nativa do DSH Cyber com modos claro e escuro para leitura confortável.' },
     'maid-atelier': { displayName: 'Ateliê das profundezas', description: 'Palácio submarino, cristais azul e dourado, salão lunar e dois retratos.' },
     'cyber-company': { displayName: 'Sede cyber', description: 'Escritório holográfico frio com brilho de obsidiana para colaboração focada.' },
     'orca-link': { displayName: 'Elo orca', description: 'Ponte submarina, elos azul-elétrico e panorama de navegação de uma orca.' },
@@ -1269,7 +1269,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: 'Orca negra', description: 'Função abissal, luz de orca e ponte futurista de mergulho.' },
   },
   'ru-RU': {
-    default: { displayName: 'Стандартный скин', description: 'Тёмная рабочая среда DSH Cyber с ясным и сдержанным отображением.' },
+    default: { displayName: 'Стандартный скин', description: 'Рабочая среда DSH Cyber со светлым и тёмным режимами для удобного чтения.' },
     'maid-atelier': { displayName: 'Глубоководное ателье', description: 'Подводный дворец, сине-золотые кристаллы, лунный зал и два портрета.' },
     'cyber-company': { displayName: 'Кибер-офис', description: 'Холодный голографический офис с отблесками обсидиана для сосредоточенной работы.' },
     'orca-link': { displayName: 'Связь с косаткой', description: 'Подводный мостик, электрически-синие каналы и панорама навигации косатки.' },
@@ -1281,7 +1281,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: 'Чёрная косатка', description: 'Функциональность бездны, свет косатки и футуристический глубоководный мостик.' },
   },
   'ar-SA': {
-    default: { displayName: 'السمة الافتراضية', description: 'مساحة عمل DSH Cyber داكنة أصلية بقراءة واضحة ومتزنة.' },
+    default: { displayName: 'السمة الافتراضية', description: 'مساحة عمل DSH Cyber بوضعين فاتح وداكن لقراءة واضحة ومريحة.' },
     'maid-atelier': { displayName: 'ورشة أعماق البحر', description: 'قصر بحري، بلورات زرقاء وذهبية، قاعة قمرية وصورتا خادمتين.' },
     'cyber-company': { displayName: 'المقر السيبراني', description: 'مكتب هولوغرافي بارد بلمعان السبج للتعاون المركّز.' },
     'orca-link': { displayName: 'وصلة الحوت القاتل', description: 'جسر أعماق البحر، وصلات زرقاء كهربائية وبانوراما ملاحة للحوت القاتل.' },
@@ -1293,7 +1293,7 @@ const BUILTIN_THEME_TEXT = {
     'black-orca': { displayName: 'الحوت القاتل الأسود', description: 'وظائف الأعماق، ضوء الحوت القاتل وجسر غوص مستقبلي.' },
   },
   'hi-IN': {
-    default: { displayName: 'डिफ़ॉल्ट स्किन', description: 'DSH Cyber का मूल गहरा वर्कबेंच, स्पष्ट और संयत पढ़ने के अनुभव के साथ।' },
+    default: { displayName: 'डिफ़ॉल्ट स्किन', description: 'DSH Cyber का कार्यक्षेत्र, आरामदायक पढ़ने के लिए हल्के और गहरे मोड के साथ।' },
     'maid-atelier': { displayName: 'गहरे समुद्र का मेइड एटेलियर', description: 'समुद्री महल, नीले-सुनहरे क्रिस्टल, चाँदनी सभागार और दो मेइड चित्र।' },
     'cyber-company': { displayName: 'साइबर मुख्यालय', description: 'ओब्सीडियन चमक वाला ठंडा होलोग्राफ़िक कार्यालय, केंद्रित सहयोग के लिए।' },
     'orca-link': { displayName: 'ऑर्का लिंक', description: 'गहरे समुद्र का पुल, बिजली-नीली कड़ियाँ और ऑर्का नेविगेशन पैनोरमा।' },
