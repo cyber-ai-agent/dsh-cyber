@@ -15,6 +15,27 @@ afterEach(() => {
 })
 
 describe('Chat control UI', () => {
+  it('keeps IME confirmation and Shift+Enter in the composer, and sends with plain Enter', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const send = vi.fn(async () => undefined)
+    await act(async () => { root.render(createElement(ChatWorkbench, {
+      demoMode: true,
+      world: { id: 'ime-world', name: '输入测试', templateId: 'personal-world' } as World,
+      employees: [{ id: 'ime-role', displayName: '管家', role: '管家', avatarIndex: 0 } as CyberEmployee],
+      participantIds: ['ime-role'], messages: [], draft: '请核对交付',
+      onDraftChange: vi.fn(), onSend: send, onUploadAttachment: vi.fn(), onOpenDossier: vi.fn(), onOpenArtifact: vi.fn(), onRecruit: vi.fn(),
+    })) })
+    const input = host.querySelector('textarea')!
+    for (const init of [{ isComposing: true }, { keyCode: 229 }, { shiftKey: true }]) {
+      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init })) })
+    }
+    expect(send).not.toHaveBeenCalled()
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
+    expect(send).toHaveBeenCalledExactlyOnceWith('请核对交付', [], 'normal')
+    await act(async () => root.unmount())
+  })
   it('derives active, queued and saturated composer state in one stable projection', () => {
     const createdAt = new Date(0).toISOString()
     const summary = summarizeChatQueue([
@@ -357,7 +378,7 @@ describe('Chat control UI', () => {
       onRecruit: vi.fn(),
     }))
     expect(html).toContain('消息已接收，正在等待角色处理')
-    expect(html).toContain('等待插入')
+    expect(html).toContain('已接收 · 等待执行')
     expect(html).not.toContain('另有 1 条')
   })
 
@@ -390,14 +411,14 @@ describe('Chat control UI', () => {
       onPromoteQueuedTurn: vi.fn(async () => undefined),
     }))
     expect(html).toContain('正在回复中')
-    expect(html).toContain('插入对话')
+    expect(html).toContain('待处理消息')
     expect(html).toContain('下一条消息')
     expect(html).not.toContain('send-button--stop')
     expect(html).toContain('编辑排队消息')
-    expect(html).toContain('插入')
-    expect(html).toContain('删除')
+    expect(html).toContain('优先处理排队消息')
+    expect(html).toContain('取消排队消息')
     expect(html).not.toContain('撤销插入')
-    expect(html).not.toContain('排队发送')
+    expect(html).toContain('排队发送')
     expect(html).not.toContain('队列操作')
     expect(html).not.toContain('插入队列前方')
     expect(html).not.toContain('下一条执行')
@@ -430,7 +451,7 @@ describe('Chat control UI', () => {
     })) })
 
     const sendButton = host.querySelector<HTMLButtonElement>('.send-button')
-    expect(sendButton?.getAttribute('aria-label')).toBe('插入对话')
+    expect(sendButton?.getAttribute('aria-label')).toBe('排队发送')
     await act(async () => { sendButton?.click() })
     expect(onSend).toHaveBeenCalledWith('补充验收条件', [], 'next')
     await act(async () => { root.unmount() })

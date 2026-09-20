@@ -10,6 +10,18 @@
   font-size: calc(1rem * var(--world-font-scale, 1));
 }
 
+/* Day mode owns the reading surfaces; the world keeps its scene palette. */
+:root[data-skin='default'][data-resolved-color-scheme='light'] .app-frame {
+  --accent: inherit;
+  --accent-strong: inherit;
+  --accent-soft: inherit;
+  --bg: inherit;
+  --surface-0: inherit;
+  --surface-1: inherit;
+  --text: inherit;
+  --text-muted: inherit;
+}
+
 :root:not([data-skin]) .message__content { border-radius: var(--world-bubble-radius, 8px); color: var(--world-text, var(--text)); background: var(--world-character-bubble, var(--surface-1)); }
 :root:not([data-skin]) .message--owner .message__content { background: var(--world-owner-bubble, var(--accent-soft)); }
 

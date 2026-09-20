@@ -4,6 +4,7 @@ import {
   CircleNotch,
   ClockCounterClockwise,
   Copy,
+  DotsThree,
   File as FileIcon,
   FilePlus,
   PencilSimple,
@@ -37,6 +38,8 @@ import { ComposerReplySpeaker } from '../features/voice/ComposerReplySpeaker.js'
 import type { SpeechInputSurface } from '../features/voice/SpeechCoordinator.js'
 import { VoiceConversationControl } from '../features/voice/VoiceConversationControl.js'
 import type { ComposerAttachmentDraft } from '../composer-draft-store.js'
+import type { ChatSubmission } from '../chat-submission-store.js'
+import { ChatSubmissionRecovery } from './ChatSubmissionRecovery.js'
 import { collaborationModeOf } from './group-collaboration.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
@@ -72,6 +75,8 @@ interface ChatWorkbenchProps {
   focusRequest?: number
   onDraftChange(value: string): void
   onSend(prompt: string, attachments: ChatAttachment[], queueMode?: 'normal' | 'next', speechSurface?: SpeechInputSurface): Promise<void>
+  onRetrySubmission?(submission: ChatSubmission): Promise<void>
+  onRestoreSubmission?(submission: ChatSubmission): void
   onUploadAttachment(file: File, signal?: AbortSignal): Promise<ChatAttachment>
   onOpenDossier(employeeId: string): void
   onOpenArtifact(artifactId?: string): void
@@ -99,9 +104,10 @@ interface ChatWorkbenchProps {
   speechConversationKey?: string
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = EMPTY_PARTICIPANT_IDS, messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onEditQueuedTurn, onPromoteQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = EMPTY_PARTICIPANT_IDS, messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onRetrySubmission, onRestoreSubmission, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onEditQueuedTurn, onPromoteQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const composingRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadGenerationRef = useRef(new Map<string, number>())
   const uploadAbortRef = useRef(new Map<string, AbortController>())
@@ -157,7 +163,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [copiedMessageId, setCopiedMessageId] = useState<string>()
   const [copyError, setCopyError] = useState<string>()
   const [savingDocumentMessageId, setSavingDocumentMessageId] = useState<string>()
-  const [savedDocumentMessageIds, setSavedDocumentMessageIds] = useState<Set<string>>(() => new Set())
+  const [savedDocumentMessageIds, setSavedDocumentMessageIds] = useState<Map<string, string>>(() => new Map())
   const [saveDocumentError, setSaveDocumentError] = useState<string>()
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [topicNotice, setTopicNotice] = useState(false)
@@ -203,7 +209,28 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   useEffect(() => {
     setAttachmentError(undefined)
     setTopicNotice(false)
+    setMessageMenu(undefined)
+    composingRef.current = false
   }, [composerOwnerKey])
+
+  useLayoutEffect(() => {
+    const input = inputRef.current
+    if (input === null) return
+    const resize = () => {
+      input.style.height = 'auto'
+      const maximum = Number.parseFloat(getComputedStyle(input).maxHeight) || 180
+      input.style.height = `${Math.min(input.scrollHeight, maximum)}px`
+    }
+    resize()
+    let width = input.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (input.clientWidth === width) return
+      width = input.clientWidth
+      resize()
+    })
+    observer.observe(input)
+    return () => observer.disconnect()
+  }, [draft, composerOwnerKey])
 
   useEffect(() => cancelAllUploads, [cancelAllUploads])
 
@@ -345,7 +372,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
 
   useEffect(() => {
     if (!shouldFollowOutputRef.current) return
-    const frame = window.requestAnimationFrame(() => scrollToBottom())
+    const frame = window.requestAnimationFrame(() => {
+      // A wheel/keyboard scroll can change intent between render and this frame.
+      if (shouldFollowOutputRef.current) scrollToBottom()
+    })
     return () => window.cancelAnimationFrame(frame)
   }, [visibleMessages, pendingCount, sending, scrollToBottom])
 
@@ -554,7 +584,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       const result = await response.json() as { artifact?: { id?: unknown }; error?: { message?: string } }
       if (!response.ok) throw new Error(result.error?.message ?? '这条回复暂时无法保存为文档')
       if (typeof result.artifact?.id !== 'string') throw new Error('产物服务没有返回可查看的文档记录')
-      setSavedDocumentMessageIds((current) => new Set(current).add(message.id))
+      const artifactId = result.artifact.id
+      setSavedDocumentMessageIds((current) => new Map(current).set(message.id, artifactId))
     } catch (cause) {
       setSaveDocumentError(cause instanceof Error ? cause.message : '这条回复暂时无法保存为文档')
     } finally {
@@ -616,9 +647,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
                 {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} assetUrl={employee?.avatarAssetUrl} rendererKind={employee?.avatarProfile?.rendererKind} /></button>}
                 <div className="message__body">
-                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}{owner || employee === undefined ? null : <MessageSpeechButton employeeId={employee.id} employeeName={employee.displayName} {...(dossiers[employee.id]?.profile === undefined ? {} : { profile: dossiers[employee.id]!.profile })} text={message.content} />}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : savingDocumentMessageId === message.id ? <span role="status">正在保存为文档…</span> : savedDocumentMessageIds.has(message.id) ? <span role="status">已保存为文档</span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
+                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}{owner || employee === undefined ? null : <MessageSpeechButton employeeId={employee.id} employeeName={employee.displayName} {...(dossiers[employee.id]?.profile === undefined ? {} : { profile: dossiers[employee.id]!.profile })} text={message.content} />}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : savingDocumentMessageId === message.id ? <span role="status">正在保存为文档…</span> : savedDocumentMessageIds.has(message.id) ? <span role="status">已保存为文档<button type="button" className="message__document-link" onClick={() => onOpenArtifact(savedDocumentMessageIds.get(message.id))}>查看文档</button></span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
                   <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                   <MessageAttachments attachments={messageAttachments(message.metadata)} onZoom={(attachment) => setZoomImage(attachment)} />
+                  {owner || streaming ? null : <button type="button" className="message__menu-button" aria-label="回复操作" aria-haspopup="menu" title="复制回复、保存为文档或加入知识" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left, y: rect.bottom + 4 } }) }}><DotsThree size={20} weight="bold" /><span>回复操作</span></button>}
                   <CompletionJobStatus metadata={message.metadata} {...(onRetryCompletionJob === undefined ? {} : { onRetry: onRetryCompletionJob })} {...(onCompletionJobSettled === undefined ? {} : { onSettled: onCompletionJobSettled })} />
                   {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
                 </div>
@@ -658,21 +690,22 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         },
       ]} />}
       <div className="composer-zone">
+        {onRetrySubmission === undefined || onRestoreSubmission === undefined ? null : <ChatSubmissionRecovery ownerKey={composerOwnerKey} hasDraft={draft.length > 0 || attachments.length > 0} onRetry={onRetrySubmission} onRestore={onRestoreSubmission} />}
         {copyError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{copyError}</span><button type="button" onClick={() => setCopyError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {saveDocumentError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{saveDocumentError}</span><button type="button" onClick={() => setSaveDocumentError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {knowledgeError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{knowledgeError}</span><button type="button" onClick={() => setKnowledgeError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
         {topicNotice ? <div className="composer-topic-notice" role="status"><span>已清空当前会话草稿，已发送消息和已上传资源仍保留</span></div> : null}
-        {queuedTurns.length > 0 ? <section className="composer-inserts" aria-label="插入对话">
-          <header><span>插入对话</span><small>当前回复结束后优先处理</small></header>
+        {queuedTurns.length > 0 ? <section className="composer-inserts" aria-label="待处理消息">
+          <header><span>待处理消息 · {queuedTurns.length}</span><small>{hasRunningTurn ? '当前回复结束后，依次处理' : '角色可用后，依次处理'}</small></header>
           {saturatedWaiting ? <p className="composer-inserts__note" role="status">角色通道已满，插入内容会在可用后立即继续。</p> : null}
           <div>{queuedTurns.map((turn) => <article key={turn.id} className="composer-insert">
-            <span><strong>{turn.content ?? turn.title}</strong><small>等待插入</small></span>
+            <span><strong title={turn.content ?? turn.title}>{turn.content ?? turn.title}</strong><small>已接收 · 等待执行</small></span>
             <div className="composer-insert__actions" aria-label={`排队消息操作：${turn.content ?? turn.title}`}>
-              {onEditQueuedTurn === undefined ? null : <button type="button" className="secondary-button" onClick={() => void onEditQueuedTurn(turn.id)} aria-label={`编辑排队消息：${turn.content ?? turn.title}`} title="编辑排队消息"><PencilSimple size={14} />编辑排队消息</button>}
-              {onPromoteQueuedTurn === undefined ? null : <button type="button" className="secondary-button" onClick={() => void onPromoteQueuedTurn(turn.id)} aria-label={`插入排队消息：${turn.content ?? turn.title}`} title="插入"><ArrowUp size={14} />插入</button>}
-              {onCancelQueuedTurn === undefined ? null : <button type="button" className="danger-button" onClick={() => void onCancelQueuedTurn(turn.id)} aria-label={`删除排队消息：${turn.content ?? turn.title}`} title="删除"><Trash size={14} />删除</button>}
+              {onEditQueuedTurn === undefined ? null : <button type="button" className="secondary-button" onClick={() => void onEditQueuedTurn(turn.id)} aria-label={`编辑排队消息：${turn.content ?? turn.title}`} title="撤回队列后编辑"><PencilSimple size={14} />编辑</button>}
+              {onPromoteQueuedTurn === undefined ? null : <button type="button" className="secondary-button" onClick={() => void onPromoteQueuedTurn(turn.id)} aria-label={`优先处理排队消息：${turn.content ?? turn.title}`} title="移到等待队列最前"><ArrowUp size={14} />优先</button>}
+              {onCancelQueuedTurn === undefined ? null : <button type="button" className="danger-button" onClick={() => void onCancelQueuedTurn(turn.id)} aria-label={`取消排队消息：${turn.content ?? turn.title}`} title="取消这条待处理消息"><Trash size={14} />取消</button>}
             </div>
           </article>)}</div>
         </section> : null}
@@ -695,7 +728,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           </span>
         })}</div> : null}
         {activeAttachmentError === undefined ? null : <p className="composer-error" role="alert">{activeAttachmentError}</p>}
-        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} onPaste={pasteImages} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
+        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} onPaste={pasteImages} onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false }} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !composingRef.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-describedby="composer-keyboard-hint" aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
         <div className="composer__toolbar">
           <div className="composer__actions-left">
             <input ref={fileInputRef} className="composer-file-input" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const files = Array.from(event.target.files ?? []); if (files.length > 0) void uploadAttachments(files) }} />
@@ -707,9 +740,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           <div className="composer__actions-right">
             <ComposerReplySpeaker {...(directEmployee === undefined ? { employeeId: undefined } : { employeeId: directEmployee.id })} {...(session?.id === undefined ? {} : { sessionId: session.id })} {...(speechConversationKey === undefined ? {} : { conversationKey: speechConversationKey })} dossiers={dossiers} />
             <VoiceConversationControl variant="compact" employeeName={directEmployee?.displayName ?? '当前会话角色'} disabled={employees.length === 0} onFinal={async (text) => { await onSend(text, [], nextQueueMode, 'composer') }} />
-            <button className={`send-button${showStopButton ? ' send-button--stop' : ''}`} type="button" aria-label={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : sending ? '正在回复中，发送新消息' : '发送'} title={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : '发送'} disabled={showStopButton ? false : uploading || employees.length === 0 || (!draft.trim() && readyAttachments.length === 0)} onClick={() => { if (showStopButton && activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id); else void submit() }}>{showStopButton ? <Stop size={19} weight="bold" /> : sending && !insertsNext ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{showStopButton || queuedCount === 0 ? null : <span className="send-button__queue" aria-label={`${queuedCount} 条插入对话`}>{queuedCount}</span>}</button>
+            <button className={`send-button${showStopButton ? ' send-button--stop' : ''}`} type="button" aria-label={showStopButton ? '停止当前回复' : insertsNext ? '排队发送' : sending ? '正在回复中，发送新消息' : '发送'} title={showStopButton ? '停止当前回复' : insertsNext ? '排队发送' : '发送'} disabled={showStopButton ? false : uploading || employees.length === 0 || (!draft.trim() && readyAttachments.length === 0)} onClick={() => { if (showStopButton && activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id); else void submit() }}>{showStopButton ? <Stop size={19} weight="bold" /> : sending && !insertsNext ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}</button>
           </div>
         </div>
+        <p className="composer__hint" id="composer-keyboard-hint">{insertsNext ? '补充将排队，在后续轮次处理' : 'Enter 发送 · Shift+Enter 换行'}</p>
       </div></div>
       {zoomImage !== undefined ? createPortal(<div className="chat-image-zoom" role="dialog" aria-modal="true" aria-label={zoomImage.name} onMouseDown={(event) => { if (event.target === event.currentTarget) setZoomImage(undefined) }}>
         <img src={zoomImage.url} alt={zoomImage.name} />
