@@ -1,6 +1,6 @@
 import { expect, type Locator } from '@playwright/test'
 
-export type WorldDockLabel = '世界' | '轨迹' | '角色' | '知识' | '产物' | '日程'
+export type WorldDockLabel = '世界' | '轨迹' | '角色' | '知识' | '产物' | '日程' | '任务'
 
 export async function openDockTab(dock: Locator, label: WorldDockLabel): Promise<void> {
   let tab = dock.getByRole('tab', { name: label, exact: true })

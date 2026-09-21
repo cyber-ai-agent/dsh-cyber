@@ -100,9 +100,14 @@ test('expands and reads sanitized event evidence, survives reload, and fits thre
   const topbarNav = page.locator('.topbar nav')
   await expect(topbarNav).toHaveCSS('overflow-x', 'auto')
   expect(await topbarNav.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
-  expect(await topbarNav.locator('button')).toHaveCount(7)
-  for (const label of ['创意工坊', '市场', '技能中心', '模型中心', '连接中心', '系统状态：良好', '设置']) {
+  expect(await topbarNav.locator('button')).toHaveCount(9)
+  for (const label of ['创意工坊', '市场', '工具', '设置']) {
     await expect(topbarNav.getByRole('button', { name: label, exact: true })).toBeVisible()
+  }
+  await topbarNav.getByRole('button', { name: '工具', exact: true }).click()
+  const tools = page.getByRole('dialog', { name: '工作台工具' })
+  for (const label of ['技能中心', '模型中心', '连接中心', '系统状态：良好']) {
+    await expect(tools.getByRole('button', { name: label, exact: true })).toBeVisible()
   }
   await writeFile(info.outputPath('console.json'), JSON.stringify(consoleIssues, null, 2))
   expect(consoleIssues).toEqual([])

@@ -634,6 +634,7 @@ describe('SqliteStore', () => {
   it('persists appearance, skin and safe model settings without storing credentials', async () => {
     const { path, store } = await testDatabase()
     const workspace = store.createWorkspace({ name: '个性化工作区' })
+    expect(store.getWorkspacePreferences(workspace.id)).toMatchObject({ colorScheme: 'light', rightPaneWidth: 440 })
     const preferenceSchema = store.database.prepare(
       `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_preferences'`,
     ).get() as { sql: string }

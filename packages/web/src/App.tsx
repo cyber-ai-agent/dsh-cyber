@@ -111,6 +111,9 @@ import {
   useComposerDraft,
   type ComposerAttachmentDraft,
 } from './composer-draft-store.js'
+import { chatSubmissionStore, type ChatSubmission } from './chat-submission-store.js'
+import { deliverChatSubmission } from './chat-submission-delivery.js'
+import { WorkbenchToolsMenu } from './components/WorkbenchToolsMenu.js'
 
 const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
 const WorldSideDock = lazy(async () => ({ default: (await import('./components/WorldSideDock.js')).WorldSideDock }))
@@ -131,12 +134,6 @@ const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
 const worldRuntimeV2Enabled = new URLSearchParams(window.location.search).get('legacyWorld') !== '1'
 const MESSAGE_PAGE_SIZE = 20
 type AppMode = 'world' | 'workbench'
-
-interface ChatResult {
-  session: WorkSession
-  workTurnId?: string
-  queueItem?: { id?: string; workTurnId?: string; status?: PendingChatTurn['status'] }
-}
 
 interface PreparedSessionHostAccessGrant {
   id: string
@@ -180,13 +177,6 @@ export default function App() {
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
-  const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>(() => readConversationModelProfiles())
-  useEffect(() => {
-    // Per-conversation model choice must survive a refresh, the same promise
-    // the permission selector makes; a deleted profile resolves nowhere and
-    // the composer falls back exactly as before.
-    writeConversationModelProfiles(conversationModelProfiles)
-  }, [conversationModelProfiles])
   const [discoveredCatalog] = useState<Record<string, CachedModelCatalog>>(() => loadDiscoveredModelsCache())
   const selectableModels = useMemo(() => {
     const configuredBaseUrls = new Set(
@@ -307,13 +297,6 @@ export default function App() {
   }, [activeComposerOwnerKey])
   const clearActiveComposerDraft = useCallback(() => {
     composerDraftStore.clear(activeComposerOwnerKey)
-    if (activeComposerOwnerKey === undefined) return
-    setConversationModelProfiles((current) => {
-      if (!(activeComposerOwnerKey in current)) return current
-      const next = { ...current }
-      delete next[activeComposerOwnerKey]
-      return next
-    })
   }, [activeComposerOwnerKey])
   const activePermissionKey = activeSessionId === undefined
     ? activeConversationKey
@@ -348,14 +331,6 @@ export default function App() {
   const activeRunningCount = activePendingTurns.filter((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
   const queuedInConversation = activePendingTurns.filter((turn) => turn.status === 'queued').length
   const activeQueuedCount = Math.max(0, queuedInConversation - (activeRunningCount === 0 && queuedInConversation > 0 ? 1 : 0))
-  const directEmployeeId = activeConversationKey !== undefined && activeConversationKey.startsWith('direct:') ? activeConversationKey.slice('direct:'.length) : undefined
-  // A direct conversation's model selector IS the character's assignment: one
-  // durable fact, two views (composer and model hub), no parallel override
-  // layer to fall out of sync. Group chats keep the transient per-conversation
-  // choice - several characters cannot share one "conversation model".
-  const conversationModelProfileId = directEmployeeId !== undefined
-    ? modelAssignments.find((assignment) => assignment.scope === 'employee' && assignment.scopeId === directEmployeeId)?.modelProfileId
-    : activeComposerDraft.modelProfileId ?? (activeComposerOwnerKey === undefined ? undefined : conversationModelProfiles[activeComposerOwnerKey])
   activeWorldRef.current = activeWorld
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
@@ -746,11 +721,18 @@ export default function App() {
     }
   }, [])
 
+  const loadedTranscriptOwnerRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     const requestId = ++transcriptLoadRequestRef.current
-    if (demoMode || activeSessionId === undefined) return
+    if (demoMode || activeSessionId === undefined) {
+      loadedTranscriptOwnerRef.current = undefined
+      return
+    }
     const sessionId = activeSessionId
     const worldId = activeWorldRef.current?.id
+    const owner = JSON.stringify([worldId, sessionId])
+    const changedOwner = loadedTranscriptOwnerRef.current !== owner
+    loadedTranscriptOwnerRef.current = owner
     const controller = new AbortController()
     let timedOut = false
     const timeout = window.setTimeout(() => {
@@ -758,8 +740,12 @@ export default function App() {
       controller.abort()
     }, 10_000)
     const queueKey = queueKeyBySessionRef.current.get(activeSessionId) ?? activeConversationKeyRef.current
-    setMessages([])
-    setMessagePage({ hasMore: false, loading: false })
+    // Completion-job updates refresh this same session. Preserve its DOM and
+    // loaded history so an in-place refresh cannot reset the reading position.
+    if (changedOwner) {
+      setMessages([])
+      setMessagePage({ hasMore: false, loading: false })
+    }
     void api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}`, { signal: controller.signal })
       .then((result) => {
         if (
@@ -767,8 +753,8 @@ export default function App() {
           activeSessionIdRef.current !== sessionId ||
           activeWorldRef.current?.id !== worldId
         ) return
-        setMessages(result.items)
-        setMessagePage({ hasMore: result.hasMore === true, loading: false })
+        setMessages((current) => changedOwner ? result.items : mergeMessages(current, result.items))
+        setMessagePage((current) => ({ hasMore: (!changedOwner && current.hasMore) || result.hasMore === true, loading: false }))
         if (queueKey !== undefined) {
           sessionByQueueKeyRef.current.set(queueKey, sessionId)
           queueKeyBySessionRef.current.set(sessionId, queueKey)
@@ -821,7 +807,7 @@ export default function App() {
         if (effectiveClientTurnId === undefined) return
         patchPendingTurn(effectiveClientTurnId, {
           workTurnId: envelope.workTurnId,
-          ...(pending?.status === 'queued' ? { status: 'running' } : {}),
+          ...(pending?.status === 'queued' || pending?.status === 'submitting' ? { status: 'running' } : {}),
         })
         const queueKey = pending?.queueKey
           ?? queueKeyBySessionRef.current.get(envelope.sessionId)
@@ -987,8 +973,14 @@ export default function App() {
     try {
       const result = await api<{ items?: PendingChatTurn[] }>(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue`)
       if (activeWorldRef.current?.id !== worldId || !Array.isArray(result.items)) return
-      setPendingTurns(result.items)
-      pendingTurnsRef.current = result.items
+      const items = result.items
+      setPendingTurns((current) => {
+        const unconfirmed = new Set(chatSubmissionStore.getSnapshot().filter((item) => item.status === 'sending').map((item) => item.id))
+        const received = new Set(items.map((item) => item.id))
+        const next = [...current.filter((item) => item.worldId !== worldId || unconfirmed.has(item.id) && !received.has(item.id)), ...items]
+        pendingTurnsRef.current = next
+        return next
+      })
     } catch {
       // The live runtime stream and the next explicit action will reconcile
       // the durable queue; a transient read must not interrupt the chat.
@@ -1050,9 +1042,14 @@ export default function App() {
     const savedSkin = typeof localStorage !== 'undefined' ? localStorage.getItem('dsh_cyber_skin') : null
     const scheme = preferences?.colorScheme ?? 'dark'
     root.dataset.colorScheme = scheme
+    const media = window.matchMedia('(prefers-color-scheme: light)')
+    const resolveScheme = () => { root.dataset.resolvedColorScheme = scheme === 'system' ? (media.matches ? 'light' : 'dark') : scheme }
+    resolveScheme()
+    media.addEventListener('change', resolveScheme)
     root.dataset.skin = activeWorld === undefined ? preferences?.skinId ?? savedSkin ?? 'default' : readWorldTheme(activeWorld)
     root.dataset.density = preferences?.interfaceDensity ?? 'compact'
     root.dataset.motion = preferences?.motion ?? 'system'
+    return () => media.removeEventListener('change', resolveScheme)
   }, [activeWorld, preferences])
 
   const openDossier = useCallback(async (employeeId: string) => {
@@ -1790,6 +1787,66 @@ export default function App() {
     return () => clearInterval(timer)
   }, [activeWorld, demoMode, refreshPendingDecisions])
 
+  const submitChatRequest = useCallback(async (submission: ChatSubmission): Promise<void> => {
+    const { id, worldId, queueKey, employeeIds } = submission
+    const outcome = await deliverChatSubmission(submission)
+    if (outcome.kind === 'in-flight') return
+    if (outcome.kind === 'accepted') {
+      const result = outcome.receipt
+      // A repeated receipt can describe an already completed turn. The host's
+      // ingress response is authoritative and the original body stays intact.
+      const status = result.queueItem?.status
+      if (status !== undefined && ['queued', 'running', 'waiting-approval'].includes(status)) {
+        setPendingTurns((current) => {
+          const previous = current.find((turn) => turn.id === id)
+          if (previous === undefined) return current
+          const next = [...current.filter((turn) => turn.id !== id), {
+            id, worldId, queueKey, employeeIds, title: submission.title,
+            content: (JSON.parse(submission.body) as { prompt: string }).prompt,
+            createdAt: submission.createdAt,
+            status: previous?.workTurnId !== undefined && previous.status !== 'submitting' && previous.status !== 'failed'
+              ? previous.status : status as PendingChatTurn['status'],
+            sessionId: result.session.id,
+            ...(result.workTurnId === undefined ? {} : { workTurnId: result.workTurnId }),
+            ...(result.queueItem?.id === undefined ? {} : { serverQueueId: result.queueItem.id }),
+          }]
+          pendingTurnsRef.current = next
+          return next
+        })
+      } else removePendingTurn(id)
+      bindConversationSession(queueKey, result.session, employeeIds)
+      await Promise.all([
+        refreshConversationTranscript(result.session.id, queueKey, worldId, true),
+        refreshPendingTurns(worldId),
+      ])
+    } else {
+      if (outcome.permissionDenied) {
+        if (submission.sessionId !== undefined) setSessionHostAccessGrants((current) => {
+          const next = { ...current }
+          delete next[submission.sessionId!]
+          return next
+        })
+        const permissionKey = submission.sessionId === undefined ? queueKey : `session:${submission.sessionId}`
+        setConversationPermissionModes((current) => ({ ...current, [permissionKey]: 'read-only' }))
+      }
+      removePendingTurn(id)
+      setOutboxMessages((current) => removeOutboxTurn(current, queueKey, id))
+      // Failures remain with the captured owner while other conversations can
+      // keep receiving input. Retry uses the original id, model and attachments.
+      if (submission.sessionId !== undefined) await refreshConversationTranscript(submission.sessionId, queueKey, worldId)
+    }
+  }, [bindConversationSession, refreshConversationTranscript, refreshPendingTurns, removePendingTurn])
+
+  const restoreChatSubmission = useCallback((submission: ChatSubmission) => {
+    const current = composerDraftStore.get(submission.ownerKey)
+    if (submission.status !== 'rejected' || current.text.length > 0 || current.attachments.length > 0) return
+    composerDraftStore.setText(submission.ownerKey, submission.draft.text)
+    composerDraftStore.setAttachments(submission.ownerKey, submission.draft.attachments)
+    composerDraftStore.setModelProfile(submission.ownerKey, submission.draft.modelProfileId)
+    chatSubmissionStore.remove(submission.id)
+    setComposerFocusRequest((value) => value + 1)
+  }, [])
+
   const send = useCallback((prompt: string, attachments: ChatAttachment[], queueMode: 'normal' | 'next' = 'normal', speechSurface?: SpeechInputSurface): Promise<void> => {
     const world = activeWorld
     if (world === undefined) return Promise.resolve()
@@ -1809,7 +1866,6 @@ export default function App() {
         : compactPrompt(prompt))
     const queueKey = activeConversationKey ?? targetConversationQueueKey(targetIds, title)
     const capturedComposerOwnerKey = activeComposerOwnerKey
-    const capturedModelProfileId = conversationModelProfileId
     const startedFromWorldScratch = activeConversationKey === undefined
       && activeSessionId === undefined
       && conversationIntent === undefined
@@ -1828,7 +1884,6 @@ export default function App() {
     const effectivePermissionMode: AgentPermissionMode = conversationPermissionMode ?? 'read-only'
     const createdAt = new Date().toISOString()
     const capturedSessionId = activeSessionId
-    const capturedPermissionKey = activePermissionKey
     const interactionKind = targetIds.length > 1
       ? 'chat'
       : /(?:^|\s)任务[：:]/.test(prompt) ? 'task' : 'chat'
@@ -1850,7 +1905,7 @@ export default function App() {
       employeeIds: targetIds,
       title,
       content: prompt,
-      status: 'queued',
+      status: demoMode ? 'queued' : 'submitting',
       createdAt,
       ...(capturedSessionId === undefined ? {} : { sessionId: capturedSessionId }),
     }
@@ -1901,104 +1956,72 @@ export default function App() {
       [queueKey]: [...(current[queueKey] ?? []), optimisticMessage],
     }))
 
+    if (!demoMode) return submitChatRequest({
+      id: clientTurnId,
+      ownerKey: composerDraftOwnerKey(world.id, queueKey),
+      queueKey, worldId: world.id, title, employeeIds: targetIds, createdAt,
+      ...(capturedSessionId === undefined ? {} : { sessionId: capturedSessionId }),
+      status: 'sending',
+      draft: {
+        text: submittedDraft.text || prompt,
+        attachments: submittedDraft.attachments.filter((item) => item.status === 'ready' && item.attachment !== undefined && submittedAssetIds.has(item.attachment.assetId)),
+      },
+      body: JSON.stringify({
+        prompt, clientTurnId, reasoningEffort, permissionMode: effectivePermissionMode,
+        ...(preparedSessionHostAccess === undefined ? {} : { runtimeAccessGrantId: preparedSessionHostAccess.id }),
+        interactionKind, queueMode,
+        ...(attachments.length === 0 ? {} : { attachments }),
+        employeeIds: targetIds,
+        ...(conversationIntent === undefined ? {} : { title }),
+        ...(capturedSessionId === undefined ? {} : { sessionId: capturedSessionId }),
+      }),
+    })
+
     const runTurn = async () => {
       patchPendingTurn(clientTurnId, { status: 'running' })
       try {
         const resolvedSessionId = sessionByQueueKeyRef.current.get(queueKey) ?? capturedSessionId
-        if (demoMode) {
-          const session = resolvedSessionId === undefined
-            ? makeDemoSession(world, prompt, targetIds.length > 1 ? 'group' : 'direct', title)
-            : {
-                id: resolvedSessionId,
-                workspaceId: world.workspaceId,
-                worldId: world.id,
-                kind: targetIds.length > 1 ? 'group' as const : 'direct' as const,
-                title,
-                status: 'open' as const,
-                createdAt,
-                updatedAt: new Date().toISOString(),
-              }
-          bindConversationSession(queueKey, session, targetIds)
-          await delay(650)
-          const targets = targetIds
-            .map((id) => employees.find((employee) => employee.id === id))
-            .filter((employee): employee is CyberEmployee => employee !== undefined)
-          const ownerMessage = makeDemoMessage(session.id, Date.now(), 'owner', 'owner', 'user', prompt, {
-            clientTurnId,
-            participantIds: targetIds,
-            ...(attachments.length === 0 ? {} : { attachments: serializableAttachments(attachments) }),
-          })
-          const replies = targets.map((employee, index) => makeDemoMessage(
-            session.id,
-            Date.now() + index + 1,
-            employee.id,
-            'employee',
-            'assistant',
-            worldExperience(world).kind === 'tavern'
-              ? tavernDemoReply(employee, prompt)
-              : `${employee.displayName}收到。我会以${employee.role}的职责独立处理“${compactPrompt(prompt)}”，完成后给出证据、产物和下一步。`,
-            { clientTurnId },
-          ))
-          if (activeWorldRef.current?.id === world.id && activeConversationKeyRef.current === queueKey) {
-            setMessages((current) => [...current.filter((message) => messageClientTurnId(message) !== clientTurnId), ownerMessage, ...replies])
-          }
-          setOutboxMessages((current) => removeOutboxTurn(current, queueKey, clientTurnId))
-          if (!pendingTurnsRef.current.some((item) => item.id === clientTurnId && (item.status === 'interrupted' || item.status === 'cancelled'))) removePendingTurn(clientTurnId)
-          return
-        }
-
-        const result = await api<ChatResult>(`/api/worlds/${world.id}/chat`, {
-          method: 'POST',
-          body: JSON.stringify({
-            prompt,
-            clientTurnId,
-            reasoningEffort,
-            permissionMode: effectivePermissionMode,
-            ...(preparedSessionHostAccess === undefined ? {} : { runtimeAccessGrantId: preparedSessionHostAccess.id }),
-            interactionKind,
-            queueMode,
-            ...(attachments.length === 0 ? {} : { attachments }),
-            employeeIds: targetIds,
-            ...(conversationIntent === undefined ? {} : { title }),
-            ...(resolvedSessionId === undefined ? {} : { sessionId: resolvedSessionId }),
-            ...(capturedModelProfileId === undefined ? {} : { modelProfileId: capturedModelProfileId }),
-          }),
+        const session = resolvedSessionId === undefined
+          ? makeDemoSession(world, prompt, targetIds.length > 1 ? 'group' : 'direct', title)
+          : {
+              id: resolvedSessionId,
+              workspaceId: world.workspaceId,
+              worldId: world.id,
+              kind: targetIds.length > 1 ? 'group' as const : 'direct' as const,
+              title,
+              status: 'open' as const,
+              createdAt,
+              updatedAt: new Date().toISOString(),
+            }
+        bindConversationSession(queueKey, session, targetIds)
+        await delay(650)
+        const targets = targetIds
+          .map((id) => employees.find((employee) => employee.id === id))
+          .filter((employee): employee is CyberEmployee => employee !== undefined)
+        const ownerMessage = makeDemoMessage(session.id, Date.now(), 'owner', 'owner', 'user', prompt, {
+          clientTurnId,
+          participantIds: targetIds,
+          ...(attachments.length === 0 ? {} : { attachments: serializableAttachments(attachments) }),
         })
-        if (result.workTurnId !== undefined || result.queueItem !== undefined) {
-          setPendingTurns((current) => {
-            const next = current.map((turn) => turn.id === clientTurnId ? {
-              ...turn,
-              ...(result.queueItem?.status === undefined ? {} : { status: result.queueItem.status }),
-              ...(result.workTurnId === undefined ? {} : { workTurnId: result.workTurnId }),
-              ...(result.queueItem?.workTurnId === undefined ? {} : { workTurnId: result.queueItem.workTurnId }),
-              ...(result.queueItem?.id === undefined ? {} : { serverQueueId: result.queueItem.id }),
-            } : turn)
-            pendingTurnsRef.current = next
-            return next
-          })
+        const replies = targets.map((employee, index) => makeDemoMessage(
+          session.id,
+          Date.now() + index + 1,
+          employee.id,
+          'employee',
+          'assistant',
+          worldExperience(world).kind === 'tavern'
+            ? tavernDemoReply(employee, prompt)
+            : `${employee.displayName}收到。我会以${employee.role}的职责独立处理“${compactPrompt(prompt)}”，完成后给出证据、产物和下一步。`,
+          { clientTurnId },
+        ))
+        if (activeWorldRef.current?.id === world.id && activeConversationKeyRef.current === queueKey) {
+          setMessages((current) => [...current.filter((message) => messageClientTurnId(message) !== clientTurnId), ownerMessage, ...replies])
         }
-        bindConversationSession(queueKey, result.session, targetIds)
-        await refreshConversationTranscript(result.session.id, queueKey, world.id, true)
-        setStreamingReplies((current) => removeStreamingTurn(current, clientTurnId))
-        if (result.queueItem === undefined && !pendingTurnsRef.current.some((item) => item.id === clientTurnId && (item.status === 'interrupted' || item.status === 'cancelled'))) removePendingTurn(clientTurnId)
+        setOutboxMessages((current) => removeOutboxTurn(current, queueKey, clientTurnId))
+        if (!pendingTurnsRef.current.some((item) => item.id === clientTurnId && (item.status === 'interrupted' || item.status === 'cancelled'))) removePendingTurn(clientTurnId)
       } catch (cause) {
-        if (cause instanceof ApiError && cause.code === 'owner_runtime_access_denied') {
-          if (capturedSessionId !== undefined) {
-            setSessionHostAccessGrants((current) => {
-              const next = { ...current }
-              delete next[capturedSessionId]
-              return next
-            })
-          }
-          if (capturedPermissionKey !== undefined) {
-            setConversationPermissionModes((current) => ({ ...current, [capturedPermissionKey]: 'read-only' }))
-          }
-        }
         const failure = cause instanceof Error ? cause.message : '消息发送失败'
         const failedSessionId = sessionByQueueKeyRef.current.get(queueKey) ?? capturedSessionId
-        if (failedSessionId !== undefined && !demoMode) {
-          await refreshConversationTranscript(failedSessionId, queueKey, world.id)
-        }
         patchPendingTurn(clientTurnId, {
           status: 'failed',
           error: failure,
@@ -2013,7 +2036,7 @@ export default function App() {
     // whether the message got through, and resolving immediately told it every
     // attempt had succeeded — so a failed send looked exactly like a delivered
     // one and the microphone went straight back to listening.
-    return demoMode ? turnQueueRef.current.enqueue(queueKey, runTurn, clientTurnId) : runTurn()
+    return turnQueueRef.current.enqueue(queueKey, runTurn, clientTurnId)
   }, [
     activeConversationKey,
     activeComposerOwnerKey,
@@ -2023,7 +2046,6 @@ export default function App() {
     activeWorld,
     bindConversationSession,
     conversationIntent,
-    conversationModelProfileId,
     demoMode,
     employees,
     conversationPermissionMode,
@@ -2033,6 +2055,7 @@ export default function App() {
     removePendingTurn,
     sessionParticipants,
     sessionHostAccessGrants,
+    submitChatRequest,
   ])
 
   const requestSessionHostAccess = useCallback(() => {
@@ -2191,7 +2214,7 @@ export default function App() {
 
   // The model hub writes providers/pool/assignments through its own routes;
   // when it closes, the shell re-pulls the profile list and the assignments so
-  // the composer's picker and every inheritance label see the new reality
+  // the settings panels and role assignments see the new configuration
   // without a page reload.
   const refreshModelProfiles = useCallback(async (): Promise<void> => {
     if (workspace === undefined || demoMode) return
@@ -2204,18 +2227,6 @@ export default function App() {
       // already surfaced any write error to the user.
     }
   }, [demoMode, workspace])
-
-  const assignEmployeeModel = useCallback(async (employeeId: string, modelProfileId: string | undefined): Promise<void> => {
-    if (workspace === undefined) throw new Error('请先创建工作区')
-    const endpoint = `/api/workspaces/${workspace.id}/model-assignments/employee/${encodeURIComponent(employeeId)}`
-    if (modelProfileId === undefined) {
-      await api<{ removed: boolean }>(endpoint, { method: 'DELETE' })
-      setModelAssignments((current) => current.filter((item) => !(item.scope === 'employee' && item.scopeId === employeeId)))
-      return
-    }
-    const result = await api<{ assignment: ModelAssignment }>(endpoint, { method: 'PUT', body: JSON.stringify({ modelProfileId }) })
-    setModelAssignments((current) => [...current.filter((item) => !(item.scope === 'employee' && item.scopeId === employeeId)), result.assignment])
-  }, [workspace])
 
   const saveModel = useCallback(async (profile: ModelProfileSaveDraft): Promise<ModelProfile> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -2395,23 +2406,25 @@ export default function App() {
           onExplore={() => void openPackageMarket('theme')}
           onManage={() => { clearError(); setWorldLibraryOpen(true) }}
         />
-        <WorldThemeSwitcher
-          key={`${activeWorld.id}:${skinRevision}`}
-          activeWorld={activeWorld}
-          installedSkinIds={installedSkinIds}
-          onThemeChange={() => {
-            setSkinRevision((value) => value + 1)
-            setWorldRuntimeRevision((value) => value + 1)
-          }}
-        />
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" aria-label={t('app.market', '市场')} title={t('app.market', '市场')} onClick={() => void openPackageMarket('theme')}><Storefront size={16} /><span>{t('app.market', '市场')}</span></button>
-          <SkillCenterLauncher world={activeWorld} worlds={worlds} onClosed={() => void loadWorld(activeWorld)} onOpenMarket={() => void openPackageMarket('plugin')} />
-          <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} onClosed={() => void refreshModelProfiles()} />
-          <ConnectionHubLauncher workspace={workspace} />
-          <button type="button" aria-label={`${t('app.systemStatus', '系统状态')}：${t('app.healthy', '良好')}`} title={`${t('app.systemStatus', '系统状态')}：${t('app.healthy', '良好')}`} onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" /><span>{t('app.healthy', '良好')}</span></button>
-          <button type="button" aria-label={t('app.settings', '设置')} title={t('app.settings', '设置')} onClick={() => { clearError(); setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} /><span>{t('app.settings', '设置')}</span></button>
+          <WorkbenchToolsMenu>
+            <WorldThemeSwitcher
+              key={`${activeWorld.id}:${skinRevision}`}
+              activeWorld={activeWorld}
+              installedSkinIds={installedSkinIds}
+              onThemeChange={() => {
+                setSkinRevision((value) => value + 1)
+                setWorldRuntimeRevision((value) => value + 1)
+              }}
+            />
+            <SkillCenterLauncher world={activeWorld} worlds={worlds} onClosed={() => void loadWorld(activeWorld)} onOpenMarket={() => void openPackageMarket('plugin')} />
+            <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} onClosed={() => void refreshModelProfiles()} />
+            <ConnectionHubLauncher workspace={workspace} />
+            <button type="button" aria-label={`${t('app.systemStatus', '系统状态')}：${t('app.healthy', '良好')}`} title={`${t('app.systemStatus', '系统状态')}：${t('app.healthy', '良好')}`} onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" /><span>{t('app.healthy', '良好')}</span></button>
+          </WorkbenchToolsMenu>
+          <button className="topbar__settings" type="button" aria-label={t('app.settings', '设置')} title={t('app.settings', '设置')} onClick={() => { clearError(); setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} /><span>{t('app.settings', '设置')}</span></button>
         </nav>
       </header>
       {error === undefined ? null : <div className="error-banner" role="alert">{error}<button type="button" onClick={clearError}>关闭</button></div>}
@@ -2450,73 +2463,10 @@ export default function App() {
             dossiers={dossiers}
             {...(activeConversationKey === undefined ? {} : { speechConversationKey: activeConversationKey })}
             installedPlugins={installedPluginCommands}
-            models={selectableModels}
-            modelAssignments={modelAssignments}
             {...(activeComposerOwnerKey === undefined ? {} : { composerOwnerKey: activeComposerOwnerKey })}
             attachments={activeComposerDraft.attachments}
             onAttachmentsChange={updateComposerAttachments}
             onClearDraft={clearActiveComposerDraft}
-            {...(conversationModelProfileId === undefined ? {} : { modelProfileId: conversationModelProfileId })}
-            onChangeModelProfile={async (modelProfileId) => {
-              if (activeComposerOwnerKey === undefined || activeConversationKey === undefined) return
-              let finalProfileId = modelProfileId
-              if (modelProfileId !== undefined && modelProfileId.startsWith('discovered:')) {
-                const parts = modelProfileId.split(':')
-                const baseProfileId = parts[1]
-                const rawModelId = parts.slice(2).join(':')
-                const baseProfile = models.find((m) => m.id === baseProfileId)
-                if (baseProfile !== undefined && rawModelId !== '') {
-                  try {
-                    const { contextWindow: _unusedContext, maxTokens: _unusedMaxTokens, ...cleanSettings } = baseProfile.settings
-                    const saved = await saveModel({
-                      displayName: rawModelId,
-                      modelId: rawModelId,
-                      providerKind: baseProfile.providerKind,
-                      baseUrl: baseProfile.baseUrl,
-                      api: baseProfile.api,
-                      isDefault: false,
-                      ...(baseProfile.credentialEnvName ? { credentialEnvName: baseProfile.credentialEnvName } : {}),
-                      ...(baseProfile.providerId !== undefined ? { providerId: baseProfile.providerId } : {}),
-                      settings: {
-                        ...cleanSettings,
-                        ...(baseProfile.providerId !== undefined ? { providerId: baseProfile.providerId } : {}),
-                        // Label by the provider connection, never by the base
-                        // profile's display name - that name is a model name.
-                        ...((baseProfile.providerName ?? (typeof baseProfile.settings?.providerName === 'string' ? baseProfile.settings.providerName : undefined)) !== undefined
-                          ? { providerName: baseProfile.providerName ?? (baseProfile.settings?.providerName as string) }
-                          : {}),
-                      },
-                    })
-                    finalProfileId = saved.id
-                  } catch (err) {
-                    console.error('Failed to auto-save discovered model:', err)
-                    return
-                  }
-                }
-              }
-              if (directEmployeeId !== undefined) {
-                if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return
-                await assignEmployeeModel(directEmployeeId, finalProfileId)
-                composerDraftStore.setModelProfile(activeComposerOwnerKey, undefined)
-                setConversationModelProfiles((current) => {
-                  if (!(activeComposerOwnerKey in current)) return current
-                  const next = { ...current }
-                  delete next[activeComposerOwnerKey]
-                  return next
-                })
-                return
-              }
-              composerDraftStore.setModelProfile(activeComposerOwnerKey, finalProfileId)
-              setConversationModelProfiles((current) => {
-                if (finalProfileId === undefined || finalProfileId.startsWith('discovered:')) {
-                  if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return current
-                  const next = { ...current }
-                  delete next[activeComposerOwnerKey]
-                  return next
-                }
-                return { ...current, [activeComposerOwnerKey]: finalProfileId }
-              })
-            }}
             pendingCount={activePendingCount}
             queuedCount={activeQueuedCount}
             queueItems={activePendingTurns}
@@ -2524,6 +2474,8 @@ export default function App() {
             focusRequest={composerFocusRequest}
             onDraftChange={setDraft}
             onSend={send}
+            onRetrySubmission={submitChatRequest}
+            onRestoreSubmission={restoreChatSubmission}
             onUploadAttachment={uploadChatAttachment}
             onOpenDossier={(employeeId) => void openDossier(employeeId)}
             onOpenArtifact={(artifactId) => { setSelectedArtifactId(artifactId); setAppMode('workbench'); setDockCollapsed(false); setDockTab('artifacts') }}
@@ -2746,10 +2698,10 @@ export default function App() {
       {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开世界管理…</div>}>
           <WorldSettingsDialog
-            world={activeWorld}
-            value={worldSettings}
             models={selectableModels}
             modelAssignments={modelAssignments}
+            world={activeWorld}
+            value={worldSettings}
             installedSkinIds={installedSkinIds}
             saving={savingSettings}
             onClose={() => setWorldSettingsOpen(false)}
@@ -3187,30 +3139,6 @@ function defaultRolePermissionMode(
       : dossiers[employeeId]?.revisions.find((item) => item.revision === employee.currentRevision)
     return revision?.runtimePermissionMode ?? 'read-only'
   }).reduce<ConversationPermissionMode>((least, mode) => rank[mode] < rank[least] ? mode : least, 'danger-full-access')
-}
-
-// v2 includes the world in every owner key. The legacy key is deliberately
-// not migrated because its entries cannot be assigned to a world safely.
-const CONVERSATION_MODELS_STORAGE_KEY = 'dsh-cyber:conversation-models:v2'
-
-function readConversationModelProfiles(): Record<string, string> {
-  try {
-    const raw = window.localStorage.getItem(CONVERSATION_MODELS_STORAGE_KEY)
-    if (raw === null) return {}
-    const parsed: unknown = JSON.parse(raw)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
-  } catch {
-    return {}
-  }
-}
-
-function writeConversationModelProfiles(map: Record<string, string>): void {
-  try {
-    window.localStorage.setItem(CONVERSATION_MODELS_STORAGE_KEY, JSON.stringify(map))
-  } catch {
-    // localStorage may be unavailable (private mode); the in-memory choice still applies now.
-  }
 }
 
 function readConversationPermissionMode(worldId: string, permissionKey: string): ConversationPermissionMode | undefined {  try {

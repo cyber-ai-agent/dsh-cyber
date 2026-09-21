@@ -9,6 +9,7 @@ import './components/dock/dock-surface.css'
 import './features/world/world-runtime.css'
 import './features/artifacts/artifacts.css'
 import './features/machine-profile/machine-profile.css'
+import './styles-workbench.css'
 
 // Keep translation catalogs outside the main application chunk while still
 // registering them before the first React render, so locale changes never flash

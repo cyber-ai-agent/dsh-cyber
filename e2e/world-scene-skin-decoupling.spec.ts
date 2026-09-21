@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
 import { attachAppConsoleRecorder } from './console-test-helpers.js'
+import { openGlobalTool } from './global-tool-helpers.js'
 
 let server: CyberServer | undefined
 let origin = ''
@@ -64,7 +65,7 @@ test('switching conversation Skin keeps the live World mounted and its manifest 
   expect(beforeResponse.ok()).toBe(true)
   const beforeManifest = await beforeResponse.json()
 
-  await page.getByRole('button', { name: /皮肤:/ }).click()
+  await openGlobalTool(page, /皮肤:/)
   const skinMenu = page.getByRole('menu', { name: '界面与会话皮肤列表' })
   await expect(skinMenu).toBeVisible()
   await skinMenu.getByRole('menuitemradio').filter({ hasText: 'E2E 会话皮肤' }).click()

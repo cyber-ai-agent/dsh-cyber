@@ -49,14 +49,15 @@ test('keeps durable inserted follow-ups, reload state and stop facts visible acr
   await page.reload()
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.getByText(/等待中|正在回复中/).first()).toBeVisible()
-  const insertedRegion = page.getByRole('region', { name: '插入对话' })
+  const insertedRegion = page.getByRole('region', { name: '待处理消息' })
   await expect(insertedRegion).toContainText('第二条排队任务')
   await expect(page.getByRole('group', { name: '队列操作' })).toHaveCount(0)
 
   const queue = await getJson<{ items: Array<{ id: string; serverQueueId?: string; status: string; workTurnId?: string }> }>(`${origin}/api/worlds/${world.id}/chat-queue`)
   const queued = queue.items.find((item) => item.status === 'queued')
   expect(queued).toBeDefined()
-  await insertedRegion.getByRole('button', { name: /删除排队消息/ }).click()
+  await insertedRegion.getByRole('button', { name: /排队消息操作/ }).click()
+  await page.getByRole('menuitem', { name: '取消排队消息', exact: true }).click()
   await expect(insertedRegion).toBeHidden()
   await expect.poll(async () => (await getJson<{ items: Array<{ status: string }> }>(`${origin}/api/worlds/${world.id}/chat-queue`)).items.some((item) => item.status === 'queued')).toBe(false)
 

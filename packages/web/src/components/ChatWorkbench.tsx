@@ -1,23 +1,23 @@
 import {
   ArrowDown,
   ArrowUp,
+  ArrowUpRight,
   CircleNotch,
   ClockCounterClockwise,
   Copy,
+  DotsThree,
   File as FileIcon,
   FilePlus,
-  PencilSimple,
   PaperPlaneRight,
   Paperclip,
   Stop,
   TerminalWindow,
-  Trash,
   UserCircle,
   X,
 } from '@phosphor-icons/react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type EmployeeDossier, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelAssignment, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
+import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type EmployeeDossier, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
 import { formatDateTime, formatTime } from '../i18n/format.js'
@@ -31,12 +31,14 @@ import { AuthorityBadge } from './AuthorityBadge.js'
 import { CommandPicker } from './CommandPicker.js'
 import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 import { ConversationPermissionControl, type ConversationPermissionMode } from './ConversationPermissionControl.js'
-import { ModelPicker } from '../features/models/ModelPicker.js'
+import { ChatQueuePanel } from './ChatQueuePanel.js'
 import { MessageSpeechButton } from '../features/voice/MessageSpeechButton.js'
 import { ComposerReplySpeaker } from '../features/voice/ComposerReplySpeaker.js'
 import type { SpeechInputSurface } from '../features/voice/SpeechCoordinator.js'
 import { VoiceConversationControl } from '../features/voice/VoiceConversationControl.js'
 import type { ComposerAttachmentDraft } from '../composer-draft-store.js'
+import type { ChatSubmission } from '../chat-submission-store.js'
+import { ChatSubmissionRecovery } from './ChatSubmissionRecovery.js'
 import { collaborationModeOf } from './group-collaboration.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
@@ -54,10 +56,6 @@ interface ChatWorkbenchProps {
   employees: CyberEmployee[]
   dossiers?: Record<string, EmployeeDossier>
   installedPlugins?: InstalledPluginCommand[]
-  models?: ModelProfile[]
-  modelAssignments?: readonly ModelAssignment[]
-  modelProfileId?: string
-  onChangeModelProfile?(modelProfileId: string | undefined): void
   attachments?: ComposerAttachmentDraft[]
   onAttachmentsChange?(updater: (current: readonly ComposerAttachmentDraft[]) => ComposerAttachmentDraft[]): void
   /** Owner key used to invalidate late upload callbacks after navigation or clear. */
@@ -72,6 +70,8 @@ interface ChatWorkbenchProps {
   focusRequest?: number
   onDraftChange(value: string): void
   onSend(prompt: string, attachments: ChatAttachment[], queueMode?: 'normal' | 'next', speechSurface?: SpeechInputSurface): Promise<void>
+  onRetrySubmission?(submission: ChatSubmission): Promise<void>
+  onRestoreSubmission?(submission: ChatSubmission): void
   onUploadAttachment(file: File, signal?: AbortSignal): Promise<ChatAttachment>
   onOpenDossier(employeeId: string): void
   onOpenArtifact(artifactId?: string): void
@@ -99,9 +99,10 @@ interface ChatWorkbenchProps {
   speechConversationKey?: string
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = EMPTY_PARTICIPANT_IDS, messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onEditQueuedTurn, onPromoteQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = EMPTY_PARTICIPANT_IDS, messages, employees, dossiers = {}, installedPlugins = [], attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onRetrySubmission, onRestoreSubmission, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onEditQueuedTurn, onPromoteQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const composingRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadGenerationRef = useRef(new Map<string, number>())
   const uploadAbortRef = useRef(new Map<string, AbortController>())
@@ -157,7 +158,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [copiedMessageId, setCopiedMessageId] = useState<string>()
   const [copyError, setCopyError] = useState<string>()
   const [savingDocumentMessageId, setSavingDocumentMessageId] = useState<string>()
-  const [savedDocumentMessageIds, setSavedDocumentMessageIds] = useState<Set<string>>(() => new Set())
+  const [savedDocumentMessageIds, setSavedDocumentMessageIds] = useState<Map<string, { id: string; title: string }>>(() => new Map())
   const [saveDocumentError, setSaveDocumentError] = useState<string>()
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [topicNotice, setTopicNotice] = useState(false)
@@ -203,7 +204,28 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   useEffect(() => {
     setAttachmentError(undefined)
     setTopicNotice(false)
+    setMessageMenu(undefined)
+    composingRef.current = false
   }, [composerOwnerKey])
+
+  useLayoutEffect(() => {
+    const input = inputRef.current
+    if (input === null) return
+    const resize = () => {
+      input.style.height = 'auto'
+      const maximum = Number.parseFloat(getComputedStyle(input).maxHeight) || 180
+      input.style.height = `${Math.min(input.scrollHeight, maximum)}px`
+    }
+    resize()
+    let width = input.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (input.clientWidth === width) return
+      width = input.clientWidth
+      resize()
+    })
+    observer.observe(input)
+    return () => observer.disconnect()
+  }, [draft, composerOwnerKey])
 
   useEffect(() => cancelAllUploads, [cancelAllUploads])
 
@@ -216,107 +238,6 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     onDraftChange('')
     updateAttachments(() => [])
   }
-
-  /**
-   * The model a given character would actually run on.
-   *
-   * Mirrors the host's own resolution order (employee, then world, then
-   * workspace, then the default profile). The composer used to apply the
-   * employee step only to a private chat, so a group named one model while
-   * its characters each ran on their own.
-   */
-  const modelForEmployee = useCallback((employeeId: string | undefined) => {
-    if (employeeId !== undefined) {
-      const assigned = modelAssignments.find((item) => item.scope === 'employee' && item.scopeId === employeeId)
-      const found = assigned === undefined ? undefined : models.find((item) => item.id === assigned.modelProfileId)
-      if (found) return found
-    }
-    const worldAssigned = modelAssignments.find((item) => item.scope === 'world' && item.scopeId === world.id)
-    const world1 = worldAssigned === undefined ? undefined : models.find((item) => item.id === worldAssigned.modelProfileId)
-    if (world1) return world1
-    const worldSettingsModelId = (world as unknown as { settings?: { model?: { defaultModelProfileId?: string } } }).settings?.model?.defaultModelProfileId
-    const world2 = worldSettingsModelId === undefined ? undefined : models.find((item) => item.id === worldSettingsModelId)
-    if (world2) return world2
-    const workspaceAssigned = modelAssignments.find((item) => item.scope === 'workspace')
-    const workspace = workspaceAssigned === undefined ? undefined : models.find((item) => item.id === workspaceAssigned.modelProfileId)
-    if (workspace) return workspace
-    return models.find((item) => item.isDefault) ?? models[0]
-  }, [modelAssignments, models, world])
-
-  /** Distinct models the characters of this conversation would run on. */
-  const participantModels = useMemo(() => {
-    if (conversationKind !== 'group') return []
-    const seen = new Map<string, string>()
-    for (const employee of participantEmployees) {
-      const model = modelForEmployee(employee.id)
-      if (model !== undefined) seen.set(model.id, model.modelId || model.displayName)
-    }
-    return [...seen.values()]
-  }, [conversationKind, participantEmployees, modelForEmployee])
-
-  const effectiveDefaultModel = useMemo(() => {
-    if (modelProfileId !== undefined) {
-      return models.find((m) => m.id === modelProfileId)
-    }
-    if (directEmployee?.id && modelAssignments.length > 0) {
-      const empAssign = modelAssignments.find((a) => a.scope === 'employee' && a.scopeId === directEmployee.id)
-      if (empAssign) {
-        const found = models.find((m) => m.id === empAssign.modelProfileId)
-        if (found) return found
-      }
-    }
-    if (modelAssignments.length > 0) {
-      const worldAssign = modelAssignments.find((a) => a.scope === 'world' && a.scopeId === world.id)
-      if (worldAssign) {
-        const found = models.find((m) => m.id === worldAssign.modelProfileId)
-        if (found) return found
-      }
-    }
-    const worldSettingsModelId = (world as unknown as { settings?: { model?: { defaultModelProfileId?: string } } }).settings?.model?.defaultModelProfileId
-    if (worldSettingsModelId) {
-      const found = models.find((m) => m.id === worldSettingsModelId)
-      if (found) return found
-    }
-    if (modelAssignments.length > 0) {
-      const wsAssign = modelAssignments.find((a) => a.scope === 'workspace')
-      if (wsAssign) {
-        const found = models.find((m) => m.id === wsAssign.modelProfileId)
-        if (found) return found
-      }
-    }
-    return models.find((m) => m.isDefault) ?? models[0]
-  }, [directEmployee?.id, modelAssignments, modelProfileId, models, world])
-
-  const resolvedModelLabel = useMemo(() => {
-    // Naming one model for a room whose characters run on several was the
-    // visible half of a real bug: the composer's pick used to flatten them all
-    // onto it, and without a pick it reported a model most of them never used.
-    if (modelProfileId === undefined && participantModels.length > 1) {
-      return t('workbench.modelPerCharacter', '按角色分配（{count} 个模型）', { count: participantModels.length })
-    }
-    if (!effectiveDefaultModel) return '未配置模型'
-    return effectiveDefaultModel.modelId || effectiveDefaultModel.displayName
-  }, [effectiveDefaultModel, modelProfileId, participantModels, t])
-
-  /**
-   * What "restore inherited" actually hands control to: the world → workspace
-   * → default chain, deliberately skipping the character's own assignment (the
-   * level being cleared) and the current selection. The panel's secondary text
-   * used to echo the current model back, which read as a no-op.
-   */
-  const inheritResolutionLabel = useMemo(() => {
-    const worldAssigned = modelAssignments.find((item) => item.scope === 'world' && item.scopeId === world.id)
-    const byWorld = worldAssigned === undefined ? undefined : models.find((item) => item.id === worldAssigned.modelProfileId)
-    if (byWorld !== undefined) return byWorld.modelId || byWorld.displayName
-    const worldSettingsModelId = (world as unknown as { settings?: { model?: { defaultModelProfileId?: string } } }).settings?.model?.defaultModelProfileId
-    const byWorldSettings = worldSettingsModelId === undefined ? undefined : models.find((item) => item.id === worldSettingsModelId)
-    if (byWorldSettings !== undefined) return byWorldSettings.modelId || byWorldSettings.displayName
-    const wsAssigned = modelAssignments.find((item) => item.scope === 'workspace')
-    const byWorkspace = wsAssigned === undefined ? undefined : models.find((item) => item.id === wsAssigned.modelProfileId)
-    if (byWorkspace !== undefined) return byWorkspace.modelId || byWorkspace.displayName
-    const fallback = models.find((item) => item.isDefault) ?? models[0]
-    return fallback === undefined ? '未配置模型' : fallback.modelId || fallback.displayName
-  }, [modelAssignments, models, world])
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const container = scrollRef.current
@@ -345,7 +266,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
 
   useEffect(() => {
     if (!shouldFollowOutputRef.current) return
-    const frame = window.requestAnimationFrame(() => scrollToBottom())
+    const frame = window.requestAnimationFrame(() => {
+      // A wheel/keyboard scroll can change intent between render and this frame.
+      if (shouldFollowOutputRef.current) scrollToBottom()
+    })
     return () => window.cancelAnimationFrame(frame)
   }, [visibleMessages, pendingCount, sending, scrollToBottom])
 
@@ -551,10 +475,11 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messageId: message.id }),
       })
-      const result = await response.json() as { artifact?: { id?: unknown }; error?: { message?: string } }
+      const result = await response.json() as { artifact?: { id?: unknown; title?: unknown }; error?: { message?: string } }
       if (!response.ok) throw new Error(result.error?.message ?? '这条回复暂时无法保存为文档')
       if (typeof result.artifact?.id !== 'string') throw new Error('产物服务没有返回可查看的文档记录')
-      setSavedDocumentMessageIds((current) => new Set(current).add(message.id))
+      const artifactId = result.artifact.id
+      setSavedDocumentMessageIds((current) => new Map(current).set(message.id, { id: artifactId, title: typeof result.artifact?.title === 'string' ? result.artifact.title : '回复文档' }))
     } catch (cause) {
       setSaveDocumentError(cause instanceof Error ? cause.message : '这条回复暂时无法保存为文档')
     } finally {
@@ -616,9 +541,11 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
                 {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} assetUrl={employee?.avatarAssetUrl} rendererKind={employee?.avatarProfile?.rendererKind} /></button>}
                 <div className="message__body">
-                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}{owner || employee === undefined ? null : <MessageSpeechButton employeeId={employee.id} employeeName={employee.displayName} {...(dossiers[employee.id]?.profile === undefined ? {} : { profile: dossiers[employee.id]!.profile })} text={message.content} />}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : savingDocumentMessageId === message.id ? <span role="status">正在保存为文档…</span> : savedDocumentMessageIds.has(message.id) ? <span role="status">已保存为文档</span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
+                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}{owner || employee === undefined ? null : <MessageSpeechButton employeeId={employee.id} employeeName={employee.displayName} {...(dossiers[employee.id]?.profile === undefined ? {} : { profile: dossiers[employee.id]!.profile })} text={message.content} />}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : savingDocumentMessageId === message.id ? <span role="status">正在保存为文档…</span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
                   <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                   <MessageAttachments attachments={messageAttachments(message.metadata)} onZoom={(attachment) => setZoomImage(attachment)} />
+                  {savedDocumentMessageIds.has(message.id) ? <button type="button" className="message__saved-document" aria-label="查看文档" onClick={() => onOpenArtifact(savedDocumentMessageIds.get(message.id)?.id)}><span className="message__document-icon"><FileIcon size={20} /></span><span><strong>{savedDocumentMessageIds.get(message.id)?.title}.md</strong><small role="status">已保存为文档</small></span><span className="message__document-open">查看文档 <ArrowUpRight size={14} /></span></button> : null}
+                  {owner || streaming ? null : <div className="message__actions"><button type="button" className="message__menu-button" aria-label="复制这条回复" onClick={() => void copyMessage(message)}><Copy size={16} /><span>复制</span></button><button type="button" className="message__menu-button" aria-label="回复操作" aria-haspopup="menu" title="更多回复操作" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left, y: rect.bottom + 4 } }) }}><DotsThree size={20} weight="bold" /></button></div>}
                   <CompletionJobStatus metadata={message.metadata} {...(onRetryCompletionJob === undefined ? {} : { onRetry: onRetryCompletionJob })} {...(onCompletionJobSettled === undefined ? {} : { onSettled: onCompletionJobSettled })} />
                   {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
                 </div>
@@ -658,24 +585,14 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         },
       ]} />}
       <div className="composer-zone">
+        {onRetrySubmission === undefined || onRestoreSubmission === undefined ? null : <ChatSubmissionRecovery ownerKey={composerOwnerKey} hasDraft={draft.length > 0 || attachments.length > 0} onRetry={onRetrySubmission} onRestore={onRestoreSubmission} />}
         {copyError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{copyError}</span><button type="button" onClick={() => setCopyError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {saveDocumentError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{saveDocumentError}</span><button type="button" onClick={() => setSaveDocumentError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {knowledgeError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{knowledgeError}</span><button type="button" onClick={() => setKnowledgeError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
         {topicNotice ? <div className="composer-topic-notice" role="status"><span>已清空当前会话草稿，已发送消息和已上传资源仍保留</span></div> : null}
-        {queuedTurns.length > 0 ? <section className="composer-inserts" aria-label="插入对话">
-          <header><span>插入对话</span><small>当前回复结束后优先处理</small></header>
-          {saturatedWaiting ? <p className="composer-inserts__note" role="status">角色通道已满，插入内容会在可用后立即继续。</p> : null}
-          <div>{queuedTurns.map((turn) => <article key={turn.id} className="composer-insert">
-            <span><strong>{turn.content ?? turn.title}</strong><small>等待插入</small></span>
-            <div className="composer-insert__actions" aria-label={`排队消息操作：${turn.content ?? turn.title}`}>
-              {onEditQueuedTurn === undefined ? null : <button type="button" className="secondary-button" onClick={() => void onEditQueuedTurn(turn.id)} aria-label={`编辑排队消息：${turn.content ?? turn.title}`} title="编辑排队消息"><PencilSimple size={14} />编辑排队消息</button>}
-              {onPromoteQueuedTurn === undefined ? null : <button type="button" className="secondary-button" onClick={() => void onPromoteQueuedTurn(turn.id)} aria-label={`插入排队消息：${turn.content ?? turn.title}`} title="插入"><ArrowUp size={14} />插入</button>}
-              {onCancelQueuedTurn === undefined ? null : <button type="button" className="danger-button" onClick={() => void onCancelQueuedTurn(turn.id)} aria-label={`删除排队消息：${turn.content ?? turn.title}`} title="删除"><Trash size={14} />删除</button>}
-            </div>
-          </article>)}</div>
-        </section> : null}
+        <ChatQueuePanel key={composerOwnerKey} turns={queuedTurns} running={hasRunningTurn} saturated={saturatedWaiting} onEdit={onEditQueuedTurn} onPromote={onPromoteQueuedTurn} onCancel={onCancelQueuedTurn} />
         <div className="composer">
         {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} assetUrl={employee.avatarAssetUrl} rendererKind={employee.avatarProfile?.rendererKind} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
         {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((item) => {
@@ -695,19 +612,18 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           </span>
         })}</div> : null}
         {activeAttachmentError === undefined ? null : <p className="composer-error" role="alert">{activeAttachmentError}</p>}
-        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} onPaste={pasteImages} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
+        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} onPaste={pasteImages} onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false }} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !composingRef.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={1} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
         <div className="composer__toolbar">
           <div className="composer__actions-left">
             <input ref={fileInputRef} className="composer-file-input" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const files = Array.from(event.target.files ?? []); if (files.length > 0) void uploadAttachments(files) }} />
             <button className="icon-button composer-attachment-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} title={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
             {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
-            {onChangeModelProfile === undefined || conversationKind === 'group' ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={inheritResolutionLabel} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} /></div>}
             <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
           </div>
           <div className="composer__actions-right">
             <ComposerReplySpeaker {...(directEmployee === undefined ? { employeeId: undefined } : { employeeId: directEmployee.id })} {...(session?.id === undefined ? {} : { sessionId: session.id })} {...(speechConversationKey === undefined ? {} : { conversationKey: speechConversationKey })} dossiers={dossiers} />
             <VoiceConversationControl variant="compact" employeeName={directEmployee?.displayName ?? '当前会话角色'} disabled={employees.length === 0} onFinal={async (text) => { await onSend(text, [], nextQueueMode, 'composer') }} />
-            <button className={`send-button${showStopButton ? ' send-button--stop' : ''}`} type="button" aria-label={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : sending ? '正在回复中，发送新消息' : '发送'} title={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : '发送'} disabled={showStopButton ? false : uploading || employees.length === 0 || (!draft.trim() && readyAttachments.length === 0)} onClick={() => { if (showStopButton && activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id); else void submit() }}>{showStopButton ? <Stop size={19} weight="bold" /> : sending && !insertsNext ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{showStopButton || queuedCount === 0 ? null : <span className="send-button__queue" aria-label={`${queuedCount} 条插入对话`}>{queuedCount}</span>}</button>
+            <button className={`send-button${showStopButton ? ' send-button--stop' : ''}`} type="button" aria-label={showStopButton ? '停止当前回复' : insertsNext ? '排队发送' : sending ? '正在回复中，发送新消息' : '发送'} title={showStopButton ? '停止当前回复' : insertsNext ? '排队发送' : '发送'} disabled={showStopButton ? false : uploading || employees.length === 0 || (!draft.trim() && readyAttachments.length === 0)} onClick={() => { if (showStopButton && activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id); else void submit() }}>{showStopButton ? <Stop size={19} weight="bold" /> : sending && !insertsNext ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}</button>
           </div>
         </div>
       </div></div>

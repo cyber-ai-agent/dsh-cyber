@@ -70,6 +70,7 @@ export async function auditVisuals(target: Locator): Promise<VisualAudit> {
       if (text === '' || element.children.length > 0) continue
       const style = getComputedStyle(element)
       if (style.display === 'none' || style.visibility === 'hidden') continue
+      if (element.getClientRects().length === 0 || element.closest('.sr-only') !== null) continue
       const fontSize = Number.parseFloat(style.fontSize)
       if (Number.isFinite(fontSize)) minFontSize = Math.min(minFontSize, fontSize)
       minOpacity = Math.min(minOpacity, effectiveOpacity(element))

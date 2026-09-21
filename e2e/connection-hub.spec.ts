@@ -1,3 +1,4 @@
+import { openGlobalTool } from './global-tool-helpers.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,9 +25,7 @@ test('opens the connection hub from the top bar, adds an SSH device, and edits w
   const consoleIssues: string[] = []; attachAppConsoleRecorder(page, consoleIssues)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(origin)
-  const hubButton = page.getByRole('button', { name: '连接中心', exact: true })
-  await expect(hubButton).toBeVisible()
-  await hubButton.click()
+  await openGlobalTool(page, '连接中心')
   const hub = page.getByRole('dialog', { name: '连接中心' })
   await expect(hub).toBeVisible()
   // SSH type is listed; selecting it shows a clean card list with no editor yet.
@@ -99,7 +98,7 @@ test('opens the connection hub from the top bar, adds an SSH device, and edits w
     await page.screenshot({ path: info.outputPath(`connection-hub-${size.width}x${size.height}.png`) })
   }
   await page.getByRole('button', { name: '关闭连接中心' }).click()
-  await expect(hubButton).toBeVisible()
+  await expect(page.getByRole('button', { name: '工具', exact: true })).toBeVisible()
   await writeConsole(info, consoleIssues)
   expect(consoleIssues).toEqual([])
 })
@@ -123,9 +122,7 @@ test('lets a role authorize a hub SSH device from 角色设置 连接授权 and 
 
   // Add an SSH device through the top-bar hub.
   await page.goto(origin)
-  const hubButton = page.getByRole('button', { name: '连接中心', exact: true })
-  await expect(hubButton).toBeVisible()
-  await hubButton.click()
+  await openGlobalTool(page, '连接中心')
   const hub = page.getByRole('dialog', { name: '连接中心' })
   await hub.getByRole('button', { name: /SSH 设备/ }).click()
   // The multi-connection list is clean by default; open the add editor first.
@@ -197,9 +194,7 @@ test('adds several MCP services under MCP 连接 and keeps the service slug uniq
   const consoleIssues: string[] = []; attachAppConsoleRecorder(page, consoleIssues)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(origin)
-  const hubButton = page.getByRole('button', { name: '连接中心', exact: true })
-  await expect(hubButton).toBeVisible()
-  await hubButton.click()
+  await openGlobalTool(page, '连接中心')
   const hub = page.getByRole('dialog', { name: '连接中心' })
   await expect(hub).toBeVisible()
   // The MCP rail item is now a multi-connection type, labelled 「MCP 连接」.
