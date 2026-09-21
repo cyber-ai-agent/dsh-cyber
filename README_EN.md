@@ -9,7 +9,6 @@ Create characters with identity and memory, collaborate in interactive worlds, a
 [Website](https://www.sandaoliu.cn/) · [简体中文](./README.md) · [Contributing](./CONTRIBUTING.md)
 
 [![CI](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml/badge.svg)](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml)
-[![E2E](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/full-e2e.yml/badge.svg)](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/full-e2e.yml)
 [![License](https://img.shields.io/badge/license-see%20LICENSE-blue)](./LICENSE)
 
 </div>
@@ -22,7 +21,7 @@ The project is **Pre-Alpha**. APIs and features are evolving. Bring your own mod
 
 ![Conversation and world workspace](./docs/assets/screenshots/workspace-current.png)
 
-*An example workspace: conversations on the left, chat in the center, and world and result views on the right.*
+*The current workspace in the deep-sea Orca Link skin: conversations on the left, character deliverables in the center, the interactive world on the right, and the complete composer in view.*
 
 ![Artifact reader](./docs/assets/screenshots/artifacts-current.png)
 
@@ -38,8 +37,10 @@ The project is **Pre-Alpha**. APIs and features are evolving. Bring your own mod
 | Artifacts | Register real files as referenceable versions and preview documents, images, code, and isolated web pages. |
 | Knowledge and memory | Import reference material, extract source-backed knowledge, and preserve character-owned conversation memory. |
 | Tasks and schedules | Organize plans, assignments, deliverables, and reviews; schedule work with durable run records. |
-| Workshop and market | Generate and review world, character, skin, and plugin drafts, then install through a shared package system. |
+| Workshop and market | Generate and review world, character, skin, and plugin drafts, then create, recruit, activate, or apply them through a shared package system. |
 | Model hub | Manage provider connections and model selection with locally encrypted credentials. |
+
+Models are assigned per character in **Tools → Model Hub**. The chat composer uses the active character's assignment directly.
 
 Chat shows conversational results. Trace explains execution. An artifact must correspond to a real file; a model’s claim is not evidence that a tool succeeded or a task finished.
 
@@ -101,9 +102,9 @@ flowchart TB
 | `packages/web`, `packages/world-runtime` | Workspace UI and world runtime |
 | `packages/package-runtime`, `packages/catalog`, `marketplace` | Extension packages and built-in catalogs |
 
-DSH is pinned to `0.1.5-rc.2`. Upstream remains in prerelease status. Runtime upgrades require compatibility checks and real worker tests.
+DSH is pinned to `0.1.6-alpha.1`. Upstream remains in prerelease status. Runtime upgrades require compatibility checks and real worker tests.
 
-See [`docs/development/deepseek-harness-compatibility-2026-09-14.md`](./docs/development/deepseek-harness-compatibility-2026-09-14.md) for the compatibility matrix and upgrade evidence.
+See [`docs/development/deepseek-harness-compatibility-2026-09-16.md`](./docs/development/deepseek-harness-compatibility-2026-09-16.md) for the compatibility matrix and upgrade evidence.
 
 ## Quick start
 

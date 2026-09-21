@@ -9,16 +9,15 @@
 [官网](https://www.sandaoliu.cn/) · [English](./README_EN.md) · [产品路线](./docs/roadmap.md) · [贡献指南](./CONTRIBUTING.md)
 
 [![CI](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml/badge.svg)](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml)
-[![E2E](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/full-e2e.yml/badge.svg)](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/full-e2e.yml)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-2f81f7)](./LICENSE)
 
 **Pre-Alpha** · 自备模型服务 · Windows / macOS / Linux
 
 </div>
 
-![DSH Cyber 深海女仆工坊主题工作台](./docs/assets/screenshots/01-maid-atelier.png)
+![DSH Cyber 深海皮肤工作台：会话、角色协作与世界视窗](./docs/assets/screenshots/workspace-current.png)
 
-<p align="center"><em>深海女仆工坊：会话、角色、世界与运行权限在同一个工作台中协同。</em></p>
+<p align="center"><em>虎鲸链路深海皮肤：左侧管理会话，中间查看角色交付，右侧呈现可交互世界，输入区完整保留在首屏。</em></p>
 
 DSH Cyber 基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 构建。它把模型与工具执行能力组织为长期存在的世界、角色、会话、任务和成果，而不是把多个角色压缩成一次性的提示词。
 
@@ -36,7 +35,7 @@ DSH Cyber 基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 | 世界产物 | 将真实文件发布为不可变版本，支持 Markdown、代码、JSON、PDF、图片和隔离网页预览。 |
 | 知识与记忆 | 导入文件、文件夹、ZIP、粘贴内容和公开网页；按来源检索资料并形成带证据的知识图谱。 |
 | 创意工坊 | 通过分步流程创建世界、角色、皮肤和插件草稿，经预览与包校验后安装。 |
-| 统一市场 | 按“世界 → 角色 → 插件”浏览和安装扩展，并继续完成创建世界、招募角色或启用插件。 |
+| 统一市场 | 浏览世界、角色、插件和界面皮肤，并继续完成创建世界、招募角色、启用插件或应用皮肤。 |
 | 模型中心 | 管理模型服务商、同步模型目录、按工作区/世界/角色分配模型，并查看按服务商归属的交互与 Token 统计。 |
 | 本地语音 | 可选安装本地 TTS 与 STT；浏览器通过本机服务使用流式音频、语音识别和打断。 |
 
@@ -70,31 +69,19 @@ Trace  = 运行状态 + 工具摘要 + 安全证据 + 任务来源
 
 轨迹只展示脱敏、限长后的安全摘要与工具证据，不持久化密钥、Authorization、Cookie、密码、Token、完整 Prompt 或原始工具 payload。
 
-## 深海主题世界
+## 世界与界面皮肤
 
-世界主题为聊天区域、世界视图和角色形象提供统一的视觉语境。当前内置深海系列包括深海女仆工坊、白鲸圣女和漆黑虎鲸。
-
-<table>
-<tr>
-<td width="50%">
-<img src="./docs/assets/screenshots/06-white-whale-maiden.png" alt="白鲸圣女深海主题" />
-<br/><b>白鲸圣女</b><br/>明亮的海底圣殿与白鲸场景。
-</td>
-<td width="50%">
-<img src="./docs/assets/screenshots/07-black-orca-maiden.png" alt="漆黑虎鲸深海主题" />
-<br/><b>漆黑虎鲸</b><br/>深海舰桥、虎鲸群与冷色霓虹界面。
-</td>
-</tr>
-</table>
+每个世界拥有独立角色、会话、地图和运行状态。界面皮肤负责配色、聊天背景和气泡样式，世界场景继续呈现该世界的角色与设施。皮肤可以从市场安装，并按世界独立应用。
 
 ## 工作台信息架构
 
 ```text
-顶部：创意工坊 · 市场 · 模型中心 · 系统状态 · 设置
+顶部：创意工坊 · 市场 · 工具 · 设置
 左侧：当前世界的会话
 中间：聊天与最终结果
 右侧：世界 · 轨迹 · 更多
 更多：角色 · 任务 · 知识 · 产物 · 日程等按需页签
+工具：皮肤 · 技能中心 · 模型中心 · 连接中心 · 系统状态
 ```
 
 - 左侧只显示会话；角色实例的浏览、设置、授权和成长记录集中在“角色”档案。
@@ -104,7 +91,7 @@ Trace  = 运行状态 + 工具摘要 + 安全证据 + 任务来源
 
 ## 模型、权限与真实动作
 
-模型中心从仓库维护的 [`catalog/model-providers.json`](./catalog/model-providers.json) 加载可用入口，支持内置服务商、本机或局域网服务以及自定义 OpenAI 兼容接口。模型默认按以下优先级继承，会话也可以显式选择其他模型：
+模型中心从仓库维护的 [`catalog/model-providers.json`](./catalog/model-providers.json) 加载可用入口，支持内置服务商、本机或局域网服务以及自定义 OpenAI 兼容接口。模型按角色配置，聊天窗口直接使用当前角色的模型；未单独配置时按以下优先级继承：
 
 ```text
 角色模型 > 世界模型 > 工作区默认模型 > 默认模型档案
@@ -179,7 +166,7 @@ pnpm build
 pnpm dsh-cyber web
 ```
 
-打开 [http://127.0.0.1:43123](http://127.0.0.1:43123)，在“模型中心”添加服务商、同步或填写模型 ID，再进入世界开始交流。
+打开 [http://127.0.0.1:43123](http://127.0.0.1:43123)，从“工具 → 模型中心”添加服务商、同步或填写模型 ID，再进入世界开始交流。
 
 需要本地语音时额外执行：
 
