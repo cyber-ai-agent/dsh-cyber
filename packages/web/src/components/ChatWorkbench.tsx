@@ -529,6 +529,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           {visibleMessages.length === 0 ? (
             <div className="conversation-empty">
               <TerminalWindow size={34} />
+              {employees.length === 0 ? <button className="primary-button" type="button" onClick={onRecruit}>添加第一个角色，开始聊天</button> : null}
               <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? t('workbench.startChat', '开始与角色对话') : '选择会话开始互动'}</h2>
               <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '发送消息后，系统会根据意图自动组织讨论或分工协作；执行细节统一进入轨迹。' : conversationKind === 'direct' ? t('workbench.startChatHint', '历史记录保留在当前世界；发送消息后角色才会开始处理。') : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
             </div>

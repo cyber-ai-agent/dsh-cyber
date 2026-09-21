@@ -45,7 +45,8 @@ export class WorldMarketplaceService {
         worldId: world.id, packageId: installed.packageId, version: installed.version,
       })
       await this.worldRuntime.bindInstalledTheme(world.id, installed.packageId)
-      const starters = BUILTIN_BLUEPRINTS.filter((blueprint) => blueprint.worldTemplateId === world.templateId).slice(0, 3)
+      const matching = BUILTIN_BLUEPRINTS.filter((blueprint) => blueprint.worldTemplateId === world.templateId)
+      const starters = matching.length > 0 ? matching.slice(0, 3) : [BUILTIN_BLUEPRINTS.find((blueprint) => blueprint.id === 'core.butler')!]
       const employees = starters.map((blueprint) => this.store.recruitEmployee({
         workspaceId: input.workspaceId,
         worldId: world.id,

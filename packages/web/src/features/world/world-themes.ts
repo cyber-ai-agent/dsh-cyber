@@ -919,10 +919,11 @@ export function saveWorldTheme(worldId: string, themeId: string): void {
  */
 export function applyWorldTheme(themeId: string): void {
   if (typeof document === 'undefined') return
-  if (themeId !== DEFAULT_SKIN_ID) void import('../../skin-decorations.css')
   const theme = themeRegistry.get(themeId)
   const root = document.documentElement
   const tokens = theme.tokens
+  if (themeId === DEFAULT_SKIN_ID) root.style.removeProperty('--workbench-skin-accent')
+  else root.style.setProperty('--workbench-skin-accent', tokens.accentColor)
 
   // 1. 核心色彩令牌
   root.style.setProperty('--theme-accent', tokens.accentColor)
