@@ -20,6 +20,6 @@ export function WorkbenchToolsMenu({ children }: { children: ReactNode }) {
   }, [open])
   return <div className="workbench-tools" ref={root}>
     <button ref={trigger} type="button" aria-label="工具" aria-expanded={open} aria-controls={id} aria-haspopup="dialog" onClick={() => setOpen((value) => !value)} onKeyDown={(event) => { if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); requestAnimationFrame(() => panel.current?.querySelector<HTMLButtonElement>('button')?.focus()) } }}><Wrench size={18} /><span>工具</span><CaretDown size={12} /></button>
-    <div ref={panel} id={id} className="workbench-tools__panel" role="dialog" aria-label="工作台工具" hidden={!open} onClick={(event) => { const button = (event.target as HTMLElement).closest('button'); if (button !== null && panel.current?.contains(button) && button.closest('.topbar-world-theme-container') === null) setOpen(false) }}>{children}</div>
+    <div ref={panel} id={id} className="workbench-tools__panel" role="dialog" aria-label="工作台工具" hidden={!open} onClick={(event) => { const button = (event.target as HTMLElement).closest('button'); if (button === null || panel.current?.contains(button) !== true) return; const insideThemeMenu = button.closest('.topbar-world-theme-container') !== null; if (!insideThemeMenu || button.matches('.theme-create-btn, .theme-menu-action-btn')) setOpen(false) }}>{children}</div>
   </div>
 }

@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Check,
   FloppyDisk,
@@ -49,6 +50,8 @@ export function ThemeCustomizerDialog({
   onSaved,
 }: ThemeCustomizerDialogProps) {
   const { locale, t } = useI18n()
+  const [portalReady, setPortalReady] = useState(false)
+  useEffect(() => setPortalReady(true), [])
   const baseTheme = themeRegistry.get(initialThemeId ?? DEFAULT_SKIN_ID)
   const baseThemeText = getLocalizedThemeText(baseTheme, locale)
   const isCustom = baseTheme.source === 'custom'
@@ -172,7 +175,7 @@ export function ThemeCustomizerDialog({
     else updateToken(key, undefined)
   }
 
-  return (
+  const dialog = (
     <div className="modal-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <section ref={dialogRef} className="theme-customizer-dialog" role="dialog" aria-modal="true" aria-labelledby="theme-customizer-title">
         <header className="theme-customizer-dialog__header">
@@ -361,6 +364,7 @@ export function ThemeCustomizerDialog({
       </section>
     </div>
   )
+  return portalReady && typeof document !== 'undefined' ? createPortal(dialog, document.body) : dialog
 }
 
 function ThemeAssetUpload({
