@@ -2640,18 +2640,10 @@ export default function App() {
           installing={packageInstalling}
           currentSkinId={readWorldTheme(activeWorld)}
           onApplySkin={async (skinId) => {
-            try {
-              saveWorldTheme(activeWorld.id, skinId)
-              if (typeof localStorage !== 'undefined') localStorage.setItem('dsh_cyber_skin', skinId)
-              applyWorldTheme(skinId)
-              setSkinRevision((value) => value + 1)
-              setPreferences((curr) => curr ? { ...curr, skinId } : { skinId } as any)
-              if (preferences !== undefined) {
-                await savePreferences({ ...preferences, skinId })
-              }
-            } catch {
-              // ignore
-            }
+            if (themeRegistry.get(skinId).id !== skinId) throw new Error('皮肤尚未加载，请重新打开市场后应用。')
+            saveWorldTheme(activeWorld.id, skinId)
+            setSkinRevision((value) => value + 1)
+            setPackageMarketOpen(false)
           }}
           onClose={() => setPackageMarketOpen(false)}
           onPreview={previewPackage}
