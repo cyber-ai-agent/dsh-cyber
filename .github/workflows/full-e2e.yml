@@ -2,10 +2,6 @@ name: Full E2E
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 18 * * *'
-  push:
-    branches: [main]
   # Draft PRs stay fast by default. Add the `run-full-e2e` label when a PR
   # needs an opt-in browser run before it is merged.
   pull_request:
