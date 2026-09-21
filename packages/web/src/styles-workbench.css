@@ -137,7 +137,9 @@
 .workbench-tools__panel .health-indicator { margin-left: auto; width: 6px; height: 6px; box-shadow: none; animation: none; }
 .workbench-tools__panel .topbar-world-theme-menu { left: auto; right: 0; top: calc(100% + 8px); max-width: min(360px, calc(100vw - 32px)); }
 @media (min-width: 1000px) { :root[data-skin] .workbench-shell { grid-template-columns: var(--workbench-columns) !important; } }
-:root[data-skin] .topbar nav { overflow-x: auto; }
+:root[data-skin] .topbar nav { overflow: visible; }
+:root[data-skin] .workbench-tools__panel button span { display: inline; }
+:root[data-skin] .workbench-tools__panel .topbar-world-theme-container { display: block; width: 100%; }
 :root[data-skin] .navigation-pane { padding: 0 10px; border: 0; background: var(--surface-1); }
 :root[data-skin] .pane-heading { height: 74px; padding: 0 12px; border: 0; font-size: 15px; color: var(--text-strong); font-weight: 600; }
 :root[data-skin] .pane-heading button { color: var(--text-soft); }
