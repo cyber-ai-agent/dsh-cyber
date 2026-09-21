@@ -481,7 +481,9 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                       <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
                       <footer>
                         <span className="market-card-state">{packageStateLabel(item, state)}</span>
-                        {marketAction(item, state, () => prepareWorld(item), () => void inspect(item), () => activateMarketItem(item))}
+                        {item.market === 'skin' && props.currentSkinId === (item.activation?.kind === 'skin' ? item.activation.themeId : item.manifest.id === 'default-skin' ? DEFAULT_SKIN_ID : item.manifest.id)
+                          ? <button className="market-action--created" type="button" disabled>当前世界正在使用</button>
+                          : marketAction(item, state, () => prepareWorld(item), () => void inspect(item), () => activateMarketItem(item))}
                       </footer>
                     </article>
                   )
@@ -498,7 +500,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               : selectedCurrent !== undefined && preview !== undefined
                 ? <PermissionReview manifest={selectedCurrent.manifest} preview={preview} approved={approved} installing={props.installing} onApproved={setApproved} onInstall={() => void install()} />
                 : selectedCurrent?.market === 'skin' && (selectedInstalled !== undefined || selectedCurrent.manifest.id === 'default-skin')
-                  ? <SkinActivationReview item={selectedCurrent} currentSkinId={props.currentSkinId} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onApplySkin={props.onApplySkin} />
+                  ? <SkinActivationReview item={selectedCurrent} currentSkinId={props.currentSkinId} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onApplySkin={() => activateMarketItem(selectedCurrent)} />
                   : selectedInstalled?.market === 'talent'
                   ? <TalentActivationReview item={selectedInstalled} workspaceId={props.workspaceId} world={props.world} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onRecruit={() => props.onRecruitTalent(selectedInstalled)} />
                   : selectedInstalled?.market === 'plugin'

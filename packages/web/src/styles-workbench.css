@@ -1,4 +1,14 @@
 /* Shared workbench geometry and readable surfaces for every world skin. */
+.package-market-layout--catalog { grid-template-columns: minmax(0, 1fr) minmax(280px, 34%); }
+.market-catalog, .market-review-panel, .market-card-grid > article { min-width: 0; }
+.market-card-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr)); }
+.market-card-grid article > header { grid-template-columns: 24px minmax(0, 1fr); }
+.market-card-grid article > header > em { grid-column: 2; }
+.market-card-grid article > footer { display: flex; flex-wrap: wrap; gap: 10px; }
+.market-card-grid article > footer > button { max-width: 100%; white-space: normal; }
+.market-activation-review > header > div { min-width: 0; }
+.market-activation-review :is(p, h3), .market-plugin-scope { overflow-wrap: anywhere; }
+@media (max-width: 800px) { .package-market-layout--catalog { grid-template-columns: minmax(0, 1fr); } .market-review-panel { border-left: 0; } }
 :root[data-skin] {
   --topbar-h: 58px;
   --radius-control: 8px;
@@ -96,7 +106,7 @@
   color: var(--text); background: var(--bg);
 }
 :root[data-skin] :is(button, input, textarea, select) { font-family: inherit; }
-:root[data-skin]:not([data-skin='default']) .message-scroll { background-image: linear-gradient(var(--surface-0), var(--surface-0)), var(--theme-backdrop-image, none); background-size: cover; background-position: center; }
+:root[data-skin]:not([data-skin='default']) .message-scroll { background-image: linear-gradient(color-mix(in srgb, var(--surface-0) 72%, transparent), color-mix(in srgb, var(--surface-0) 72%, transparent)), var(--theme-backdrop-image, none); background-size: cover; background-position: center; }
 :root[data-skin]:not([data-skin='default']) .message--owner .message__content { background: var(--theme-owner-bubble); }
 :root[data-skin] .workspace-backdrop,
 :root[data-skin] .skin-stage { display: none; }
