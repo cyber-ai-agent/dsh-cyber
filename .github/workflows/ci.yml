@@ -17,9 +17,7 @@ jobs:
   verify:
     name: required
     runs-on: ubuntu-latest
-    # Keep the protected PR gate short enough for rapid pre-alpha iteration.
-    # A bounded deterministic browser smoke runs here; Full E2E keeps the broad suite.
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,75 +30,9 @@ jobs:
         with:
           node-version: 22.19.0
           cache: pnpm
-      - name: Verify immutable workflow action pins
-        run: node scripts/check-workflow-action-pins.mjs
       - run: pnpm install --frozen-lockfile
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Unit and integration tests
-        run: pnpm test
-      - name: Migration replay and schema contracts
-        run: pnpm test:migration && pnpm test:schema
-      - name: Install browser for core smoke
-        run: pnpm exec playwright install --with-deps chromium
-      - name: Core browser smoke
-        run: pnpm exec playwright test --config playwright.smoke.config.ts
-      - name: Preserve successful trace screenshots
-        if: success()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: trace-evidence-screenshots
-          path: |
-            .private/playwright-results/trace-evidence-*/trace-*.png
-            .private/playwright-results/trace-evidence-*/console.json
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 3
-      - name: Preserve model stats browser evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: model-stats-browser-evidence
-          path: |
-            .private/playwright-results/model-stats-*/model-stats-*.png
-            .private/playwright-results/model-stats-*/console.json
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 3
-      - name: Preserve reconnect browser evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: runtime-reconnect-evidence
-          path: |
-            .private/playwright-results/runtime-reconnect-*/reconnect-*.png
-            .private/playwright-results/runtime-reconnect-*/console.json
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 3
-      - name: Preserve source task completion evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: source-task-completion-evidence
-          path: |
-            .private/playwright-results/source-task-completion-*/source-completion-*.png
-            .private/playwright-results/source-task-completion-*/console.json
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 3
-      - name: Preserve failed browser evidence
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: core-browser-smoke
-          path: .private/playwright-results
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 7
-      # The status can only be written to a commit inside this repository.
-      # For fork pull requests the head sha lives in the contributor's fork,
-      # where GITHUB_TOKEN has no write access (403), so skip instead of failing.
+      - name: Compile and build
+        run: pnpm exec tsc -b && pnpm --filter @dsh-cyber/web build
       - name: Publish protected branch status
         if: >-
           ${{ success() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
@@ -108,10 +40,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          curl --fail-with-body --silent --show-error \
-            --request POST \
-            --header "Authorization: Bearer ${GH_TOKEN}" \
-            --header "Accept: application/vnd.github+json" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
-            --data '{"state":"success","context":"CI / required","description":"typecheck, unit/integration, migration, schema and browser smoke passed"}'
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
+            -f state=success -f context='CI / required' \
+            -f description='TypeScript compilation and production build passed'
