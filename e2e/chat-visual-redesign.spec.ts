@@ -87,6 +87,25 @@ test('renders a consistent light and dark workbench, opens deliverables, and exp
   await page.getByRole('menuitem', { name: /将回复保存为文档/ }).click()
   await expect(answer.getByRole('button', { name: '查看文档' })).toBeVisible()
   await expect(page.locator('.composer').getByRole('button', { name: /模型/ })).toHaveCount(0)
+  const navigationGeometry = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll<HTMLElement>('.session-row')].map((row) => row.getBoundingClientRect().height)
+    const switcher = document.querySelector<HTMLElement>('.topbar-world-switcher > summary')!.getBoundingClientRect()
+    return { rowHeights: rows, switcherWidth: switcher.width, switcherHeight: switcher.height }
+  })
+  expect(Math.max(...navigationGeometry.rowHeights)).toBeLessThanOrEqual(64)
+  expect(navigationGeometry.switcherWidth).toBeLessThanOrEqual(170)
+  expect(navigationGeometry.switcherHeight).toBe(36)
+  const worldSwitcher = page.locator('.topbar-world-switcher > summary')
+  await worldSwitcher.click()
+  const worldSwitcherMenu = page.locator('.topbar-world-switcher__menu')
+  await expect(worldSwitcherMenu).toBeVisible()
+  expect(await worldSwitcherMenu.evaluate((node) => {
+    const box = node.getBoundingClientRect()
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + Math.min(60, box.height / 2))
+    return hit !== null && node.contains(hit)
+  })).toBe(true)
+  await page.screenshot({ path: join(output, 'redesign-world-switcher.png') })
+  await worldSwitcher.click()
   const measurements: unknown[] = []
   for (const theme of ['light', 'dark'] as const) {
     if (theme === 'dark') await mode(page, '黑夜')
@@ -113,7 +132,27 @@ test('renders a consistent light and dark workbench, opens deliverables, and exp
       measurements.push({ theme, visual, ...geometry })
     }
   }
-  await page.setViewportSize({ width: 1440, height: 900 }); await mode(page, '白天')
+  const composer = page.locator('.composer')
+  const composerInput = composer.getByRole('textbox', { name: '给当前世界的角色发送消息' })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await composerInput.fill('补充今天的交付内容和验收结论')
+  await page.screenshot({ path: join(output, 'redesign-composer-dark-focused.png') })
+  await mode(page, '白天')
+  await composerInput.fill('补充今天的交付内容和验收结论')
+  await expect(composerInput).toBeFocused()
+  await expect(composer).not.toContainText('Enter 发送')
+  await expect(composer).not.toContainText('Shift+Enter 换行')
+  await expect(composer.getByRole('button', { name: '发送', exact: true })).toBeEnabled()
+  const composerGeometry = await composer.evaluate((node) => {
+    const box = node.getBoundingClientRect()
+    const toolbar = node.querySelector<HTMLElement>('.composer__toolbar')!.getBoundingClientRect()
+    return { width: box.width, height: box.height, toolbarHeight: toolbar.height }
+  })
+  expect(composerGeometry.width).toBeGreaterThan(600)
+  expect(composerGeometry.height).toBeLessThan(120)
+  expect(composerGeometry.toolbarHeight).toBeGreaterThanOrEqual(48)
+  await page.screenshot({ path: join(output, 'redesign-composer-focused.png') })
+  await composerInput.fill('')
   await click(page, '展开世界')
   await expect.poll(() => page.evaluate(() => document.fullscreenElement?.className)).toBe('world-runtime-dock')
   await click(page, '显示全景')

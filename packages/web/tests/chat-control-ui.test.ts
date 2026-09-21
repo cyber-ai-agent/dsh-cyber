@@ -28,6 +28,9 @@ describe('Chat control UI', () => {
       onDraftChange: vi.fn(), onSend: send, onUploadAttachment: vi.fn(), onOpenDossier: vi.fn(), onOpenArtifact: vi.fn(), onRecruit: vi.fn(),
     })) })
     const input = host.querySelector('textarea')!
+    expect(input.hasAttribute('aria-describedby')).toBe(false)
+    expect(host.textContent).not.toContain('Enter 发送')
+    expect(host.textContent).not.toContain('Shift+Enter 换行')
     for (const init of [{ isComposing: true }, { keyCode: 229 }, { shiftKey: true }]) {
       await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init })) })
     }
