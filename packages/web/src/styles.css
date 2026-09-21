@@ -3129,6 +3129,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .workbench-shell, .workbench-shell:not(.workbench-shell--dock-collapsed) { grid-template-columns: 220px 4px minmax(460px, 1fr) 0 0 !important; }
   .right-pane, .workbench-shell > .resize-handle:nth-of-type(2) { display: none; }
   .dock-reopen { display: none; }
+  :root[data-skin='default'] .topbar nav { overflow-x: auto; }
   .topbar nav button span { display: none; }
   .topbar__workspace { display: none; }
   .brand-lockup { min-width: 170px; }
