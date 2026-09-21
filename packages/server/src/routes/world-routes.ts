@@ -84,7 +84,11 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
       name: requiredString(body, 'name'),
       templateId: requestedTemplateId,
     })
-    writeJson(response, 201, { world })
+    const starter = BUILTIN_BLUEPRINTS.find((item) => item.worldTemplateId === requestedTemplateId)
+      ?? BUILTIN_BLUEPRINTS.find((item) => item.id === 'core.butler')!
+    const employee = store.recruitEmployee({ workspaceId: world.workspaceId, worldId: world.id, blueprintId: starter.id, blueprintVersion: starter.version, displayName: starter.displayName })
+    await conversationHub.ensureDirectSessions(world.id)
+    writeJson(response, 201, { world, employees: [employee] })
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/snapshot$/, async ({ request, response, params }) => {
