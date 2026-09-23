@@ -2980,8 +2980,7 @@ function Onboarding({ error, onCreated }: { error?: string; onCreated(): Promise
     setCreating(true)
     try {
       const workspaceResult = await api<{ workspace: Workspace }>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name: '本地实例' }) })
-      const worldResult = await api<{ world: World }>(`/api/workspaces/${workspaceResult.workspace.id}/worlds`, { method: 'POST', body: JSON.stringify({ name: '我的世界', templateId: 'personal-world' }) })
-      await api(`/api/worlds/${worldResult.world.id}/recruit`, { method: 'POST', body: JSON.stringify({ blueprintId: 'core.butler', blueprintVersion: 1, displayName: '管家' }) })
+      await api(`/api/workspaces/${workspaceResult.workspace.id}/worlds`, { method: 'POST', body: JSON.stringify({ name: '我的世界', templateId: 'personal-world' }) })
       await onCreated()
     } finally {
       setCreating(false)

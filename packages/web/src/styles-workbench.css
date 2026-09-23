@@ -200,8 +200,21 @@
 :root[data-skin] .message__document-link { background: var(--accent-soft); padding: 4px 8px; text-decoration: none; }
 :root[data-skin] .message-scroll__jump { border: 1px solid var(--border); color: var(--text-soft); background: var(--surface-0); box-shadow: var(--shadow-sm); }
 :root[data-skin] .stream-state { padding: 6px 0; border: 0; background: transparent; color: var(--text-muted); font-size: 12px; }
-:root[data-skin] .composer-zone { padding: 12px 28px 18px; border: 0; background: var(--surface-0); backdrop-filter: none; }
-:root[data-skin] .composer-zone > * { max-width: 740px; margin-inline: auto; }
+:root[data-skin] .composer-zone { padding: 8px clamp(14px, 2vw, 28px) 18px; border: 0; background: transparent; backdrop-filter: none; }
+:root[data-skin] .composer-zone > * { max-width: none; width: 100%; margin-inline: auto; }
+:root[data-skin] .composer-zone > .composer { width: 100%; }
+:root[data-skin] .dossier-directory .dock-surface__header { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
+:root[data-skin] .dossier-directory .dock-surface__heading { min-width: 0; }
+:root[data-skin] .dossier-directory .dock-surface__heading h2 { overflow: visible; text-overflow: clip; white-space: normal; line-height: 1.35; }
+:root[data-skin] .dossier-directory .dock-surface__heading p { overflow-wrap: anywhere; }
+:root[data-skin] .dossier-directory .dock-surface__meta { grid-column: 2 / -1; grid-row: 2; white-space: normal; line-height: 1.45; }
+:root[data-skin] .dossier-directory .dock-surface__action { grid-column: 3; grid-row: 1; }
+:root[data-skin] .dossier-directory .dock-row__body { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 6px 10px; }
+:root[data-skin] .dossier-directory .dock-row__mark { grid-column: 1; grid-row: 1; }
+:root[data-skin] .dossier-directory .dock-row__main { grid-column: 2 / -1; grid-row: 1; }
+:root[data-skin] .dossier-directory .dock-row__badge { grid-column: 2; grid-row: 2; min-width: 0; flex-wrap: wrap; gap: 2px 8px; white-space: normal; }
+:root[data-skin] .dossier-directory .dock-row__actions { grid-column: 3; grid-row: 2; }
+:root[data-skin] .dossier-directory .dock-row__secondary { white-space: normal; }
 :root[data-skin] .composer { overflow: visible; border: 1px solid var(--border-strong); background: color-mix(in srgb, var(--surface-0) 86%, var(--surface-2)); border-radius: 16px; box-shadow: 0 8px 24px color-mix(in srgb, var(--text-strong) 8%, transparent); transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
 :root[data-skin] .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 80%, var(--border-strong)); background: var(--surface-0); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent), 0 12px 30px color-mix(in srgb, var(--text-strong) 10%, transparent); }
 :root[data-skin] .composer textarea { min-height: 68px; max-height: 200px; padding: 14px 17px 7px; font-size: 15px; line-height: 1.65; caret-color: var(--accent); }

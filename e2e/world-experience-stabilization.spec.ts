@@ -65,7 +65,7 @@ test('previews, cancels and persists world appearance settings', async ({ page }
   expect(sceneThemeBefore).toBeTruthy()
 
   const openWorldSettings = async () => {
-    await page.getByRole('button', { name: '世界管理' }).click()
+    await page.getByRole('button', { name: '世界设置' }).click()
     const opened = page.getByRole('dialog', { name: /世界管理 · 我的世界/ })
     await expect(opened).toBeVisible()
     // 会话皮肤从基础设定分出了自己的分栏。

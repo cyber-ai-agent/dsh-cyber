@@ -43,7 +43,7 @@ test('probes the host, edits custom CLI names, and stays inside the settings sur
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
   await expect(dock.getByRole('button', { name: '机器档案' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: '世界管理' }).click()
+  await page.getByRole('button', { name: '世界设置' }).click()
   const settings = page.getByRole('dialog', { name: /世界管理|世界设置/ })
   await settings.getByRole('button', { name: '机器档案' }).click()
 
