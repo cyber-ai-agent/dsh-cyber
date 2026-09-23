@@ -177,15 +177,14 @@ describe('world library views', () => {
   })
 })
 
-describe('workshop project library', () => {
-  it('marks a project whose world was deleted and hides the entry into that world', async () => {
-    const detached = makeProject({ worldLinked: false })
+describe('creative workshop entry', () => {
+  it('opens the creation hub even when local projects already exist', async () => {
+    const onCreate = vi.fn()
     const { host, root } = await mount(createElement(CreativeWorkshopProjectLibrary, {
-      projects: [detached],
-      selectedProject: detached,
+      projects: [makeProject({})],
       skills: [],
       onSelect: () => undefined,
-      onCreate: () => undefined,
+      onCreate,
       onDuplicate: () => undefined,
       onOpenWorld: () => undefined,
       onArchive: () => undefined,
@@ -193,166 +192,10 @@ describe('workshop project library', () => {
       onDelete: () => undefined,
     }))
 
-    expect(host.textContent).toContain('关联世界已删除')
-    expect(buttonNamed(host, '进入世界')).toBeUndefined()
-
-    await act(async () => { root.unmount() })
-  })
-
-  it('keeps the entry into the world for a project that is still linked', async () => {
-    const linked = makeProject({})
-    const { host, root } = await mount(createElement(CreativeWorkshopProjectLibrary, {
-      projects: [linked],
-      selectedProject: linked,
-      skills: [],
-      onSelect: () => undefined,
-      onCreate: () => undefined,
-      onDuplicate: () => undefined,
-      onOpenWorld: () => undefined,
-      onArchive: () => undefined,
-      onRestore: () => undefined,
-      onDelete: () => undefined,
-    }))
-
-    expect(host.textContent).not.toContain('关联世界已删除')
-    expect(buttonNamed(host, '进入世界')).toBeDefined()
-
-    await act(async () => { root.unmount() })
-  })
-
-  it('shows archived projects only in the archive view, with restore and permanent delete', async () => {
-    const archived = makeProject({ id: 'project-archived', displayName: '停用的短剧项目', status: 'archived' })
-    const { host, root } = await mount(createElement(CreativeWorkshopProjectLibrary, {
-      projects: [makeProject({}), archived],
-      selectedProject: archived,
-      skills: [],
-      onSelect: () => undefined,
-      onCreate: () => undefined,
-      onDuplicate: () => undefined,
-      onOpenWorld: () => undefined,
-      onArchive: () => undefined,
-      onRestore: () => undefined,
-      onDelete: () => undefined,
-    }))
-
-    const list = host.querySelector('.creative-workshop-project-items')!
-    expect(list.textContent).toContain('夜航工作室项目')
-    expect(list.textContent).not.toContain('停用的短剧项目')
-
-    await act(async () => { buttonNamed(host, '归档项目')!.click() })
-    expect(host.querySelector('.creative-workshop-project-items')!.textContent).toContain('停用的短剧项目')
-    expect(host.querySelector('.creative-workshop-project-items')!.textContent).not.toContain('夜航工作室项目')
-    expect(buttonNamed(host, '恢复')).toBeDefined()
-    expect(buttonNamed(host, '永久删除')).toBeDefined()
-
-    await act(async () => { root.unmount() })
-  })
-})
-
-/** Header actions only, so the confirmation's own 确认永久删除 never stands in for the trigger. */
-function detailAction(host: ParentNode, label: string): HTMLButtonElement | undefined {
-  return [...host.querySelectorAll<HTMLButtonElement>('.creative-workshop-project-detail__header button')]
-    .find((button) => button.textContent?.trim() === label)
-}
-
-async function pressKey(key: string, init: KeyboardEventInit = {}): Promise<void> {
-  await act(async () => {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }))
-  })
-}
-
-describe('workshop project permanent-delete confirmation focus contract', () => {
-  const archivedProject = () => makeProject({ id: 'project-archived', displayName: '停用的短剧项目', status: 'archived' })
-
-  async function openConfirm(onDelete = vi.fn()) {
-    const project = archivedProject()
-    const { host, root } = await mount(createElement(CreativeWorkshopProjectLibrary, {
-      projects: [project],
-      selectedProject: project,
-      skills: [],
-      onSelect: () => undefined,
-      onCreate: () => undefined,
-      onDuplicate: () => undefined,
-      onOpenWorld: () => undefined,
-      onArchive: () => undefined,
-      onRestore: () => undefined,
-      onDelete,
-    }))
-    // The archive tab is the only place permanent delete exists.
-    await act(async () => { buttonNamed(host, '归档项目')!.click() })
-    const trigger = detailAction(host, '永久删除')!
-    trigger.focus()
-    await act(async () => { trigger.click() })
-    const confirm = host.querySelector<HTMLElement>('[role="alertdialog"]')!
-    return { host, root, trigger, confirm, onDelete }
-  }
-
-  it('moves focus into the confirmation when it opens', async () => {
-    const { root, confirm } = await openConfirm()
-    expect(confirm).toBeDefined()
-    expect(confirm.contains(document.activeElement)).toBe(true)
-    await act(async () => { root.unmount() })
-  })
-
-  it('closes on Escape without deleting, and gives focus back to the control that opened it', async () => {
-    const { host, root, trigger, onDelete } = await openConfirm()
-
-    await pressKey('Escape')
-
-    expect(host.querySelector('[role="alertdialog"]')).toBeNull()
-    expect(onDelete).not.toHaveBeenCalled()
-    expect(document.activeElement).toBe(trigger)
-    await act(async () => { root.unmount() })
-  })
-
-  it('cycles Tab inside the confirmation instead of leaking into the page behind it', async () => {
-    const { root, confirm } = await openConfirm()
-    const items = [...confirm.querySelectorAll<HTMLButtonElement>('button')]
-    expect(items.length).toBeGreaterThan(1)
-
-    items.at(-1)!.focus()
-    await pressKey('Tab')
-    expect(document.activeElement).toBe(items[0])
-
-    await pressKey('Tab', { shiftKey: true })
-    expect(document.activeElement).toBe(items.at(-1))
-
-    await act(async () => { root.unmount() })
-  })
-
-  it('is the topmost modal while the workshop dialog around it is still open', async () => {
-    // The library always renders inside the creative workshop dialog, so the
-    // confirmation has to win the topmost check against that outer modal.
-    const project = archivedProject()
-    const onDelete = vi.fn()
-    const { host, root } = await mount(createElement(
-      'section',
-      { role: 'dialog', 'aria-modal': 'true' },
-      createElement(CreativeWorkshopProjectLibrary, {
-        projects: [project],
-        selectedProject: project,
-        skills: [],
-        onSelect: () => undefined,
-        onCreate: () => undefined,
-        onDuplicate: () => undefined,
-        onOpenWorld: () => undefined,
-        onArchive: () => undefined,
-        onRestore: () => undefined,
-        onDelete,
-      }),
-    ))
-    await act(async () => { buttonNamed(host, '归档项目')!.click() })
-    const trigger = detailAction(host, '永久删除')!
-    trigger.focus()
-    await act(async () => { trigger.click() })
-
-    const confirm = host.querySelector<HTMLElement>('[role="alertdialog"]')!
-    expect([...document.querySelectorAll('[aria-modal="true"]')].at(-1)).toBe(confirm)
-
-    await pressKey('Escape')
-    expect(host.querySelector('[role="alertdialog"]')).toBeNull()
-    expect(onDelete).not.toHaveBeenCalled()
-
+    expect(host.textContent).toContain('打造专属的赛博智能体世界')
+    expect(host.textContent).not.toContain('我的本地项目')
+    await act(async () => { buttonNamed(host, '新建空白世界')?.click() })
+    expect(onCreate).toHaveBeenCalledOnce()
     await act(async () => { root.unmount() })
   })
 })
