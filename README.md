@@ -11,7 +11,7 @@
 [![CI](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml/badge.svg)](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-2f81f7)](./LICENSE)
 
-**Pre-Alpha** · 自备模型服务 · Windows / macOS / Linux
+**Pre-Alpha** · 自备模型服务 · Web 支持 Windows / macOS / Linux · Windows 桌面预览版
 
 </div>
 
@@ -38,6 +38,7 @@ DSH Cyber 基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 | 统一市场 | 浏览世界、角色、插件和界面皮肤，并继续完成创建世界、招募角色、启用插件或应用皮肤。 |
 | 模型中心 | 管理模型服务商、同步模型目录、按工作区/世界/角色分配模型，并查看按服务商归属的交互与 Token 统计。 |
 | 本地语音 | 可选安装本地 TTS 与 STT；浏览器通过本机服务使用流式音频、语音识别和打断。 |
+| Windows 桌面预览版 | 独立运行本地服务与同一工作台，支持单实例、托盘后台运行、退出确认和版本首次启动前备份。 |
 
 任务进度会随来源会话的状态变化实时刷新。模型运行发生重连、超时或取消时，工作台会按请求归属核对状态，避免旧响应覆盖当前世界或会话。
 
@@ -149,14 +150,15 @@ flowchart TB
 | `packages/server`、`packages/cli` | 本地 API、服务与命令行 |
 | `packages/web`、`packages/world-runtime` | 工作台与世界运行时 |
 | `packages/package-runtime`、`packages/catalog`、`marketplace` | 扩展包、服务商目录与内置市场 |
+| `apps/desktop` | Windows 桌面壳、独立运行时打包与窗口验收 |
 
-当前锁定 DeepSeek Harness `0.1.6-alpha.1`。上游仍处于预发布阶段，升级候选需要经过合同测试、真实启动与回滚验证。
+当前锁定 DeepSeek Harness `0.1.7-rc.2`。上游仍处于预发布阶段，升级候选需要经过合同测试、真实启动与回滚验证。
 
-兼容性矩阵与升级证据见 [`docs/development/deepseek-harness-compatibility-2026-09-16.md`](./docs/development/deepseek-harness-compatibility-2026-09-16.md)。
+兼容性矩阵与升级证据见[新版适配记录](./docs/development/deepseek-harness-compatibility-2026-09-26.md)。
 
 ## 快速开始
 
-准备 Node.js `22.19+`（22 LTS）或 `24+`，以及 pnpm `11.7.0`。
+准备 Node.js `22.19+`（22 LTS）或 `24+`，以及 pnpm `11.19.0`。
 
 ```bash
 git clone https://github.com/cyber-ai-agent/dsh-cyber.git
@@ -167,6 +169,8 @@ pnpm dsh-cyber web
 ```
 
 打开 [http://127.0.0.1:43123](http://127.0.0.1:43123)，从“工具 → 模型中心”添加服务商、同步或填写模型 ID，再进入世界开始交流。
+
+Windows x64 可从源码构建[桌面预览版](./apps/desktop/README.md)：运行 `pnpm desktop:dev` 使用隔离开发数据，或运行 `pnpm desktop:package:win:installer` 生成包含本地 Node 和完整工作台的安装包。该安装包当前只在本地生成，尚未作为正式下载发布。
 
 需要本地语音时额外执行：
 

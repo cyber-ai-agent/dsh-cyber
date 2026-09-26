@@ -22,7 +22,7 @@ export default defineConfig({
         test: {
           ...shared,
           name: 'node',
-          include: ['packages/**/tests/**/*.test.ts', 'packages/**/tests/**/*.test.tsx'],
+          include: ['packages/**/tests/**/*.test.ts', 'packages/**/tests/**/*.test.tsx', 'apps/desktop/tests/**/*.test.ts'],
           exclude: [...shared.exclude, 'packages/web/tests/**'],
         },
       },

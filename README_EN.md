@@ -39,6 +39,7 @@ The project is **Pre-Alpha**. APIs and features are evolving. Bring your own mod
 | Tasks and schedules | Organize plans, assignments, deliverables, and reviews; schedule work with durable run records. |
 | Workshop and market | Generate and review world, character, skin, and plugin drafts, then create, recruit, activate, or apply them through a shared package system. |
 | Model hub | Manage provider connections and model selection with locally encrypted credentials. |
+| Windows desktop preview | Run the same local workspace in a single-instance desktop window with tray background mode, explicit quit, and a backup before the first launch of a new desktop version. |
 
 Models are assigned per character in **Tools → Model Hub**. The chat composer uses the active character's assignment directly.
 
@@ -101,10 +102,11 @@ flowchart TB
 | `packages/server`, `packages/cli` | Local API, services, and command line |
 | `packages/web`, `packages/world-runtime` | Workspace UI and world runtime |
 | `packages/package-runtime`, `packages/catalog`, `marketplace` | Extension packages and built-in catalogs |
+| `apps/desktop` | Windows shell, self-contained runtime packaging, and window tests |
 
-DSH is pinned to `0.1.6-alpha.1`. Upstream remains in prerelease status. Runtime upgrades require compatibility checks and real worker tests.
+DSH is pinned to `0.1.7-rc.2`. Upstream remains in prerelease status. Runtime upgrades require compatibility checks and real worker tests.
 
-See [`docs/development/deepseek-harness-compatibility-2026-09-16.md`](./docs/development/deepseek-harness-compatibility-2026-09-16.md) for the compatibility matrix and upgrade evidence.
+See the [current compatibility notes](./docs/development/deepseek-harness-compatibility-2026-09-26.md) for the upgrade evidence.
 
 ## Quick start
 
@@ -119,6 +121,8 @@ pnpm dsh-cyber web
 ```
 
 Open the [local workspace](http://127.0.0.1:43123), configure a provider connection and model in the model hub, and enter a world.
+
+On Windows x64, you can build the [desktop preview](./apps/desktop/README.md) with `pnpm desktop:dev` for isolated development data or `pnpm desktop:package:win:installer` for a self-contained local installer. This preview installer is built locally and is not yet published as an official download.
 
 For local voice, also run `pnpm voice:install`. Voice models load on demand; the conversation model uses your configured provider.
 
@@ -151,4 +155,4 @@ Stop the previous service before updating. If you use a custom data directory, k
 
 Contributions to features, themes, packages, tests, and documentation are welcome. Read [Contributing](./CONTRIBUTING.md) and the [architecture guidelines](./docs/development/architecture-guidelines.md). Product direction is documented in the [Roadmap](./docs/roadmap.md).
 
-See [LICENSE](./LICENSE) for licensing terms. Thanks to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) for the underlying runtime.
+DSH Cyber is licensed under the [PolyForm Noncommercial License 1.0.0](./LICENSE). Commercial use requires separate authorization. Thanks to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) for the underlying runtime.
