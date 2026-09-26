@@ -6,7 +6,7 @@
 
 让 AI 角色拥有持续身份、独立会话、真实技能和可追溯成果，在属于你的本地世界中长期工作与成长。
 
-[官网](https://www.sandaoliu.cn/) · [English](./README_EN.md) · [产品路线](./docs/roadmap.md) · [贡献指南](./CONTRIBUTING.md)
+[官网](https://www.sandaoliu.cn/) · [Windows 桌面版下载](https://github.com/cyber-ai-agent/dsh-cyber/releases/tag/desktop-v0.1.0-preview.1) · [English](./README_EN.md) · [产品路线](./docs/roadmap.md) · [贡献指南](./CONTRIBUTING.md)
 
 [![CI](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml/badge.svg)](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-2f81f7)](./LICENSE)
@@ -170,7 +170,7 @@ pnpm dsh-cyber web
 
 打开 [http://127.0.0.1:43123](http://127.0.0.1:43123)，从“工具 → 模型中心”添加服务商、同步或填写模型 ID，再进入世界开始交流。
 
-Windows x64 可从源码构建[桌面预览版](./apps/desktop/README.md)：运行 `pnpm desktop:dev` 使用隔离开发数据，或运行 `pnpm desktop:package:win:installer` 生成包含本地 Node 和完整工作台的安装包。该安装包当前只在本地生成，尚未作为正式下载发布。
+Windows x64 可以下载桌面预览版：[安装包](https://github.com/cyber-ai-agent/dsh-cyber/releases/download/desktop-v0.1.0-preview.1/DSH-Cyber-Setup-0.1.0-preview.1-win-x64.exe)、[便携版 ZIP](https://github.com/cyber-ai-agent/dsh-cyber/releases/download/desktop-v0.1.0-preview.1/DSH-Cyber-Portable-0.1.0-preview.1-win-x64.zip)和[SHA-256 校验文件](https://github.com/cyber-ai-agent/dsh-cyber/releases/download/desktop-v0.1.0-preview.1/SHA256SUMS.txt)。安装与源码构建方式见[桌面版说明](./apps/desktop/README.md)。预览包尚未签名，也没有自动更新。
 
 需要本地语音时额外执行：
 

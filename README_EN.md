@@ -6,7 +6,7 @@
 
 Create characters with identity and memory, collaborate in interactive worlds, and keep the results of real work.
 
-[Website](https://www.sandaoliu.cn/) · [简体中文](./README.md) · [Contributing](./CONTRIBUTING.md)
+[Website](https://www.sandaoliu.cn/) · [Windows desktop download](https://github.com/cyber-ai-agent/dsh-cyber/releases/tag/desktop-v0.1.0-preview.1) · [简体中文](./README.md) · [Contributing](./CONTRIBUTING.md)
 
 [![CI](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml/badge.svg)](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-see%20LICENSE-blue)](./LICENSE)
@@ -122,7 +122,7 @@ pnpm dsh-cyber web
 
 Open the [local workspace](http://127.0.0.1:43123), configure a provider connection and model in the model hub, and enter a world.
 
-On Windows x64, you can build the [desktop preview](./apps/desktop/README.md) with `pnpm desktop:dev` for isolated development data or `pnpm desktop:package:win:installer` for a self-contained local installer. This preview installer is built locally and is not yet published as an official download.
+On Windows x64, download the desktop preview [installer](https://github.com/cyber-ai-agent/dsh-cyber/releases/download/desktop-v0.1.0-preview.1/DSH-Cyber-Setup-0.1.0-preview.1-win-x64.exe), [portable ZIP](https://github.com/cyber-ai-agent/dsh-cyber/releases/download/desktop-v0.1.0-preview.1/DSH-Cyber-Portable-0.1.0-preview.1-win-x64.zip), and [SHA-256 checksums](https://github.com/cyber-ai-agent/dsh-cyber/releases/download/desktop-v0.1.0-preview.1/SHA256SUMS.txt). See the [desktop guide](./apps/desktop/README.md) for installation and source builds. Preview binaries are unsigned and do not auto-update.
 
 For local voice, also run `pnpm voice:install`. Voice models load on demand; the conversation model uses your configured provider.
 

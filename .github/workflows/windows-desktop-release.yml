@@ -1,0 +1,85 @@
+name: Windows desktop release
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.19.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.14.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node apps/desktop/scripts/check-release-links.mjs
+      - run: pnpm build
+      - run: pnpm exec vitest run apps/desktop/tests/runtime.test.ts packages/cli/tests/cli.test.ts
+      - run: pnpm --filter @dsh-cyber/desktop electron:check
+      - run: pnpm --filter @dsh-cyber/desktop prepare:runtime
+      - run: node apps/desktop/scripts/build-win.mjs nsis
+      - run: node apps/desktop/scripts/verify-artifact.mjs installer
+      - run: pnpm --filter @dsh-cyber/desktop release:prepare
+      - name: Publish pre-release with verified assets
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $version = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne "desktop-v$version") { throw "Tag $tag does not match desktop version $version" }
+          $root = 'apps/desktop/.desktop-build/artifacts/release'
+          $manifest = Get-Content "$root/release-assets.json" -Raw | ConvertFrom-Json
+          $notes = "apps/desktop/releases/$version.md"
+          if (-not (Test-Path $notes)) { throw "Missing release notes: $notes" }
+          $existingJson = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --draft --prerelease --title "DSH Cyber Desktop $version" --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release' }
+          } elseif (-not ($existingJson | ConvertFrom-Json).isDraft) {
+            $published = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+            if ($published.draft -or -not $published.prerelease) { throw 'Existing release is not a published pre-release' }
+            foreach ($name in @($manifest.assets[0].name, $manifest.assets[1].name, 'SHA256SUMS.txt')) {
+              $remote = $published.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+              if ($null -eq $remote -or $remote.size -le 0) { throw "Published release is missing $name" }
+            }
+            Write-Host "Published release already contains all assets: $($published.html_url)"
+            return
+          }
+          $published = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          if ($published.draft) {
+            gh release upload $tag "$root/$($manifest.assets[0].name)" "$root/$($manifest.assets[1].name)" "$root/SHA256SUMS.txt" --repo $env:GITHUB_REPOSITORY --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false --prerelease
+            if ($LASTEXITCODE -ne 0) { throw 'Could not publish pre-release' }
+          }
+          $published = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          if ($published.draft -or -not $published.prerelease) { throw 'Release is not a published pre-release' }
+          foreach ($asset in $manifest.assets) {
+            $remote = $published.assets | Where-Object { $_.name -eq $asset.name } | Select-Object -First 1
+            if ($null -eq $remote -or $remote.size -ne $asset.bytes) { throw "Missing or incomplete asset: $($asset.name)" }
+            if ($remote.digest -and $remote.digest -ne "sha256:$($asset.sha256)") { throw "Digest mismatch: $($asset.name)" }
+          }
+          $sum = $published.assets | Where-Object { $_.name -eq 'SHA256SUMS.txt' } | Select-Object -First 1
+          if ($null -eq $sum -or $sum.size -ne (Get-Item "$root/SHA256SUMS.txt").Length) { throw 'Missing checksum asset' }
+          Write-Host "Published and verified $($published.html_url)"

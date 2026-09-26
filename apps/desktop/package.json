@@ -11,7 +11,8 @@
     "dev": "pnpm electron:check && node scripts/dev.mjs",
     "prepare:runtime": "node scripts/prepare-runtime.mjs",
     "package:win:dir": "pnpm electron:check && pnpm prepare:runtime && node scripts/build-win.mjs dir && node scripts/verify-artifact.mjs",
-    "package:win:installer": "pnpm electron:check && pnpm prepare:runtime && node scripts/build-win.mjs nsis && node scripts/verify-artifact.mjs installer"
+    "package:win:installer": "pnpm electron:check && pnpm prepare:runtime && node scripts/build-win.mjs nsis && node scripts/verify-artifact.mjs installer",
+    "release:prepare": "node scripts/prepare-release.mjs && node scripts/check-release-links.mjs"
   },
   "devDependencies": {
     "electron": "43.4.0",

@@ -53,6 +53,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: node apps/desktop/scripts/check-release-links.mjs
       - run: pnpm exec vitest run apps/desktop/tests/runtime.test.ts packages/cli/tests/cli.test.ts
       - run: pnpm --filter @dsh-cyber/desktop electron:check
       - run: pnpm --filter @dsh-cyber/desktop prepare:runtime
