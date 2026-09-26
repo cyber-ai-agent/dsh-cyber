@@ -19,7 +19,7 @@ export const HARNESS_PROTOCOL_CONTRACT = SUPPORTED_HARNESS_PROTOCOL_CONTRACT
 
 /**
  * Runtimes DSH Cyber can actually drive. The launch API and profile layout
- * follow the 0.1.6-alpha.1 SDK/profile contract, so older DSH releases are unreachable: the
+ * follow the 0.1.7-rc.2 SDK/profile contract, so older DSH releases are unreachable: the
  * matrix must never advertise a version the adapter cannot start.
  */
 export const HARNESS_COMPATIBILITY_MATRIX = [
@@ -38,7 +38,7 @@ export const HARNESS_COMPATIBILITY_MATRIX = [
       sessionLock: true,
     },
     adaptationNotes: [
-      'session.v2 JSONL 由上游 V2-to-V3 迁移边读取并生成 V3 后继代',
+      '旧 Session JSONL 由上游相邻迁移链读取并生成 V4 后继代；原始代不由 DSH Cyber 改写',
       '默认文件编辑工具采用 read/write/edit；str_replace_editor 保持按需配置',
       'PTC 使用独立 Node 进程，凭据继续由宿主变量与工具边界提供',
       '协议客户端、JSON-RPC Server、审批、工具事件与流式通知沿用当前适配层合同',

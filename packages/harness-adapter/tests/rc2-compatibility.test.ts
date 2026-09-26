@@ -11,17 +11,17 @@ import {
 } from '../src/compatibility.js'
 import { inspectHarnessCompatibility, SUPPORTED_HARNESS_VERSION } from '../src/profile.js'
 
-const EXPECTED_HARNESS_VERSION = '0.1.6-alpha.1'
+const EXPECTED_HARNESS_VERSION = '0.1.7-rc.2'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-describe('DSH 0.1.6-alpha.1 compatibility', () => {
-  it('pins the bundled and candidate runtime to the supported alpha release', () => {
+describe('DSH 0.1.7-rc.2 compatibility', () => {
+  it('pins the bundled and candidate runtime to the supported release candidate', () => {
     expect(SUPPORTED_HARNESS_VERSION).toBe(EXPECTED_HARNESS_VERSION)
     expect(HARNESS_COMPATIBILITY_MATRIX.some((entry) => entry.dshVersion === EXPECTED_HARNESS_VERSION)).toBe(true)
     expect(HARNESS_COMPATIBILITY_MATRIX[0]).toMatchObject({
-      releaseTag: 'dsh-v0.1.6-alpha.1',
-      sessionFormatVersion: 3,
-      supportedFormatMigrations: ['v2-to-v3'],
+      releaseTag: 'dsh-v0.1.7-rc.2',
+      sessionFormatVersion: 4,
+      supportedFormatMigrations: ['v2-to-v3', 'v3-to-v4'],
       lifecycle: { sessionHandle: true, asyncAgentLoopCreate: true, sessionLock: true },
     })
   })
@@ -70,24 +70,24 @@ describe('DSH 0.1.6-alpha.1 compatibility', () => {
     expect(patch).toMatch(/id: tool-skill\s+disabled: true/)
   })
 
-  it('uses the 0.1.6 session event feed instead of deprecated synchronous history reads', async () => {
+  it('uses the session event feed instead of deprecated synchronous history reads', async () => {
     const source = await readFile(join(HERE, '../../harness-bundle/src/index.ts'), 'utf8')
     expect(source).not.toMatch(/\.eventAt\(|\.snapshotEvents\(|\.ownEvents\(/)
     expect(source).toContain("ctx.on('session/event'")
   })
 
-  it('reports the V3 migration boundary and verifies the Bundle peer closure', async () => {
+  it('reports the V4 migration boundary and verifies the Bundle peer closure', async () => {
     const report = await inspectHarnessCompatibility()
     expect(report).toMatchObject({
       ok: true,
       expectedVersion: EXPECTED_HARNESS_VERSION,
-      releaseTag: 'dsh-v0.1.6-alpha.1',
-      releaseDate: '2026-09-15',
-      releaseCommit: '0a15e36e7f82b6ed45af6fa9759f29b40dcd965d',
-      npmChannel: 'alpha',
+      releaseTag: 'dsh-v0.1.7-rc.2',
+      releaseDate: '2026-09-24',
+      releaseCommit: '477b4f420553e8a52c2fbccc464d7561b239c443',
+      npmChannel: 'next',
       contractId: 'dsh-session-events-v1',
-      sessionFormatVersion: 3,
-      supportedFormatMigrations: ['v2-to-v3'],
+      sessionFormatVersion: 4,
+      supportedFormatMigrations: ['v2-to-v3', 'v3-to-v4'],
     })
     const dshPackages = Object.entries(report.packages)
       .filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))

@@ -237,7 +237,7 @@ describe('real Harness worker with a loopback model provider', () => {
       expect(eventKinds).toContain('turn.started')
       expect(eventKinds).toContain('assistant.message')
       expect(eventKinds).toContain('turn.completed')
-      const sessionLogs = await findFiles(join(stateRoot, 'harness-home', 'sessions'), 'session.v3.jsonl.zstd')
+      const sessionLogs = await findFiles(join(stateRoot, 'harness-home', 'sessions'), 'session.v4.jsonl.zstd')
       expect(sessionLogs.length).toBeGreaterThan(0)
     } finally {
       await adapter.close()
@@ -281,7 +281,7 @@ describe('real Harness worker with a loopback model provider', () => {
     })
     expect(canary).toMatchObject({
       ok: true,
-      version: '0.1.6-alpha.1',
+      version: '0.1.7-rc.2',
       stableSession: true,
     })
     expect(canary.eventKinds).toEqual(expect.arrayContaining(['turn.started', 'assistant.message', 'turn.completed']))

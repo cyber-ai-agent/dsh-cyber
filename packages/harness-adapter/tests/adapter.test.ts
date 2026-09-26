@@ -1326,7 +1326,7 @@ describe('Harness profile and adapter', () => {
       await mkdir(packageDirectory, { recursive: true })
       await writeFile(
         join(packageDirectory, 'package.json'),
-        `${JSON.stringify({ name: packageName, version: '0.1.6-alpha.1' })}\n`,
+        `${JSON.stringify({ name: packageName, version: '0.1.7-rc.2' })}\n`,
         'utf8',
       )
     }
@@ -1338,7 +1338,7 @@ describe('Harness profile and adapter', () => {
     expect(report).toMatchObject({
       ok: true,
       supported: true,
-      version: '0.1.6-alpha.1',
+      version: '0.1.7-rc.2',
       contractId: 'dsh-session-events-v1',
       checks: {
         packageVersions: true,
@@ -1347,7 +1347,7 @@ describe('Harness profile and adapter', () => {
       },
     })
     expect(report.profile?.profileDir).toContain('candidates')
-    expect(report.profile?.profileDir).toContain('dsh-cyber-candidate-0-1-6-alpha-1')
+    expect(report.profile?.profileDir).toContain('dsh-cyber-candidate-0-1-7-rc-2')
 
     const mismatchedManifest = join(
       candidateRoot,

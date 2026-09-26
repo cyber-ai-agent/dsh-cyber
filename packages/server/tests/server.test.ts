@@ -146,7 +146,7 @@ describe('Cyber local server', () => {
     expect(server.store.getBlueprint(builtIn.id, builtIn.version)?.summary).toBe('由旧版本持久化的蓝图定义')
   })
 
-  it('starts loopback-only with an empty world and independent role catalogs', async () => {
+  it('starts loopback-only with a seeded world role and independent role catalogs', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-server-'))
     const { origin } = await start(stateRoot)
 
@@ -166,7 +166,7 @@ describe('Cyber local server', () => {
     ])
     const { workspace, world } = await createWorld(origin)
     const snapshot = await json(origin, `/api/worlds/${world.id}/snapshot`)
-    expect(snapshot.body.employees).toEqual([])
+    expect(snapshot.body.employees).toMatchObject([{ blueprintId: 'core.butler', worldId: world.id }])
     expect(snapshot.body.world.workspaceId).toBe(workspace.id)
 
     const companyCatalog = await json(origin, '/api/catalog/blueprints?templateId=cyber-company')
@@ -409,7 +409,7 @@ describe('Cyber local server', () => {
     const worldSnapshot = await json(second.origin, `/api/worlds/${world.id}/snapshot`)
     const messages = await json(second.origin, `/api/sessions/${sessionId}/messages`)
     expect(workspaceSnapshot.body.worlds).toHaveLength(1)
-    expect(worldSnapshot.body.employees).toHaveLength(2)
+    expect(worldSnapshot.body.employees).toHaveLength(3)
     expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'assistant')).toHaveLength(2)
     expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'reasoning')).toHaveLength(2)
     expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'tool-call')).toHaveLength(2)
@@ -417,13 +417,16 @@ describe('Cyber local server', () => {
     expect(messages.body.items
       .filter((item: { kind: string }) => item.kind === 'user' || item.kind === 'assistant')
       .every((item: { metadata: { clientTurnId?: string } }) => item.metadata.clientTurnId === 'client-turn-group')).toBe(true)
-    expect(worldSnapshot.body.employees.every((item: { agentSessionId?: string }) => item.agentSessionId)).toBe(true)
+    expect(worldSnapshot.body.employees
+      .filter((item: { id: string }) => item.id === engineer.id || item.id === archivist.id)
+      .every((item: { agentSessionId?: string }) => item.agentSessionId)).toBe(true)
   })
 
   it('projects, persists, interacts with, and recovers the World Runtime V2 state', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-world-runtime-'))
     const first = await start(stateRoot, new FakeRuntime())
     const { world } = await createWorld(first.origin)
+    const starter = first.server.store.listEmployees(world.id)[0]!
     const engineer = await recruit(first.origin, world.id, 'cyber-company.software-engineer')
     const archivist = await recruit(first.origin, world.id, 'cyber-company.archivist')
 
@@ -437,7 +440,7 @@ describe('Cyber local server', () => {
       clock: { lightsOn: true },
     })
     expect(projected.body.entities.map((item: { id: string }) => item.id).sort()).toEqual(
-      [engineer.id, archivist.id].sort(),
+      [starter.id, engineer.id, archivist.id].sort(),
     )
     expect(projected.body.objects).toHaveLength(4)
 
@@ -486,7 +489,7 @@ describe('Cyber local server', () => {
     expect(lights.body.snapshot.clock.lightsOn).toBe(false)
     expect(first.server.store.doctor().counts).toMatchObject({
       worldRuntimeSnapshots: 1,
-      worldEntityStates: 2,
+      worldEntityStates: 3,
       worldObjectStates: 4,
       worldThemeBindings: 0,
     })
@@ -496,7 +499,7 @@ describe('Cyber local server', () => {
     const second = await start(stateRoot, new FakeRuntime())
     const recovered = await json(second.origin, `/api/worlds/${world.id}/runtime-snapshot`)
     expect(recovered.body.clock.lightsOn).toBe(false)
-    expect(recovered.body.entities).toHaveLength(2)
+    expect(recovered.body.entities).toHaveLength(3)
     expect(recovered.body.sequence).toBeGreaterThan(projected.body.sequence)
   })
 
@@ -615,9 +618,12 @@ describe('Cyber local server', () => {
 
     const companySessions = await json(origin, `/api/worlds/${company.id}/sessions`)
     const tavernSessions = await json(origin, `/api/worlds/${tavern.id}/sessions`)
-    expect(companySessions.body.items).toHaveLength(1)
-    expect(tavernSessions.body.items).toHaveLength(1)
-    expect(tavernSessions.body.items[0].worldId).toBe(tavern.id)
+    expect(companySessions.body.items).toHaveLength(2)
+    expect(tavernSessions.body.items).toHaveLength(2)
+    expect(companySessions.body.items.every((item: { worldId: string }) => item.worldId === company.id)).toBe(true)
+    expect(tavernSessions.body.items.every((item: { worldId: string }) => item.worldId === tavern.id)).toBe(true)
+    expect(companySessions.body.items.some((item: { id: string }) => item.id === companySessionId)).toBe(true)
+    expect(tavernSessions.body.items.some((item: { id: string }) => item.id === tavernChat.body.session.id)).toBe(true)
   })
 
   it('serves the standalone shell and persists appearance, model, asset, and employee dossier settings', async () => {
@@ -1204,7 +1210,7 @@ it('searches verified market packages and activates installed plugin and talent 
     expect(verified.response.status).toBe(201)
     expect(verified.body).toMatchObject({
       ok: true,
-      version: '0.1.6-alpha.1',
+      version: '0.1.7-rc.2',
       transaction: { status: 'verified' },
     })
     const transactionId = verified.body.transaction.id as string
@@ -1250,7 +1256,7 @@ it('searches verified market packages and activates installed plugin and talent 
     })
 
     const updates = await json(origin, '/api/system/updates')
-    expect(updates.body.activeRuntime).toMatchObject({ transactionId, version: '0.1.6-alpha.1' })
+    expect(updates.body.activeRuntime).toMatchObject({ transactionId, version: '0.1.7-rc.2' })
     expect(updates.body.items[0]).toMatchObject({ id: transactionId, status: 'activated' })
 
     const rolledBack = await json(origin, `/api/system/update/${transactionId}/rollback`, {
