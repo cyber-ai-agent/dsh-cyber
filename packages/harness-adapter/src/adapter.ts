@@ -128,10 +128,10 @@ const MAX_ACTIVE_LANES_PER_EMPLOYEE = 2
 
 /**
  * Estimated tokens of the exact model-facing `tools` array emitted by the
- * pinned DSH 0.1.6-alpha.1 worker profile. The real loopback Harness test guards
+ * pinned DSH 0.1.7-rc.2 worker profile. The real loopback Harness test guards
  * this value against schema drift. A DSH/profile upgrade must refresh both.
  */
-export const PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS = 8_550
+export const PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS = 6_590
 /** Additional pinned DSH system instructions beyond `DSH_SYSTEM_PROMPT`. */
 export const PINNED_HARNESS_NATIVE_SYSTEM_OVERHEAD_TOKENS = 1_400
 /** Per-turn runtime-context snapshot injected as a separate user message. */
@@ -388,7 +388,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       lane.hasWorldDirectory = request.worldDirectory !== undefined
       lane.runtime = runtime
     }
-    // The 0.1.6-alpha.1 SDK server creates its session through
+    // The pinned SDK server creates its session through
     // ctx.agents.create. SessionStore.prepare rejects a live collision but does
     // not restore a JSONL log created by an earlier worker process. Every
     // conversation therefore gets a brand-new random id the first time it runs
@@ -892,7 +892,7 @@ export function normalizeHarnessTraceNotification(
       const source = record(message?.source)
       const callId = stringValue(source?.callId) ?? 'unknown-call'
       const failure = record(data.error)
-      const failed = failure !== undefined
+      const failed = failure !== undefined || message?.isError === true
       const subject = toolSubjects?.complete(sourceSessionId, callId)
       const summary = summarizeToolResult(data, subject, redactor.redact.bind(redactor))
       const metadata: JsonObject = {

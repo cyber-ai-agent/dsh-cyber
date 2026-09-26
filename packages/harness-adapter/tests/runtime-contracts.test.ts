@@ -112,7 +112,7 @@ describe('Harness adapter runtime contracts', () => {
     ]
     const client = {
       start() {},
-      async initialize() { return { serverInfo: { name: 'test', version: '0.1.6-alpha.1' } } },
+      async initialize() { return { serverInfo: { name: 'test', version: '0.1.7-rc.2' } } },
       async prompt(sessionId: string, contentBlocks: SdkPromptContentBlock[]) {
         promptCalls.push({ sessionId, contentBlocks })
         return 'image-contract-message'

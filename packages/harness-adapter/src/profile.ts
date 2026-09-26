@@ -6,14 +6,14 @@ import { randomUUID } from 'node:crypto'
 
 import type { WorkerWebSearchPlan } from './web-search.js'
 
-export const SUPPORTED_HARNESS_VERSION = '0.1.6-alpha.1' as const
-export const SUPPORTED_HARNESS_RELEASE_TAG = 'dsh-v0.1.6-alpha.1' as const
-export const SUPPORTED_HARNESS_RELEASE_DATE = '2026-09-15' as const
-export const SUPPORTED_HARNESS_RELEASE_COMMIT = '0a15e36e7f82b6ed45af6fa9759f29b40dcd965d' as const
-export const SUPPORTED_HARNESS_NPM_CHANNEL = 'alpha' as const
+export const SUPPORTED_HARNESS_VERSION = '0.1.7-rc.2' as const
+export const SUPPORTED_HARNESS_RELEASE_TAG = 'dsh-v0.1.7-rc.2' as const
+export const SUPPORTED_HARNESS_RELEASE_DATE = '2026-09-24' as const
+export const SUPPORTED_HARNESS_RELEASE_COMMIT = '477b4f420553e8a52c2fbccc464d7561b239c443' as const
+export const SUPPORTED_HARNESS_NPM_CHANNEL = 'next' as const
 export const SUPPORTED_HARNESS_PROTOCOL_CONTRACT = 'dsh-session-events-v1' as const
-export const SUPPORTED_HARNESS_SESSION_FORMAT_VERSION = 3 as const
-export const SUPPORTED_HARNESS_FORMAT_MIGRATIONS = ['v2-to-v3'] as const
+export const SUPPORTED_HARNESS_SESSION_FORMAT_VERSION = 4 as const
+export const SUPPORTED_HARNESS_FORMAT_MIGRATIONS = ['v2-to-v3', 'v3-to-v4'] as const
 export const WORKER_PROFILE_NAME = 'dsh-cyber-worker' as const
 
 export interface HarnessProfilePaths {

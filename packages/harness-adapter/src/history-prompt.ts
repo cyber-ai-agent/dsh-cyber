@@ -12,7 +12,7 @@ const HISTORY_INSTRUCTION = [
 /**
  * Renders recovered conversation history in front of the live prompt.
  *
- * The DSH 0.1.6-alpha.1 SDK server creates named sessions through
+ * The pinned DSH SDK server creates named sessions through
  * `ctx.agents.create`; that path does not resume a JSONL log owned by an earlier
  * worker process. Every conversation therefore gets a fresh random runtime
  * session id per process. Continuity is restored from the local store, not from

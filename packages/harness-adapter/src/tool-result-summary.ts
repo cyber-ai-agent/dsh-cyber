@@ -80,15 +80,18 @@ export function summarizeToolResult(
   const surface = Array.isArray(message?.content) ? message.content : []
   const callId = object(message?.source)?.callId
   if (surface.length > 64) truncated = true
-  // 0.1.6-alpha.1 represents tool output as user-message -> tool-result -> text.
-  // Unwrap this documented layer only; never descend into images or arbitrary JSON.
-  const blocks = surface.slice(0, 64).flatMap((value) => {
+  // V4 stores tool output as a tool-role message with direct content. V3's
+  // user-role wrapper remains readable for old notifications and migration
+  // diagnostics. Neither shape descends into images or arbitrary JSON.
+  const blocks = message?.role === 'tool' && message.toolCallId !== callId
+    ? []
+    : surface.slice(0, 64).flatMap((value) => {
     const block = object(value)
     if (block?.type === 'tool-result') {
       return block.toolCallId === callId && Array.isArray(block.content) ? block.content.slice(0, 64) : []
     }
     return block?.type === 'text' ? [block] : []
-  })
+    })
   for (const value of blocks.slice(0, 64)) {
     const block = object(value)
     if (block?.type !== 'text' || typeof block.text !== 'string') continue

@@ -9,13 +9,31 @@ function event(type: string, data: object, sessionId = 's'): HarnessNotification
   return { method: 'session.event', params: { sessionId, event: { type, data, seq: 1, time: 1 } } } as HarnessNotification
 }
 function result(text: string, callId = 'c', sessionId = 's') {
-  return event('tool/result', { message: { source: { callId }, content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text }], isError: false }] } }, sessionId)
+  return event('tool/result', { message: { role: 'tool', toolCallId: callId, source: { kind: 'tool', callId }, content: [{ type: 'text', text }], isError: false } }, sessionId)
 }
 function start(subjects: ToolTraceSubjects, args: object, name = 'read', callId = 'c', sessionId = 's') {
   return normalizeHarnessTraceNotification(event('tool/call', { name, callId, arguments: JSON.stringify(args) }, sessionId), subjects)
 }
 
 describe('sanitized tool evidence from current Harness event shapes', () => {
+  it('recognizes V4 failed tool messages without an outer error and rejects a conflicting call id', () => {
+    const subjects = new ToolTraceSubjects()
+    start(subjects, { file_path: 'src/index.ts' })
+    const failed = event('tool/result', { message: { role: 'tool', toolCallId: 'c', source: { kind: 'tool', callId: 'c' }, content: [{ type: 'text', text: 'read failed' }], isError: true } })
+    const [done] = normalizeHarnessTraceNotification(failed, subjects)
+    expect(done?.failed).toBe(true)
+    expect(done?.metadata.toolOutput).toContain('read failed')
+
+    start(subjects, { file_path: 'src/index.ts' })
+    const mismatched = event('tool/result', { message: { role: 'tool', toolCallId: 'other', source: { kind: 'tool', callId: 'c' }, content: [{ type: 'text', text: 'wrong call' }] } })
+    expect(normalizeHarnessTraceNotification(mismatched, subjects)[0]?.metadata.toolOutput).toBeUndefined()
+  })
+  it('still reads V3 tool-result wrappers during migration diagnostics', () => {
+    const subjects = new ToolTraceSubjects()
+    start(subjects, { file_path: 'src/legacy.ts' })
+    const legacy = event('tool/result', { message: { source: { callId: 'c' }, content: [{ type: 'tool-result', toolCallId: 'c', content: [{ type: 'text', text: 'legacy result' }] }] } })
+    expect(normalizeHarnessTraceNotification(legacy, subjects)[0]?.metadata.toolOutput).toBe('legacy result')
+  })
   it('keeps long code filenames and raw read ranges', () => {
     const summary = summarizeToolCall({ file_path: 'packages/server/src/services/character-profile-runtime.ts', offset: 10, limit: 25 })!
     expect(summary.detail).toContain('character-profile-runtime.ts')
