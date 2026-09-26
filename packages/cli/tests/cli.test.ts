@@ -58,6 +58,27 @@ describe('dsh-cyber CLI', () => {
     })
   })
 
+  it('exposes a machine-readable desktop readiness line without opening a browser', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-desktop-cli-'))
+    const captured = captureIo()
+    const openBrowser = vi.fn(async () => {})
+    const exitCode = await runCli([
+      'web', '--port', '0', '--data-dir', stateRoot, '--workspace', stateRoot,
+      '--web-root', stateRoot, '--marketplace-root', stateRoot, '--desktop-control',
+    ], {
+      io: captured.io,
+      openBrowser,
+      waitForShutdown: async (server) => {
+        const response = await fetch(`${server.address()!.origin}/api/health`)
+        expect(response.status).toBe(200)
+      },
+    })
+    expect(exitCode).toBe(0)
+    expect(openBrowser).not.toHaveBeenCalled()
+    const ready = captured.stdout.find((line) => line.startsWith('DSH_CYBER_DESKTOP_READY '))
+    expect(JSON.parse(ready!.slice('DSH_CYBER_DESKTOP_READY '.length))).toMatchObject({ origin: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) })
+  })
+
   it('creates verified backup and portable export artifacts', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-cli-'))
     const web = captureIo()

@@ -3,7 +3,11 @@ packages:
   - "packages/*"
 minimumReleaseAgeExclude:
   - "@deepseek-ai/*"
+overrides:
+  "app-builder-lib>@electron/get": "5.1.0"
 allowBuilds:
+  electron: true
+  electron-winstaller: true
   '@deepseek-ai/dsh-subprocess-local': true
   '@google/genai': true
   cpu-features: true

@@ -5,7 +5,7 @@
   "description": "Local-first standalone multi-agent workspace powered by DeepSeek Harness.",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE",
-  "packageManager": "pnpm@11.7.0",
+  "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
@@ -30,6 +30,9 @@
     "voice:verify-loop": "node scripts/verify-local-voice-loop.mjs",
     "voice:verify-websocket": "node scripts/verify-voice-websocket.mjs",
     "context:benchmark": "node scripts/benchmark-context.mjs",
+    "desktop:dev": "pnpm run build && pnpm --filter @dsh-cyber/desktop dev",
+    "desktop:package:win:dir": "pnpm run build && pnpm --filter @dsh-cyber/desktop package:win:dir",
+    "desktop:package:win:installer": "pnpm run build && pnpm --filter @dsh-cyber/desktop package:win:installer",
     "package:prepare": "tsx scripts/prepare-package.ts",
     "dsh-cyber": "node packages/cli/lib/bin.js"
   },

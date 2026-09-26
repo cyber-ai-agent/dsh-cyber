@@ -1,0 +1,58 @@
+{
+  "name": "@dsh-cyber/desktop",
+  "version": "0.1.0-preview.1",
+  "description": "Windows desktop preview for the local DSH Cyber workspace",
+  "author": "DSH Cyber Contributors",
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "electron:check": "node scripts/ensure-electron.mjs",
+    "dev": "pnpm electron:check && node scripts/dev.mjs",
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
+    "package:win:dir": "pnpm electron:check && pnpm prepare:runtime && node scripts/build-win.mjs dir && node scripts/verify-artifact.mjs",
+    "package:win:installer": "pnpm electron:check && pnpm prepare:runtime && node scripts/build-win.mjs nsis && node scripts/verify-artifact.mjs installer"
+  },
+  "devDependencies": {
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.dshcyber.desktop",
+    "productName": "DSH Cyber",
+    "compression": "store",
+    "asar": true,
+    "directories": {
+      "output": ".desktop-build/artifacts",
+      "buildResources": "../../packages/web/public"
+    },
+    "files": [
+      "main.cjs",
+      "runtime.cjs",
+      "startup.html",
+      "favicon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": ".desktop-build/runtime", "to": "runtime" },
+      { "from": ".desktop-build/runtime/node_modules", "to": "runtime/node_modules" },
+      { "from": "../../packages/web/dist", "to": "web" },
+      { "from": "../../marketplace", "to": "marketplace" },
+      { "from": "../../packages/web/public/favicon.png", "to": "favicon.png" },
+      { "from": "../../LICENSE", "to": "LICENSE" }
+    ],
+    "win": {
+      "icon": "../../packages/web/public/favicon.png",
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "license": "../../LICENSE",
+      "deleteAppDataOnUninstall": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

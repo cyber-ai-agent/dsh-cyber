@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { join, resolve } from 'node:path'
+import { createInterface } from 'node:readline'
 
 import {
   clearActiveHarnessRuntime,
@@ -51,15 +52,23 @@ export async function runCli(args: string[], context: CliContext = {}): Promise<
     if (command === 'web') {
       const port = optionInteger(options, 'port') ?? 43123
       const workspacePath = resolve(optionString(options, 'workspace') ?? cwd)
-      const server = await createCyberServer({ stateRoot, workspacePath, port, bootstrapDefaultWorld: true })
+      const webRoot = optionString(options, 'web-root')
+      const marketplaceRoot = optionString(options, 'marketplace-root')
+      const desktopControl = optionBoolean(options, 'desktop-control')
+      const server = await createCyberServer({
+        stateRoot, workspacePath, port, bootstrapDefaultWorld: true,
+        ...(webRoot === undefined ? {} : { webRoot: resolve(webRoot) }),
+        ...(marketplaceRoot === undefined ? {} : { marketplaceRoot: resolve(marketplaceRoot) }),
+      })
       const address = await server.start()
       try {
         io.stdout(`DSH Cyber 已启动：${address.origin}`)
         io.stdout(`本地数据：${stateRoot}`)
-        if (!optionBoolean(options, 'no-open')) {
+        if (desktopControl) io.stdout(`DSH_CYBER_DESKTOP_READY ${JSON.stringify({ origin: address.origin })}`)
+        if (!desktopControl && !optionBoolean(options, 'no-open')) {
           await (context.openBrowser ?? openExternal)(address.origin)
         }
-        await (context.waitForShutdown ?? waitForProcessShutdown)(server)
+        await (context.waitForShutdown ?? (desktopControl ? waitForDesktopShutdown : waitForProcessShutdown))(server)
         return 0
       } finally {
         await server.close()
@@ -210,7 +219,7 @@ function parseOptions(args: string[]): Map<string, string | true> {
     if (token === undefined || !token.startsWith('--')) throw new Error(`Unexpected argument: ${token}`)
     const key = token.slice(2)
     if (!key) throw new Error('Invalid empty option')
-    if (key === 'no-open' || key === 'force') {
+    if (key === 'no-open' || key === 'force' || key === 'desktop-control') {
       options.set(key, true)
       continue
     }
@@ -277,6 +286,26 @@ function waitForProcessShutdown(server: CyberServer): Promise<void> {
       process.off('SIGTERM', shutdown)
       void server.close().finally(resolvePromise)
     }
+    process.once('SIGINT', shutdown)
+    process.once('SIGTERM', shutdown)
+  })
+}
+
+/** A desktop owner keeps the Host alive while its window is hidden, and closes it through stdin. */
+function waitForDesktopShutdown(server: CyberServer): Promise<void> {
+  return new Promise((resolvePromise) => {
+    const lines = createInterface({ input: process.stdin })
+    let settling = false
+    const shutdown = () => {
+      if (settling) return
+      settling = true
+      lines.close()
+      process.off('SIGINT', shutdown)
+      process.off('SIGTERM', shutdown)
+      void server.close().finally(resolvePromise)
+    }
+    lines.on('line', (line) => { if (line.trim() === 'shutdown') shutdown() })
+    lines.once('close', shutdown)
     process.once('SIGINT', shutdown)
     process.once('SIGTERM', shutdown)
   })
