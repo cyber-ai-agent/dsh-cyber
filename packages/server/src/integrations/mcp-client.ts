@@ -10,9 +10,27 @@ export interface McpToolDefinition {
   annotations?: JsonObject
 }
 
+export interface McpResourceDefinition {
+  uri: string
+  name: string
+  title?: string
+  description?: string
+  mimeType?: string
+}
+
+export interface McpResourceContent {
+  uri: string
+  mimeType?: string
+  text?: string
+  blob?: string
+}
+
 export interface McpClientConnection {
   listTools(): Promise<McpToolDefinition[]>
   callTool(name: string, args: JsonObject): Promise<unknown>
+  /** Optional for injected legacy clients; the official SDK implements both. */
+  listResources?(): Promise<McpResourceDefinition[]>
+  readResource?(uri: string): Promise<McpResourceContent[]>
   close(): Promise<void>
 }
 
@@ -78,6 +96,40 @@ function wrapMcpClient(client: Client): McpClientConnection {
       return tools
     },
     callTool(name, args) { return client.callTool({ name, arguments: args }) },
+    async listResources() {
+      const resources: McpResourceDefinition[] = []
+      let cursor: string | undefined
+      const seen = new Set<string>()
+      const seenCursors = new Set<string>()
+      for (let pageNumber = 0; pageNumber < 10 && resources.length < 100; pageNumber += 1) {
+        const page = await client.listResources(cursor === undefined ? {} : { cursor })
+        for (const resource of page.resources) {
+          if (seen.has(resource.uri)) continue
+          seen.add(resource.uri)
+          resources.push({
+            uri: resource.uri,
+            name: resource.name,
+            ...(resource.title === undefined ? {} : { title: resource.title }),
+            ...(resource.description === undefined ? {} : { description: resource.description }),
+            ...(resource.mimeType === undefined ? {} : { mimeType: resource.mimeType }),
+          })
+          if (resources.length >= 100) break
+        }
+        if (page.nextCursor === undefined || seenCursors.has(page.nextCursor)) break
+        seenCursors.add(page.nextCursor)
+        cursor = page.nextCursor
+      }
+      return resources
+    },
+    async readResource(uri) {
+      const result = await client.readResource({ uri })
+      return result.contents.map((content) => ({
+        uri: content.uri,
+        ...(content.mimeType === undefined ? {} : { mimeType: content.mimeType }),
+        ...('text' in content && typeof content.text === 'string' ? { text: content.text } : {}),
+        ...('blob' in content && typeof content.blob === 'string' ? { blob: content.blob } : {}),
+      }))
+    },
     close() { return client.close() },
   }
 }

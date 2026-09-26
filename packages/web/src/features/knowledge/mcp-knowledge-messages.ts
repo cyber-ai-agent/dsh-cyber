@@ -1,0 +1,41 @@
+import { registerMessages } from '../../i18n/runtime.js'
+
+registerMessages('zh-CN', {
+  'knowledge.mcpImportAction': '从 MCP 资源导入',
+  'knowledge.mcpImportDesc': '读取已启用连接中的文本资源，确认后保存到当前世界。',
+  'knowledge.mcpConnection': 'MCP 连接',
+  'knowledge.mcpChooseConnection': '选择一个连接',
+  'knowledge.mcpNoConnections': '当前工作区没有已启用的 MCP 连接。请先在顶部连接中心添加并启用。',
+  'knowledge.mcpLoad': '读取资源目录',
+  'knowledge.mcpLoading': '正在读取…',
+  'knowledge.mcpEmpty': '这个连接没有可列出的资源。',
+  'knowledge.mcpPreview': '预览资源',
+  'knowledge.mcpPreviewLimit': '这里只显示前 8000 个字符，导入时会读取完整文本（最多 1 MiB）。',
+  'knowledge.mcpImport': '导入当前世界',
+  'knowledge.mcpImporting': '正在导入…',
+  'knowledge.mcpSuccess': '资源已保存到当前世界知识库。',
+  'knowledge.mcpClose': '收起 MCP 导入',
+  'knowledge.mcpRetry': '重试',
+  'knowledge.mcpTextOnly': '目前只支持文本资源。',
+  'knowledge.mcpSource': 'MCP 资源',
+})
+
+registerMessages('en-US', {
+  'knowledge.mcpImportAction': 'Import MCP resource',
+  'knowledge.mcpImportDesc': 'Read a text resource from an enabled connection and save it to this world after review.',
+  'knowledge.mcpConnection': 'MCP connection',
+  'knowledge.mcpChooseConnection': 'Choose a connection',
+  'knowledge.mcpNoConnections': 'No MCP connection is enabled in this workspace. Add one in Connection Hub first.',
+  'knowledge.mcpLoad': 'Load resources',
+  'knowledge.mcpLoading': 'Loading…',
+  'knowledge.mcpEmpty': 'This connection has no listed resources.',
+  'knowledge.mcpPreview': 'Preview resource',
+  'knowledge.mcpPreviewLimit': 'The preview shows the first 8,000 characters. Import reads up to 1 MiB of text.',
+  'knowledge.mcpImport': 'Import into this world',
+  'knowledge.mcpImporting': 'Importing…',
+  'knowledge.mcpSuccess': 'Resource saved to this world’s knowledge base.',
+  'knowledge.mcpClose': 'Close MCP import',
+  'knowledge.mcpRetry': 'Retry',
+  'knowledge.mcpTextOnly': 'Only text resources are supported for now.',
+  'knowledge.mcpSource': 'MCP resource',
+})

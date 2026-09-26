@@ -20,6 +20,7 @@ import {
 } from '../services/world-knowledge-consolidation-service.js'
 import type { WorldKnowledgeConsolidationScheduler } from '../services/world-knowledge-consolidation-scheduler.js'
 import { WorldKnowledgeLibraryService } from '../services/world-knowledge-library-service.js'
+import type { McpResourceKnowledgeService } from '../services/mcp-resource-knowledge-service.js'
 
 const MAX_MULTIPART_BODY_BYTES = 204 * 1024 * 1024
 const MAX_MULTIPART_FILES = 500
@@ -28,6 +29,7 @@ export interface WorldKnowledgeRoutesDependencies {
   store: Pick<SqliteStore, 'getWorld'>
   library: WorldKnowledgeLibraryService
   web?: KnowledgeWebImportService
+  mcpResources?: McpResourceKnowledgeService
   access?: WorldAccessService
   graph?: WorldKnowledgeGraphService
   graphAdmin?: KnowledgeGraphAdminPort
@@ -38,6 +40,29 @@ export interface WorldKnowledgeRoutesDependencies {
 
 export function registerWorldKnowledgeRoutes(router: Router, dependencies: WorldKnowledgeRoutesDependencies): void {
   const { store, library, web, access } = dependencies
+
+  router.get(/^\/api\/worlds\/([^/]+)\/knowledge\/mcp-resources\/([^/]+)$/, async ({ request, response, params }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.mcpResources === undefined) throw new HttpError(503, 'mcp_resources_unavailable', 'MCP 资源服务尚未配置')
+    writeJson(response, 200, { items: await dependencies.mcpResources.list(world.id, params[1]!) })
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/knowledge\/mcp-resources\/([^/]+)\/preview$/, async ({ request, response, params }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.mcpResources === undefined) throw new HttpError(503, 'mcp_resources_unavailable', 'MCP 资源服务尚未配置')
+    const body = await readJson(request)
+    writeJson(response, 200, { preview: await dependencies.mcpResources.preview(world.id, params[1]!, requiredString(body, 'uri')) })
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/knowledge\/mcp-resources\/([^/]+)\/import$/, async ({ request, response, params }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.mcpResources === undefined) throw new HttpError(503, 'mcp_resources_unavailable', 'MCP 资源服务尚未配置')
+    const body = await readJson(request)
+    writeJson(response, 201, { document: await dependencies.mcpResources.import(world.id, params[1]!, requiredString(body, 'uri'), requiredString(body, 'expectedHash')) })
+  })
 
   router.get(/^\/api\/worlds\/([^/]+)\/knowledge\/graph$/, async ({ request, response, params, url }) => {
     const world = assertWorld(store, params[0]!)

@@ -94,6 +94,7 @@ import { WorldSettingsService } from './services/world-settings-service.js'
 import { createKnowledgeSearchPort } from './services/knowledge-search-port.js'
 import { KnowledgeWebImportService } from './services/knowledge-web-import-service.js'
 import { WorldKnowledgeLibraryService } from './services/world-knowledge-library-service.js'
+import { McpResourceKnowledgeService } from './services/mcp-resource-knowledge-service.js'
 import { WorldKnowledgeRetrievalService } from './services/world-knowledge-retrieval-service.js'
 import { createWebSearchWiring } from './compose-web-search.js'
 import type { KnowledgeExtractionPort } from './services/knowledge-extraction.js'
@@ -276,6 +277,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   })
   const mcpClients = options.mcpClientFactory ?? new OfficialMcpClientFactory()
   const integrations = await IntegrationService.open(stateRoot, createBuiltinIntegrationRegistry(mcpClients))
+  const mcpResources = new McpResourceKnowledgeService({ store, integrations, clients: mcpClients, library: worldKnowledge })
   const { manager: credentialManager, sanitizer: traceSanitizer } = composeCredentialBoundary({ store, credentials, integrations })
   const firecrawlClient = new FirecrawlClient({ integrations, redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId) })
   const knowledgeWeb = new KnowledgeWebImportService({
@@ -488,6 +490,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     store,
     library: worldKnowledge,
     web: knowledgeWeb,
+    mcpResources,
     access: worldAccess,
     graph: knowledgeGraphRuntime.graph,
     graphAdmin: knowledgeGraphRuntime.admin,
