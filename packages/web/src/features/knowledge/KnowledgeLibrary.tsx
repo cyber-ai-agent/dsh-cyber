@@ -11,12 +11,13 @@ import {
   LinkSimple,
   MagnifyingGlass,
   Package,
+  PlugsConnected,
   SpinnerGap,
   UploadSimple,
   WarningCircle,
   X,
 } from '@phosphor-icons/react'
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type MutableRefObject, type ReactNode, type RefObject } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type MutableRefObject, type ReactNode, type RefObject } from 'react'
 
 import type { KnowledgeConsolidationJob, World } from '@dsh-cyber/contracts'
 
@@ -24,6 +25,7 @@ import { formatDateTime } from '../../i18n/format.js'
 import { useI18n } from '../../i18n/runtime.js'
 
 import { KnowledgeDocumentPreview } from './KnowledgeDocumentPreview.js'
+import './mcp-knowledge-messages.js'
 
 import type {
   KnowledgeCollection,
@@ -40,6 +42,7 @@ export interface KnowledgeLibraryProps {
 }
 
 type DialogKind = 'paste' | 'web' | undefined
+const McpResourceImportPanel = lazy(async () => ({ default: (await import('./McpResourceImportPanel.js')).McpResourceImportPanel }))
 type KnowledgeConsolidationState = 'pending' | 'queued' | 'success' | 'error'
 
 interface KnowledgeConsolidationEntry {
@@ -57,6 +60,7 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
   const { t } = useI18n()
   const [dialog, setDialog] = useState<DialogKind>()
   const [importMenuOpen, setImportMenuOpen] = useState(false)
+  const [mcpImportOpen, setMcpImportOpen] = useState(false)
   const [queryInput, setQueryInput] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const zipInputRef = useRef<HTMLInputElement>(null)
@@ -117,6 +121,7 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
             <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); folderInputRef.current?.click() }}><FolderOpen size={16} aria-hidden="true" /><span><strong>{t('knowledge.libraryImportFolder', '导入文件夹')}</strong><small>{t('knowledge.libraryImportFolderDesc', '批量导入资料目录')}</small></span></button>
             <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); setDialog('paste') }}><ClipboardText size={16} aria-hidden="true" /><span>{t('knowledge.libraryPasteAction', '粘贴内容')}</span></button>
             <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); setDialog('web') }}><GlobeSimple size={16} aria-hidden="true" /><span>{t('knowledge.libraryWebAction', '从网页导入')}</span></button>
+            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); setMcpImportOpen(true) }}><PlugsConnected size={16} aria-hidden="true" /><span>{t('knowledge.mcpImportAction', '从 MCP 资源导入')}</span></button>
             <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); void state.rescan().catch(() => undefined) }}><ArrowsClockwise size={16} aria-hidden="true" /><span>{t('knowledge.libraryRescanAction', '重新扫描')}</span></button>
           </div> : null}
         </div>
@@ -125,6 +130,7 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
 
     {demoMode ? <div className="knowledge-notice knowledge-notice--disabled" role="status"><WarningCircle size={17} aria-hidden="true" /><span>{t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库，导入与扫描入口暂不可用。')}</span></div> : null}
     {state.error === undefined ? null : <div className="knowledge-notice knowledge-notice--error" role="alert"><WarningCircle size={17} aria-hidden="true" /><span>{state.error}</span><button type="button" onClick={() => void state.reload()} disabled={state.loading}>{t('knowledge.libraryRetry', '重试')}</button></div>}
+    {mcpImportOpen && !demoMode ? <Suspense fallback={<p className="knowledge-state" role="status">{t('knowledge.mcpLoading', '正在读取…')}</p>}><McpResourceImportPanel key={world.id} world={world} onImported={state.reload} onClose={() => setMcpImportOpen(false)} /></Suspense> : null}
     <KnowledgeConsolidationPanel state={state} />
 
     <form className="knowledge-search" role="search" onSubmit={submitSearch}>
@@ -266,7 +272,9 @@ function DocumentRow({ worldId, document, consolidation, demoMode, onConsolidate
   const [expanded, setExpanded] = useState(false)
   const consolidationActive = consolidation?.state === 'pending' || consolidation?.state === 'queued' || consolidation?.state === 'success'
   const canConsolidate = document.status === 'indexed' && !demoMode && !consolidationActive
-  const originKey = `knowledge.origin${document.origin.charAt(0).toUpperCase() + document.origin.slice(1)}`
+  const originKey = document.relativePath.startsWith('mcp/')
+    ? 'knowledge.mcpSource'
+    : `knowledge.origin${document.origin.charAt(0).toUpperCase() + document.origin.slice(1)}`
   const statusKey = `knowledge.status${document.status.charAt(0).toUpperCase() + document.status.slice(1)}`
   return <li className="knowledge-document"><details onToggle={(event) => setExpanded(event.currentTarget.open)}><summary>
     <span className="knowledge-row__icon" aria-hidden="true"><FileText size={18} /></span>
