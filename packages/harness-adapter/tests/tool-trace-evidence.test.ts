@@ -85,6 +85,32 @@ describe('sanitized tool evidence from current Harness event shapes', () => {
     expect((done?.metadata.toolOutput as string).length).toBeLessThanOrEqual(TOOL_EVIDENCE_MAX_CHARS)
     expect(done?.metadata.toolOutputHash).toMatch(/^[0-9a-f]{16}$/)
   })
+  it('keeps the ending and marks omissions when a V4 result has many short blocks', () => {
+    const subjects = new ToolTraceSubjects()
+    start(subjects, { command: 'many-blocks' }, 'bash')
+    const content = Array.from({ length: 70 }, (_, index) => ({ type: 'text', text: `line-${index}` }))
+    const [done] = normalizeHarnessTraceNotification(event('tool/result', {
+      message: { role: 'tool', toolCallId: 'c', source: { kind: 'tool', callId: 'c' }, content },
+    }), subjects)
+
+    expect(done?.metadata.toolOutput).toContain('line-0')
+    expect(done?.metadata.toolOutput).toContain('line-69')
+    expect(done?.metadata.toolOutput).toContain(TOOL_EVIDENCE_OMISSION.trim())
+    expect(done?.metadata.toolOutputTruncated).toBe(true)
+  })
+  it('keeps the ending of a V3 result wrapper with many short blocks', () => {
+    const subjects = new ToolTraceSubjects()
+    start(subjects, { file_path: 'src/legacy.ts' })
+    const content = Array.from({ length: 70 }, (_, index) => ({ type: 'text', text: `legacy-${index}` }))
+    const [done] = normalizeHarnessTraceNotification(event('tool/result', {
+      message: { source: { callId: 'c' }, content: [{ type: 'tool-result', toolCallId: 'c', content }] },
+    }), subjects)
+
+    expect(done?.metadata.toolOutput).toContain('legacy-0')
+    expect(done?.metadata.toolOutput).toContain('legacy-69')
+    expect(done?.metadata.toolOutput).toContain(TOOL_EVIDENCE_OMISSION.trim())
+    expect(done?.metadata.toolOutputTruncated).toBe(true)
+  })
   it('deduplicates identical result bodies within one AgentRun', () => {
     const subjects = new ToolTraceSubjects()
     const body = 'same grep result\nline-1\nline-2'

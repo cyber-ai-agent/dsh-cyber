@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { CredentialRedactor, isSensitiveCredentialKey, type JsonObject, type JsonValue } from '@dsh-cyber/contracts'
-import { BoundedEvidenceCollector } from './evidence-bounds.js'
+import { BoundedEvidenceCollector, TOOL_EVIDENCE_OMISSION } from './evidence-bounds.js'
 
 interface ToolSubject { name: string }
 
@@ -83,16 +83,17 @@ export function summarizeToolResult(
   // V4 stores tool output as a tool-role message with direct content. V3's
   // user-role wrapper remains readable for old notifications and migration
   // diagnostics. Neither shape descends into images or arbitrary JSON.
-  const blocks = message?.role === 'tool' && message.toolCallId !== callId
-    ? []
-    : surface.slice(0, 64).flatMap((value) => {
+  const blocks = message?.role === 'tool' && message.toolCallId !== callId ? [] : boundedBlocks(surface).flatMap((value) => {
     const block = object(value)
     if (block?.type === 'tool-result') {
-      return block.toolCallId === callId && Array.isArray(block.content) ? block.content.slice(0, 64) : []
+      if (block.toolCallId !== callId || !Array.isArray(block.content)) return []
+      if (block.content.length > 64) truncated = true
+      return boundedBlocks(block.content)
     }
     return block?.type === 'text' ? [block] : []
-    })
-  for (const value of blocks.slice(0, 64)) {
+  })
+  if (blocks.length > 64) truncated = true
+  for (const value of boundedBlocks(blocks)) {
     const block = object(value)
     if (block?.type !== 'text' || typeof block.text !== 'string') continue
     const safeText = redactText(block.text)
@@ -139,6 +140,12 @@ export function summarizeToolResult(
   if (truncated || bounded.truncated) result.toolOutputTruncated = true
   if (redacted) result.toolOutputRedacted = true
   return result
+}
+
+function boundedBlocks(values: unknown[]): unknown[] {
+  return values.length <= 64
+    ? values
+    : [...values.slice(0, 32), { type: 'text', text: TOOL_EVIDENCE_OMISSION }, ...values.slice(-32)]
 }
 
 function appendEvidence(
