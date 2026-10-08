@@ -1,4 +1,4 @@
-import type { WorkMessage } from '@dsh-cyber/contracts'
+import type { ChatAttachment, ReasoningEffort, WorkMessage } from '@dsh-cyber/contracts'
 import { formatTime } from './i18n/format.js'
 
 export type ChatQueueMode = 'normal' | 'next'
@@ -11,6 +11,9 @@ export interface PendingChatTurn {
   employeeIds: string[]
   title: string
   content?: string
+  attachments?: ChatAttachment[]
+  modelProfileId?: string
+  reasoningEffort?: ReasoningEffort
   status: PendingChatTurnStatus
   createdAt: string
   /** Durable queue priority; higher values are shown before normal entries. */

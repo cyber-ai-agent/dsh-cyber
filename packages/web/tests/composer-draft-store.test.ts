@@ -125,4 +125,48 @@ describe('ComposerDraftStore', () => {
     expect(store.get(ownerA)).toMatchObject({ text: '', attachments: [] })
     expect(store.get(ownerB).text).toBe('世界 B')
   })
+  it('restores a confirmed queued edit atomically to its original owner', () => {
+    const store = new ComposerDraftStore()
+    store.setText(ownerB, '别的会话')
+    store.restoreCancelledTurn(ownerA, store.get(ownerA).revision, {
+      text: '撤回的文字', attachments: [ready('original')], modelProfileId: 'original-model', reasoningEffort: 'high',
+    })
+    expect(store.get(ownerA)).toMatchObject({ text: '撤回的文字', modelProfileId: 'original-model', reasoningEffort: 'high' })
+    expect(store.get(ownerA).attachments).toEqual([ready('original')])
+    expect(store.get(ownerA).recalledMessage).toBeUndefined()
+    expect(store.get(ownerB).text).toBe('别的会话')
+  })
+
+  it('preserves newer input and persists the cancelled draft until explicitly restored once', () => {
+    const store = new ComposerDraftStore()
+    const revision = store.get(ownerA).revision
+    store.setText(ownerA, '更新的文字')
+    store.setAttachments(ownerA, [ready('newer')])
+    const original = { text: '撤回的文字', attachments: [ready('original')], modelProfileId: 'original-model', reasoningEffort: 'high' as const }
+    store.restoreCancelledTurn(ownerA, revision, original)
+    expect(store.get(ownerA)).toMatchObject({ text: '更新的文字', recalledMessage: original })
+    expect(store.get(ownerA).attachments).toEqual([ready('newer')])
+    expect(store.restoreRecalledMessage(ownerA)).toBe(false)
+
+    const reloaded = new ComposerDraftStore()
+    expect(reloaded.get(ownerA).recalledMessage).toEqual(original)
+    reloaded.clear(ownerA)
+    expect(reloaded.get(ownerA).recalledMessage).toEqual(original)
+    expect(reloaded.restoreRecalledMessage(ownerA)).toBe(true)
+    expect(reloaded.get(ownerA)).toMatchObject(original)
+    expect(reloaded.restoreRecalledMessage(ownerA)).toBe(false)
+    expect(new ComposerDraftStore().get(ownerA).recalledMessage).toBeUndefined()
+  })
+
+  it('does not silently restore after a newer draft was typed and cleared during cancellation', () => {
+    const store = new ComposerDraftStore()
+    const revision = store.get(ownerA).revision
+    store.setText(ownerA, '新草稿')
+    store.clear(ownerA)
+    store.restoreCancelledTurn(ownerA, revision, { text: '原消息', attachments: [] })
+    expect(store.get(ownerA).text).toBe('')
+    expect(store.get(ownerA).recalledMessage?.text).toBe('原消息')
+    expect(store.restoreRecalledMessage(ownerA)).toBe(true)
+  })
+
 })

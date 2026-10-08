@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { ChatAttachment, LocalAssetMimeType } from '@dsh-cyber/contracts'
+import type { ChatAttachment, LocalAssetMimeType, ReasoningEffort } from '@dsh-cyber/contracts'
 
 const STORAGE_KEY = 'dsh-cyber:composer-drafts:v1'
 const SESSION_ALIAS_STORAGE_KEY = 'dsh-cyber:composer-session-aliases:v1'
@@ -18,11 +18,18 @@ export interface ComposerAttachmentDraft {
   error?: string
 }
 
-export interface ComposerDraft {
+export interface ComposerDraftContent {
   text: string
   attachments: ComposerAttachmentDraft[]
   /** Temporary per-conversation model override; durable role assignments live elsewhere. */
   modelProfileId?: string
+  /** A recovered queued turn keeps its original reasoning selection. */
+  reasoningEffort?: ReasoningEffort
+}
+
+export interface ComposerDraft extends ComposerDraftContent {
+  /** A confirmed cancellation that raced newer input; never overwrite that input. */
+  recalledMessage?: ComposerDraftContent
   /** Changes whenever this owner draft is edited, consumed, or cleared. */
   revision: number
 }
@@ -93,6 +100,16 @@ export class ComposerDraftStore {
     })
   }
 
+  setReasoningEffort(ownerKey: string | undefined, reasoningEffort: ReasoningEffort | undefined): void {
+    if (ownerKey === undefined) return
+    this.#update(ownerKey, (current) => {
+      const next = { ...current }
+      if (reasoningEffort === undefined) delete next.reasoningEffort
+      else next.reasoningEffort = reasoningEffort
+      return next
+    })
+  }
+
   setAttachments(ownerKey: string | undefined, attachments: ComposerAttachmentDraft[]): void {
     if (ownerKey === undefined) return
     this.#update(ownerKey, (current) => ({ ...current, attachments: [...attachments].slice(0, MAX_DRAFT_ATTACHMENTS) }))
@@ -127,8 +144,28 @@ export class ComposerDraftStore {
         !submittedIds.has(item.id)
         && (item.attachment === undefined || !sameRevision || !submittedIds.has(item.attachment.assetId))
       ))
-      return { ...current, text, attachments }
+      const next = { ...current, text, attachments }
+      if (sameRevision) delete next.reasoningEffort
+      return next
     })
+  }
+
+  /** Called only after cancellation is confirmed, using the original owner/revision. */
+  restoreCancelledTurn(ownerKey: string, revision: number, content: ComposerDraftContent): void {
+    this.#update(ownerKey, (current) => {
+      if (current.revision === revision && current.text.length === 0 && current.attachments.length === 0) {
+        return { ...content, revision: current.revision }
+      }
+      return { ...current, recalledMessage: content }
+    })
+  }
+
+  restoreRecalledMessage(ownerKey: string | undefined): boolean {
+    if (ownerKey === undefined) return false
+    const current = this.get(ownerKey)
+    if (current.recalledMessage === undefined || current.text.length > 0 || current.attachments.length > 0) return false
+    this.#update(ownerKey, () => ({ ...current.recalledMessage!, revision: current.revision }))
+    return true
   }
 
   /** Persist the stable queue key used to own a session's composer draft. */
@@ -152,6 +189,7 @@ export class ComposerDraftStore {
       text: '',
       attachments: [],
       revision: current.revision,
+      ...(current.recalledMessage === undefined ? {} : { recalledMessage: current.recalledMessage }),
       // Clearing a local draft also clears its temporary model override. Any
       // durable employee/world assignment is owned by the model settings
       // layer and is unaffected.
@@ -284,9 +322,18 @@ interface PersistedDraft {
     attachment?: ChatAttachment
   }>
   modelProfileId?: string
+  reasoningEffort?: ReasoningEffort
+  recalledMessage?: Omit<PersistedDraft, 'recalledMessage'>
 }
 
 function serializeDraft(draft: ComposerDraft): PersistedDraft | undefined {
+  const current = serializeContent(draft)
+  const recalledMessage = draft.recalledMessage === undefined ? undefined : serializeContent(draft.recalledMessage)
+  if (current === undefined && recalledMessage === undefined) return undefined
+  return { text: '', attachments: [], ...current, ...(recalledMessage === undefined ? {} : { recalledMessage }) }
+}
+
+function serializeContent(draft: ComposerDraftContent): PersistedDraft | undefined {
   const attachments: PersistedDraft['attachments'] = []
   for (const item of draft.attachments) {
     if (item.status === 'ready' && item.attachment !== undefined && isPersistableAttachment(item.attachment)) {
@@ -314,15 +361,24 @@ function serializeDraft(draft: ComposerDraft): PersistedDraft | undefined {
     }
   }
   const text = draft.text
-  if (text.length === 0 && attachments.length === 0 && draft.modelProfileId === undefined) return undefined
+  if (text.length === 0 && attachments.length === 0 && draft.modelProfileId === undefined && draft.reasoningEffort === undefined) return undefined
   return {
     text,
     attachments,
     ...(draft.modelProfileId === undefined ? {} : { modelProfileId: draft.modelProfileId }),
+    ...(draft.reasoningEffort === undefined ? {} : { reasoningEffort: draft.reasoningEffort }),
   }
 }
 
 function deserializeDraft(value: unknown): ComposerDraft | undefined {
+  const current = deserializeContent(value)
+  const recalledMessage = value !== null && typeof value === 'object'
+    ? deserializeContent((value as Record<string, unknown>).recalledMessage) : undefined
+  if (current === undefined && recalledMessage === undefined) return undefined
+  return { text: '', attachments: [], ...current, revision: 0, ...(recalledMessage === undefined ? {} : { recalledMessage }) }
+}
+
+function deserializeContent(value: unknown): ComposerDraftContent | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
   const source = value as Record<string, unknown>
   const text = typeof source.text === 'string' ? source.text : ''
@@ -331,11 +387,13 @@ function deserializeDraft(value: unknown): ComposerDraft | undefined {
     : undefined
   const rawAttachments = Array.isArray(source.attachments) ? source.attachments : []
   const attachments = rawAttachments.flatMap((item) => deserializeAttachment(item)).slice(0, MAX_DRAFT_ATTACHMENTS)
-  if (text.length === 0 && attachments.length === 0 && modelProfileId === undefined) return undefined
+  const reasoningEffort = typeof source.reasoningEffort === 'string' && ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(source.reasoningEffort)
+    ? source.reasoningEffort as ReasoningEffort : undefined
+  if (text.length === 0 && attachments.length === 0 && modelProfileId === undefined && reasoningEffort === undefined) return undefined
   return {
     text,
     attachments,
-    revision: 0,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     ...(modelProfileId === undefined ? {} : { modelProfileId }),
   }
 }
