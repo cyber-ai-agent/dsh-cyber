@@ -84,6 +84,35 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('Conversation control and durable queue', () => {
+  it('lists the full editable content of a queued attachment message after cancellation-safe hydration', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const model = server.store.saveModelProfile({ workspaceId: world.workspaceId, displayName: '排队编辑模型', providerKind: 'openai-compatible-local', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'queued-edit-model', api: 'openai-completions', settings: {} })
+    const running = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id], prompt: '并发占用通道', queueMode: 'normal', clientTurnId: 'editable-running',
+    }))
+    await waitFor(() => runtime.calls.length === 1)
+    const upload = await json(origin, `/api/worlds/${world.id}/assets/attachment`, post({
+      name: '编辑附件.txt', mimeType: 'text/plain', dataBase64: Buffer.from('完整保留').toString('base64'),
+    }))
+    expect(upload.response.status).toBe(201)
+    const queued = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id], sessionId: running.body.session.id, prompt: '待编辑的文字',
+      attachments: [upload.body.attachment], reasoningEffort: 'high', permissionMode: 'read-only',
+      queueMode: 'normal', clientTurnId: 'editable-queued', modelProfileId: model.id,
+    }))
+    expect(queued.response.status).toBe(202)
+    const listed = await json(origin, `/api/worlds/${world.id}/chat-queue`)
+    expect(listed.body.items.find((item: { id: string }) => item.id === 'editable-queued')).toMatchObject({
+      status: 'queued', content: '待编辑的文字', attachments: [upload.body.attachment], reasoningEffort: 'high', modelProfileId: model.id,
+    })
+    expect(listed.body.items.find((item: { id: string }) => item.id === 'editable-running').reasoningEffort).toBe('auto')
+    const cancelled = await json(origin, `/api/worlds/${world.id}/chat-queue/${queued.body.queueItem.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' } })
+    expect(cancelled.response.status).toBe(200)
+    expect(cancelled.body.queueItem.status).toBe('cancelled')
+    await json(origin, `/api/turns/${running.body.workTurnId}/abort`, post({}))
+    expect(runtime.calls).toHaveLength(1)
+  })
+
   it('replays one claimed immediate turn and rejects a changed request with the same client id', async () => {
     const { origin, server, runtime, world, employee } = await start()
     const body = {

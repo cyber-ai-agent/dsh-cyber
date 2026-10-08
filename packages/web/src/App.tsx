@@ -62,6 +62,7 @@ import {
 } from '@dsh-cyber/contracts'
 
 import { ApiError, api } from './api.js'
+import { useQueuedTurnEdit } from './use-queued-turn-edit.js'
 import { resolveUiLocale, setUiLocale, useI18n } from './i18n/runtime.js'
 import { formatTime } from './i18n/format.js'
 import {
@@ -600,30 +601,20 @@ export default function App() {
     })
   }, [])
 
-  const cancelQueuedTurn = useCallback(async (turnId: string): Promise<void> => {
-    const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
-    if (turn === undefined || turn.status !== 'queued') return
-    const worldId = activeWorldRef.current?.id
-    if (worldId === undefined) return
-    try {
-      if (!demoMode) {
-        await api(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue/${encodeURIComponent(turn.serverQueueId ?? turn.id)}`, { method: 'DELETE' })
+  const { cancelQueuedTurn, editQueuedTurn, wasCancelled } = useQueuedTurnEdit({
+    demoMode,
+    getTurn: useCallback((id: string) => pendingTurnsRef.current.find((turn) => turn.id === id), []),
+    removeDemoTurn: useCallback((id: string) => turnQueueRef.current.remove(id), []),
+    onCancelled: useCallback((id: string) => patchPendingTurn(id, { status: 'cancelled' }), [patchPendingTurn]),
+    onError: setError,
+    onRestored: useCallback((ownerKey: string) => {
+      const worldId = activeWorldRef.current?.id
+      const queueKey = activeConversationKeyRef.current
+      if (worldId !== undefined && queueKey !== undefined && composerDraftOwnerKey(worldId, queueKey) === ownerKey) {
+        setComposerFocusRequest((current) => current + 1)
       }
-      turnQueueRef.current.remove(turnId)
-      patchPendingTurn(turnId, { status: 'cancelled' })
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '撤销排队消息失败')
-    }
-  }, [demoMode, patchPendingTurn])
-
-  const editQueuedTurn = useCallback(async (turnId: string): Promise<void> => {
-    const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
-    if (turn === undefined || turn.status !== 'queued') return
-    const content = turn.content ?? turn.title
-    await cancelQueuedTurn(turnId)
-    setDraft(content)
-    setComposerFocusRequest((current) => current + 1)
-  }, [cancelQueuedTurn])
+    }, []),
+  })
 
   const promoteQueuedTurn = useCallback(async (turnId: string): Promise<void> => {
     const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
@@ -973,7 +964,12 @@ export default function App() {
     try {
       const result = await api<{ items?: PendingChatTurn[] }>(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue`)
       if (activeWorldRef.current?.id !== worldId || !Array.isArray(result.items)) return
-      const items = result.items
+      const items = result.items.filter((item) => !wasCancelled(item.id)).map((item) => ({
+        ...item,
+        queueKey: item.sessionId === undefined ? item.queueKey
+          : queueKeyBySessionRef.current.get(item.sessionId)
+            ?? composerDraftStore.getSessionOwnerAlias(worldId, item.sessionId) ?? item.queueKey,
+      }))
       setPendingTurns((current) => {
         const unconfirmed = new Set(chatSubmissionStore.getSnapshot().filter((item) => item.status === 'sending').map((item) => item.id))
         const received = new Set(items.map((item) => item.id))
@@ -985,7 +981,7 @@ export default function App() {
       // The live runtime stream and the next explicit action will reconcile
       // the durable queue; a transient read must not interrupt the chat.
     }
-  }, [demoMode])
+  }, [demoMode, wasCancelled])
 
   useEffect(() => {
     if (activeWorld === undefined) return
@@ -1801,6 +1797,7 @@ export default function App() {
           const previous = current.find((turn) => turn.id === id)
           if (previous === undefined) return current
           const next = [...current.filter((turn) => turn.id !== id), {
+            ...previous,
             id, worldId, queueKey, employeeIds, title: submission.title,
             content: (JSON.parse(submission.body) as { prompt: string }).prompt,
             createdAt: submission.createdAt,
@@ -1843,6 +1840,7 @@ export default function App() {
     composerDraftStore.setText(submission.ownerKey, submission.draft.text)
     composerDraftStore.setAttachments(submission.ownerKey, submission.draft.attachments)
     composerDraftStore.setModelProfile(submission.ownerKey, submission.draft.modelProfileId)
+    composerDraftStore.setReasoningEffort(submission.ownerKey, submission.draft.reasoningEffort)
     chatSubmissionStore.remove(submission.id)
     setComposerFocusRequest((value) => value + 1)
   }, [])
@@ -1898,6 +1896,7 @@ export default function App() {
       surface: speechSurface,
     })
 
+    const submittedDraft = composerDraftStore.get(capturedComposerOwnerKey)
     const pendingTurn: PendingChatTurn = {
       id: clientTurnId,
       queueKey,
@@ -1905,6 +1904,9 @@ export default function App() {
       employeeIds: targetIds,
       title,
       content: prompt,
+      attachments,
+      ...(submittedDraft.modelProfileId === undefined ? {} : { modelProfileId: submittedDraft.modelProfileId }),
+      reasoningEffort: submittedDraft.reasoningEffort ?? reasoningEffort,
       status: demoMode ? 'queued' : 'submitting',
       createdAt,
       ...(capturedSessionId === undefined ? {} : { sessionId: capturedSessionId }),
@@ -1936,7 +1938,6 @@ export default function App() {
     // Consume only after all local validation has accepted this submission.
     // The owner revision guard keeps text or files typed after the request
     // started from being cleared by its eventual completion.
-    const submittedDraft = composerDraftStore.get(capturedComposerOwnerKey)
     const submittedAssetIds = new Set(attachments.map((attachment) => attachment.assetId))
     composerDraftStore.consume(capturedComposerOwnerKey, {
       text: submittedDraft.text,
@@ -1964,10 +1965,13 @@ export default function App() {
       status: 'sending',
       draft: {
         text: submittedDraft.text || prompt,
+        ...(submittedDraft.modelProfileId === undefined ? {} : { modelProfileId: submittedDraft.modelProfileId }),
+        ...(submittedDraft.reasoningEffort === undefined ? {} : { reasoningEffort: submittedDraft.reasoningEffort }),
         attachments: submittedDraft.attachments.filter((item) => item.status === 'ready' && item.attachment !== undefined && submittedAssetIds.has(item.attachment.assetId)),
       },
       body: JSON.stringify({
-        prompt, clientTurnId, reasoningEffort, permissionMode: effectivePermissionMode,
+        prompt, clientTurnId, reasoningEffort: submittedDraft.reasoningEffort ?? reasoningEffort, permissionMode: effectivePermissionMode,
+        ...(submittedDraft.modelProfileId === undefined ? {} : { modelProfileId: submittedDraft.modelProfileId }),
         ...(preparedSessionHostAccess === undefined ? {} : { runtimeAccessGrantId: preparedSessionHostAccess.id }),
         interactionKind, queueMode,
         ...(attachments.length === 0 ? {} : { attachments }),

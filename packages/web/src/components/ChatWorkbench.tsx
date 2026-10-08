@@ -31,6 +31,7 @@ import { AuthorityBadge } from './AuthorityBadge.js'
 import { CommandPicker } from './CommandPicker.js'
 import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 import { ConversationPermissionControl, type ConversationPermissionMode } from './ConversationPermissionControl.js'
+import { QueuedMessageRecovery } from './QueuedMessageRecovery.js'
 import { ChatQueuePanel } from './ChatQueuePanel.js'
 import { MessageSpeechButton } from '../features/voice/MessageSpeechButton.js'
 import { ComposerReplySpeaker } from '../features/voice/ComposerReplySpeaker.js'
@@ -586,6 +587,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         },
       ]} />}
       <div className="composer-zone">
+        <QueuedMessageRecovery ownerKey={composerOwnerKey} onRestored={() => inputRef.current?.focus()} />
         {onRetrySubmission === undefined || onRestoreSubmission === undefined ? null : <ChatSubmissionRecovery ownerKey={composerOwnerKey} hasDraft={draft.length > 0 || attachments.length > 0} onRetry={onRetrySubmission} onRestore={onRestoreSubmission} />}
         {copyError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{copyError}</span><button type="button" onClick={() => setCopyError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {saveDocumentError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{saveDocumentError}</span><button type="button" onClick={() => setSaveDocumentError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}

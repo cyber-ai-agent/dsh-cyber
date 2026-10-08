@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { ComposerAttachmentDraft } from './composer-draft-store.js'
+import type { ComposerDraftContent } from './composer-draft-store.js'
 
 const STORAGE_KEY = 'dsh-cyber:chat-submissions:v1'
 
@@ -14,7 +14,7 @@ export interface ChatSubmission {
   createdAt: string
   sessionId?: string
   body: string
-  draft: { text: string; attachments: ComposerAttachmentDraft[]; modelProfileId?: string }
+  draft: ComposerDraftContent
   status: 'sending' | 'uncertain' | 'rejected'
   error?: string
 }

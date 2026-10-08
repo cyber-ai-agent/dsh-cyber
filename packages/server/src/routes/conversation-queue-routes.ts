@@ -159,11 +159,16 @@ export function registerConversationQueueRoutes(router: Router, dependencies: Co
         ...item,
         id: clientTurnId ?? item.id,
         serverQueueId: item.id,
+        // Missing durable reasoning means the original turn selected auto,
+        // not that an edited message should inherit a newer world setting.
+        reasoningEffort: item.reasoningEffort ?? 'auto',
         queueKey: session?.kind === 'direct' && item.employeeIds[0] !== undefined
           ? `direct:${item.employeeIds[0]}`
           : `session:${item.sessionId}`,
         title: session?.title ?? '对话任务',
         ...(userMessage?.content === undefined ? {} : { content: userMessage.content }),
+        ...(Array.isArray(userMessage?.metadata.attachments) ? { attachments: userMessage.metadata.attachments } : {}),
+        ...(typeof userMessage?.metadata.modelProfileId === 'string' ? { modelProfileId: userMessage.metadata.modelProfileId } : {}),
         createdAt: item.enqueuedAt,
         ...(item.errorCode === undefined ? {} : { error: queueErrorMessage(item.errorCode) }),
       }

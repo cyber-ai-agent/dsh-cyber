@@ -6,7 +6,7 @@ function submission(id: string, worldId = 'world-a'): ChatSubmission {
     id, worldId, queueKey: 'direct:character', ownerKey: JSON.stringify([worldId, 'direct:character']),
     title: '管家', employeeIds: ['character'], createdAt: new Date(0).toISOString(), status: 'sending',
     body: JSON.stringify({ clientTurnId: id, prompt: '检查资料', queueMode: 'normal', modelProfileId: 'model-a' }),
-    draft: { text: '检查资料', modelProfileId: 'model-a', attachments: [{ id: 'attachment-a', name: '资料.txt', status: 'ready', attachment: { assetId: 'asset-a', name: '资料.txt', mimeType: 'text/plain', byteLength: 8, url: '/api/worlds/world-a/assets/asset-a' } }] },
+    draft: { text: '检查资料', modelProfileId: 'model-a', reasoningEffort: 'high', attachments: [{ id: 'attachment-a', name: '资料.txt', status: 'ready', attachment: { assetId: 'asset-a', name: '资料.txt', mimeType: 'text/plain', byteLength: 8, url: '/api/worlds/world-a/assets/asset-a' } }] },
   }
 }
 
@@ -22,6 +22,7 @@ describe('chat submission recovery', () => {
     expect(reloaded.body).toBe(item.body)
     expect(reloaded.draft.attachments[0]?.attachment?.assetId).toBe('asset-a')
     expect(reloaded.draft.modelProfileId).toBe('model-a')
+    expect(reloaded.draft.reasoningEffort).toBe('high')
   })
 
   it('settles only the acknowledged submission and keeps other worlds and newer submissions recoverable', () => {
