@@ -14,6 +14,7 @@ import type { Router } from '../http/router.js'
 import { commitGeneratedPackage, prepareGeneratedPackagePaths, type GeneratedPackagePaths } from '../services/generated-package-publish.js'
 import { normalizeSkillDraft, normalizeSkillSource, type SkillAuthoringAnalyzerPort } from '../services/skill-authoring-analyzer.js'
 import { compileSkillPackage } from '../services/skill-package-compiler.js'
+import { importSkillMarkdownPackage } from '../services/skill-markdown-import.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 
@@ -88,9 +89,19 @@ export function registerSkillAuthoringRoutes(router: Router, dependencies: Skill
     const uploaded = form.files.length === 1 && isZipName(form.files[0]!.fileName)
       ? readZipPackageFiles(form.files[0]!.bytes)
       : form.files.map((file, index) => ({ path: form.relativePaths[index] ?? file.fileName, bytes: file.bytes }))
-    const files = normalizePackageRoot(uploaded)
-    const manifestFile = files.find((file) => file.path === 'dsh-cyber.package.json')
-    if (manifestFile === undefined) throw new HttpError(422, 'skill_import_manifest_missing', '技能包根目录需要 dsh-cyber.package.json。')
+    let files = normalizePackageRoot(uploaded)
+    let manifestFile = files.find((file) => file.path === 'dsh-cyber.package.json')
+    let warnings: string[] = []
+    if (manifestFile === undefined) {
+      try {
+        const imported = importSkillMarkdownPackage(files)
+        files = imported.files
+        warnings = imported.warnings
+        manifestFile = files.find((file) => file.path === 'dsh-cyber.package.json')!
+      } catch (error) {
+        throw new HttpError(422, 'skill_import_markdown_invalid', error instanceof Error ? error.message : 'SKILL.md 技能包无效。')
+      }
+    }
     let manifest: ReturnType<typeof packageManifest>
     try { manifest = packageManifest(JSON.parse(manifestFile.bytes.toString('utf8'))) }
     catch (error) { throw new HttpError(422, 'skill_import_manifest_invalid', error instanceof Error ? error.message : '技能包清单无效。') }
@@ -115,7 +126,7 @@ export function registerSkillAuthoringRoutes(router: Router, dependencies: Skill
       committed = true
       dependencies.packageCatalog.invalidate()
       const instance = worldId === undefined ? undefined : await dependencies.worldPackages.instantiate({ worldId, packageId: manifest.id, version: manifest.version, actorId: 'owner' })
-      writeJson(response, 201, { installed: installation.installed, ...(instance === undefined ? {} : { instance }) })
+      writeJson(response, 201, { installed: installation.installed, ...(instance === undefined ? {} : { instance }), ...(warnings.length === 0 ? {} : { warnings }) })
     } catch (error) {
       if (!committed && installation !== undefined) await dependencies.packageManager.compensate(installation, 'skill_import_failed').catch(() => undefined)
       if (!committed) await rm(paths.stagingDirectory, { recursive: true, force: true }).catch(() => undefined)
@@ -171,7 +182,9 @@ async function parseSkillPackageMultipart(request: IncomingMessage): Promise<Ski
     const fileName = /(?:^|;)\s*filename="([^"]*)"/iu.exec(disposition)?.[1]
     if (fileName !== undefined && fileName !== '') {
       if (content.length > MAX_SKILL_UPLOAD_FILE_BYTES) throw new HttpError(413, 'skill_import_file_too_large', '技能包单文件超过 64 MiB。')
-      files.push({ fileName: fileName.replaceAll('\\', '/').split('/').pop() ?? 'upload', bytes: Buffer.from(content) })
+      // Folder hierarchy is supplied separately in relativePaths. Never erase
+      // traversal from an attacker-provided filename before validating it.
+      files.push({ fileName: normalizePackagePath(fileName), bytes: Buffer.from(content) })
     } else {
       const value = content.toString('utf8')
       if (value.includes('\uFFFD') || value.length > 1_000_000) throw new HttpError(422, 'skill_import_field_invalid', '技能包导入字段无效。')
@@ -197,7 +210,7 @@ function parseRelativePaths(value: string | undefined, count: number): Array<str
   if (value === undefined || value.trim() === '') return Array.from({ length: count }, () => undefined)
   try {
     const parsed: unknown = JSON.parse(value)
-    if (!Array.isArray(parsed) || parsed.some((item) => item !== null && typeof item !== 'string')) throw new Error()
+    if (!Array.isArray(parsed) || parsed.length !== count || parsed.some((item) => item !== null && typeof item !== 'string')) throw new Error()
     return Array.from({ length: count }, (_, index) => typeof parsed[index] === 'string' ? parsed[index] : undefined)
   } catch { throw new HttpError(422, 'skill_import_relative_paths_invalid', '技能包文件相对路径无效。') }
 }
@@ -207,23 +220,25 @@ function isZipName(fileName: string): boolean { return fileName.toLowerCase().en
 function normalizePackageRoot(files: Array<{ path: string; bytes: Buffer }>): NormalizedPackageFile[] {
   const normalized = files.map((file) => ({ path: normalizePackagePath(file.path), bytes: file.bytes }))
   const manifestPaths = normalized.filter((file) => file.path === 'dsh-cyber.package.json' || file.path.endsWith('/dsh-cyber.package.json'))
-  if (manifestPaths.length !== 1) throw new HttpError(422, 'skill_import_manifest_count_invalid', '技能包需要且只能包含一个 dsh-cyber.package.json。')
-  const manifestPath = manifestPaths[0]!.path
-  const prefix = manifestPath === 'dsh-cyber.package.json' ? '' : manifestPath.slice(0, -'dsh-cyber.package.json'.length)
+  const rootName = manifestPaths.length > 0 ? 'dsh-cyber.package.json' : 'SKILL.md'
+  const roots = manifestPaths.length > 0 ? manifestPaths : normalized.filter((file) => file.path === rootName || file.path.endsWith(`/${rootName}`))
+  if (roots.length !== 1) throw new HttpError(422, 'skill_import_manifest_count_invalid', `技能包需要唯一的 ${rootName} 根入口；不能同时导入多个技能目录。`)
+  const manifestPath = roots[0]!.path
+  const prefix = manifestPath === rootName ? '' : manifestPath.slice(0, -rootName.length)
   const result = normalized.map((file) => {
     if (prefix !== '' && !file.path.startsWith(prefix)) throw new HttpError(422, 'skill_import_root_invalid', '技能包文件必须位于同一个包目录中。')
     return { path: prefix === '' ? file.path : file.path.slice(prefix.length), bytes: file.bytes }
   })
-  if (!result.some((file) => file.path === 'dsh-cyber.package.json')) throw new HttpError(422, 'skill_import_manifest_missing', '技能包根目录缺少清单。')
-  if (new Set(result.map((file) => file.path)).size !== result.length) throw new HttpError(422, 'skill_import_duplicate_file', '技能包包含重复文件路径。')
+  if (new Set(result.map((file) => file.path.normalize('NFC').toLowerCase())).size !== result.length) throw new HttpError(422, 'skill_import_duplicate_file', '技能包包含重复或大小写歧义文件路径。')
   return result
 }
 
 function normalizePackagePath(value: string): string {
   const normalized = value.replaceAll('\\', '/')
-  if (normalized.startsWith('/') || /^[A-Za-z]:/u.test(normalized)) throw new HttpError(422, 'skill_import_path_invalid', '技能包文件路径必须是相对路径。')
-  const parts = normalized.split('/').filter((part) => part.length > 0)
-  if (parts.length === 0 || parts.some((part) => part === '.' || part === '..' || part.startsWith('.'))) throw new HttpError(422, 'skill_import_path_invalid', `技能包文件路径无效：${value}`)
+  if (normalized.length > 512 || normalized.startsWith('/') || /^[A-Za-z]:/u.test(normalized) || /[\u0000-\u001f\u007f]/.test(normalized)) throw new HttpError(422, 'skill_import_path_invalid', '技能包文件路径必须是安全的相对路径。')
+  const parts = normalized.split('/')
+  if (parts.some((part) => !part || part.startsWith('.') || /[:*?"<>|]/.test(part) || /[. ]$/.test(part)
+    || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) throw new HttpError(422, 'skill_import_path_invalid', `技能包文件路径无效：${value}`)
   return parts.join('/')
 }
 
@@ -242,6 +257,7 @@ function readZipPackageFiles(bytes: Buffer): Array<{ path: string; bytes: Buffer
   const count = bytes.readUInt16LE(eocd + 10)
   const centralSize = bytes.readUInt32LE(eocd + 12)
   const centralOffset = bytes.readUInt32LE(eocd + 16)
+  if (bytes.readUInt16LE(eocd + 8) !== count) throw new HttpError(422, 'skill_import_zip_invalid', 'ZIP 技能包目录计数不一致。')
   if (count === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) throw new HttpError(422, 'skill_import_zip64_unsupported', '暂不支持 ZIP64 技能包。')
   if (count > MAX_SKILL_UPLOAD_FILES || centralOffset + centralSize > eocd) throw new HttpError(413, 'skill_import_zip_too_large', 'ZIP 技能包目录超过限制。')
   const files: Array<{ path: string; bytes: Buffer }> = []
@@ -260,11 +276,14 @@ function readZipPackageFiles(bytes: Buffer): Array<{ path: string; bytes: Buffer
     const externalAttributes = bytes.readUInt32LE(cursor + 38)
     const localOffset = bytes.readUInt32LE(cursor + 42)
     const nameStart = cursor + 46
+    if (nameLength === 0 || nameStart + nameLength + extraLength + commentLength > centralOffset + centralSize) throw new HttpError(422, 'skill_import_zip_invalid', 'ZIP 技能包文件名越界。')
     const name = bytes.subarray(nameStart, nameStart + nameLength).toString('utf8')
     cursor = nameStart + nameLength + extraLength + commentLength
     if (name.includes('\uFFFD')) throw new HttpError(422, 'skill_import_zip_invalid', 'ZIP 技能包文件名编码无效。')
     if ((externalAttributes >>> 16 & 0xf000) === 0xa000) throw new HttpError(422, 'skill_import_zip_symlink', 'ZIP 技能包不能包含符号链接。')
-    if (name.endsWith('/')) continue
+    const fileType = externalAttributes >>> 16 & 0xf000
+    if (![0, 0x4000, 0x8000].includes(fileType)) throw new HttpError(422, 'skill_import_zip_invalid', 'ZIP 技能包只能包含普通文件和目录。')
+    if (name.endsWith('/')) { normalizePackagePath(name.slice(0, -1)); continue }
     if ((flags & 1) !== 0) throw new HttpError(422, 'skill_import_zip_encrypted', '不支持加密 ZIP 技能包。')
     if (uncompressedSize > MAX_SKILL_UPLOAD_FILE_BYTES || compressedSize > MAX_SKILL_UPLOAD_FILE_BYTES) throw new HttpError(413, 'skill_import_file_too_large', 'ZIP 技能包单文件超过 64 MiB。')
     if (compressedSize > 0 && uncompressedSize / compressedSize > 1000) throw new HttpError(413, 'skill_import_zip_bomb', 'ZIP 技能包压缩比超过限制。')
@@ -280,7 +299,7 @@ function readZipPackageFiles(bytes: Buffer): Array<{ path: string; bytes: Buffer
     let body: Buffer
     if (method === 0) body = Buffer.from(compressed)
     else if (method === 8) {
-      try { body = inflateRawSync(compressed) }
+      try { body = inflateRawSync(compressed, { maxOutputLength: Math.min(uncompressedSize + 1, MAX_SKILL_UPLOAD_FILE_BYTES) }) }
       catch { throw new HttpError(422, 'skill_import_zip_invalid', 'ZIP 技能包无法解压。') }
     } else throw new HttpError(422, 'skill_import_zip_method_unsupported', 'ZIP 技能包仅支持 Store 和 Deflate。')
     if (body.length !== uncompressedSize || crc32(body) !== expectedCrc) {

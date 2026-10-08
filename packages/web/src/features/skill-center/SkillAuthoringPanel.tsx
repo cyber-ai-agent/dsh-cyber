@@ -61,8 +61,8 @@ export function SkillAuthoringPanel({ workspaceId, worldId, editSeed, onInstalle
   const installImported = async (): Promise<void> => {
     setBusy('import'); setError(undefined); setMessage(undefined)
     try {
-      await importSkillPackage(workspaceId, importFiles, loadIntoWorld ? worldId : undefined)
-      await onInstalled(); setMessage(`技能包${importLabel ? `「${importLabel}」` : ''} 已导入。`)
+      const result = await importSkillPackage(workspaceId, importFiles, loadIntoWorld ? worldId : undefined)
+      await onInstalled(); setMessage([`技能包${importLabel ? `「${importLabel}」` : ''} 已导入。请在角色档案中授权后使用。`, ...result.warnings].join('\n'))
       setImportFiles([]); setImportLabel('')
     } catch (cause) { setError(errorMessage(cause, '技能包导入失败')) }
     finally { setBusy(undefined) }
@@ -77,7 +77,7 @@ export function SkillAuthoringPanel({ workspaceId, worldId, editSeed, onInstalle
       {error === undefined ? null : <div className="skill-center__error" role="alert">{error}</div>}
       {message === undefined ? null : <div className="skill-center__success" role="status">{message}</div>}
       {mode === 'import' ? <>
-        <header><h3>导入技能包</h3><p>选择一个 ZIP 压缩包或技能包文件夹。包内需要包含 <code>dsh-cyber.package.json</code>，系统会执行完整性、依赖和能力检查。</p></header>
+        <header><h3>导入技能包</h3><p>选择一个 ZIP 压缩包或技能包文件夹。支持根目录带有 <code>SKILL.md</code> 的标准工作方法，也支持含 <code>dsh-cyber.package.json</code> 的原生技能包。导入保留来源和许可，不会安装依赖、运行脚本或自动授予角色权限。</p></header>
         <div className="skill-center__import-pickers">
           <input ref={zipInputRef} className="skill-center__visually-hidden" type="file" accept=".zip,application/zip" onChange={(event) => void selectImportFiles(event.currentTarget.files, setImportFiles, setImportLabel, event.currentTarget)} />
           <input ref={folderInputRef} className="skill-center__visually-hidden" type="file" multiple {...({ webkitdirectory: '' } as unknown as Record<string, string>)} onChange={(event) => void selectImportFiles(event.currentTarget.files, setImportFiles, setImportLabel, event.currentTarget)} />
@@ -108,6 +108,8 @@ export function SkillAuthoringPanel({ workspaceId, worldId, editSeed, onInstalle
 }
 
 export function draftFromDetail(detail: SkillDetailView): SkillAuthoringDraft | undefined {
+  // An inline draft cannot preserve the source body/reference/provenance graph.
+  if (isSourceBackedSkill(detail)) return undefined
   const manifestFile = detail.files.find((file) => file.path === 'skill.json')
   if (manifestFile === undefined) {
     const source = detail.files[0]?.content.trim()
@@ -119,6 +121,13 @@ export function draftFromDetail(detail: SkillDetailView): SkillAuthoringDraft | 
     if (typeof value.id !== 'string' || typeof value.displayName !== 'string' || typeof value.summary !== 'string' || typeof value.instructions !== 'string') return undefined
     return { schemaVersion: 1, id: value.id, displayName: value.displayName, summary: value.summary, routingHints: Array.isArray(value.routingHints) ? value.routingHints.filter((item): item is string => typeof item === 'string') : [], integrationId: 'builtin.recipe', dependencies: Array.isArray(value.dependencies) ? value.dependencies.filter(isDependency) : [], dataEgress: [], instructions: value.instructions, sourceSummary: '来自技能中心现有版本。' }
   } catch { return undefined }
+}
+
+export function isSourceBackedSkill(detail: SkillDetailView): boolean {
+  const manifest = detail.files.find((file) => file.path === 'skill.json')
+  if (manifest === undefined) return false
+  try { return typeof (JSON.parse(manifest.content) as { instructionFile?: unknown }).instructionFile === 'string' }
+  catch { return false }
 }
 
 function emptyDraft(): SkillAuthoringDraft { return { schemaVersion: 1, id: '', displayName: '', summary: '', routingHints: [], integrationId: 'builtin.recipe', dependencies: [], dataEgress: [], instructions: '', sourceSummary: '由用户在技能中心撰写。' } }

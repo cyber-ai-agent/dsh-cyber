@@ -34,7 +34,8 @@
     "sherpa-onnx-node": "1.13.6",
     "ssh2": "^1.17.0",
     "undici": "7.16.0",
-    "ws": "8.18.3"
+    "ws": "8.18.3",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@types/ssh2": "^1.15.6"

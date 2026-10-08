@@ -10,6 +10,8 @@ const SKILL_KEYS = new Set([
   'dependencies',
   'dataEgress',
   'instructions',
+  'instructionFile',
+  'resources',
 ])
 const ID = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const MAX_EGRESS_ITEMS = 128
@@ -27,6 +29,10 @@ export interface SkillManifest {
   dependencies?: SkillDependency[]
   dataEgress: string[]
   instructions: string
+  /** Declared package file read only after this Skill is authorized and selected. */
+  instructionFile?: string
+  /** Inert, declared companion files. Listing these paths does not grant file or execution access. */
+  resources?: string[]
 }
 
 export interface SkillManifestParseContext {
@@ -55,7 +61,11 @@ export function parseSkillManifest(value: unknown, context: SkillManifestParseCo
   const integrationId = text(input.integrationId, 'integrationId', 160, ID)
   const dependencies = input.dependencies === undefined ? undefined : dependencySet(input.dependencies)
   const dataEgress = stringSet(input.dataEgress, 'dataEgress', MAX_EGRESS_ITEMS, MAX_EGRESS_LENGTH)
-  const instructions = text(input.instructions, 'instructions', MAX_INSTRUCTIONS_LENGTH)
+  const instructions = text(input.instructions, 'instructions', MAX_INSTRUCTIONS_LENGTH, undefined, true)
+  const instructionFile = input.instructionFile === undefined ? undefined : resourcePath(input.instructionFile, 'instructionFile')
+  const resources = input.resources === undefined ? undefined : stringSet(input.resources, 'resources', 256, 240)
+    .map((path) => resourcePath(path, 'resources'))
+  if (instructionFile !== undefined && resources?.includes(instructionFile)) throw new Error('Skill instructionFile must not be duplicated in resources')
   return {
     schemaVersion: 1,
     id,
@@ -66,6 +76,8 @@ export function parseSkillManifest(value: unknown, context: SkillManifestParseCo
     ...(dependencies === undefined ? {} : { dependencies }),
     dataEgress,
     instructions,
+    ...(instructionFile === undefined ? {} : { instructionFile }),
+    ...(resources === undefined ? {} : { resources }),
   }
 }
 
@@ -81,12 +93,22 @@ function object(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-function text(value: unknown, field: string, maximum: number, pattern?: RegExp): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) {
+function text(value: unknown, field: string, maximum: number, pattern?: RegExp, multiline = false): string {
+  const controls = multiline ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/ : /[\u0000-\u001f\u007f]/
+  if (typeof value !== 'string' || !value.trim() || value.length > maximum || controls.test(value)) {
     throw new Error(`Skill manifest ${field} must be non-empty text of at most ${maximum} characters`)
   }
   if (pattern !== undefined && !pattern.test(value)) throw new Error(`Invalid skill manifest ${field}`)
   return value
+}
+
+function resourcePath(value: unknown, field: string): string {
+  const path = text(value, field, 240)
+  if (path.includes('\\') || path.startsWith('/') || /^[A-Za-z]:/.test(path)
+    || path.split('/').some((part) => !part || part !== part.trim() || part.startsWith('.') || /[:%#*?"<>|]/.test(part) || /[. ]$/.test(part))) {
+    throw new Error(`Unsafe skill manifest ${field} path`)
+  }
+  return path
 }
 
 function stringSet(value: unknown, field: string, maximumItems: number, maximumLength: number): string[] {

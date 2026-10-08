@@ -1,6 +1,7 @@
 import { FileCode, Folder, MagnifyingGlass, PencilSimple } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState } from 'react'
 import type { SkillDetailView } from '@dsh-cyber/contracts'
+import { isSourceBackedSkill } from './SkillAuthoringPanel.js'
 
 import type { SkillCatalogEntry } from '../../components/skill-catalog.js'
 import {
@@ -52,7 +53,9 @@ export function SkillListPanel({ catalog, detail, selectedId, loadingDetail, onS
       {loadingDetail ? <div className="skill-center__empty">正在读取 Skill 内容…</div> : detail === undefined ? <div className="skill-center__empty"><strong>选择一个技能</strong><span>这里会显示文件树、Skill 内容与版本信息。</span></div> : <>
         <header className="skill-center__inspector-header">
           <div><strong>{selectedGroup?.displayName ?? detail.entry.displayName}</strong><code>{selectedGroup === undefined ? detail.entry.id : groupCode(selectedGroup)}</code></div>
-          <button type="button" onClick={() => onEdit(detail)}><PencilSimple size={14} />{detail.editable ? '编辑技能' : '基于此技能新建'}</button>
+          {isSourceBackedSkill(detail)
+            ? <span title="请在来源目录修改完整技能包后重新导入，以保留正文、引用和来源许可。">来源技能包（只读）</span>
+            : <button type="button" onClick={() => onEdit(detail)}><PencilSimple size={14} />{detail.editable ? '编辑技能' : '基于此技能新建'}</button>}
         </header>
         <p className="skill-center__inspector-summary">{selectedGroup?.summary ?? detail.entry.summary}</p>
         {selectedGroup === undefined ? null : <SkillEntityInspector group={selectedGroup} selectedId={detail.entry.id} onSelect={onSelect} />}

@@ -233,15 +233,19 @@ export async function loadInstalledSkills(
     await verificationCache.verifyPackage(installed)
     for (const entrypoint of entrypoints) {
       const value = await readEntrypoint<unknown>(installed, entrypoint.path, verificationCache)
+      const manifest = parseSkillManifest(value, {
+        packageId: installed.packageId,
+        entrypointId: entrypoint.id,
+      })
+      for (const path of [...(manifest.instructionFile === undefined ? [] : [manifest.instructionFile]), ...(manifest.resources ?? [])]) {
+        if (!installed.manifest.files.some((file) => file.path === path)) throw new Error(`Skill document file is not declared: ${path}`)
+      }
       skills.push({
         packageId: installed.packageId,
         packageVersion: installed.version,
         entrypointId: entrypoint.id,
         entrypointPath: entrypoint.path,
-        manifest: parseSkillManifest(value, {
-          packageId: installed.packageId,
-          entrypointId: entrypoint.id,
-        }),
+        manifest,
       })
     }
   }

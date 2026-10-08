@@ -2,10 +2,12 @@ import { createElement } from 'react'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SkillCatalogEntry, SkillSettingsView, World } from '@dsh-cyber/contracts'
+import type { SkillCatalogEntry, SkillDetailView, SkillSettingsView, World } from '@dsh-cyber/contracts'
 
 import { SkillCenterDialog } from '../src/features/skill-center/SkillCenterDialog.js'
 import { SkillListPanel } from '../src/features/skill-center/SkillListPanel.js'
+import { draftFromDetail } from '../src/features/skill-center/SkillAuthoringPanel.js'
+import { importSkillPackage } from '../src/features/skill-center/api.js'
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals() })
 
@@ -47,6 +49,8 @@ describe('SkillCenterDialog', () => {
     expect(document.body.textContent).toContain('选择 ZIP 技能包')
     expect(document.body.textContent).toContain('选择技能包文件夹')
     expect(document.body.textContent).toContain('目录由宿主固定管理')
+    expect(document.body.textContent).toContain('SKILL.md')
+    expect(document.body.textContent).toContain('不会安装依赖、运行脚本或自动授予角色权限')
     expect(document.body.textContent).toContain('写入技能')
     await clickButton('写入技能')
     expect(document.body.textContent).toContain('AI 撰写技能')
@@ -72,6 +76,22 @@ describe('SkillCenterDialog', () => {
     expect(Array.from(host.querySelectorAll('.skill-center__source-rail button')).find((item) => item.textContent?.includes('技能包'))?.textContent).toContain('1')
     await act(async () => { (rows[0] as HTMLButtonElement).click() })
     expect(onSelect).toHaveBeenCalledWith(expect.stringMatching(/^(mcp\.playwright|browser\.)/))
+    await act(async () => { root.unmount() })
+  })
+
+  it('preserves import warnings and prevents lossy inline clones of source-backed packages', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ warnings: ['未声明许可证。', '不授予工具权限。'] })))
+    expect(await importSkillPackage(world.workspaceId, [new File(['---'], 'SKILL.md')], world.id)).toEqual({ warnings: ['未声明许可证。', '不授予工具权限。'] })
+    const detail: SkillDetailView = { entry: catalog[0]!, editable: false, tree: [{ path: 'skill.json', kind: 'file' }],
+      files: [{ path: 'skill.json', language: 'json', editable: false, content: JSON.stringify({ id: 'imported.example', instructions: 'placeholder', instructionFile: 'source/SKILL.md', resources: ['source/references/check.md'] }) }] }
+    expect(draftFromDetail(detail)).toBeUndefined()
+    const onEdit = vi.fn()
+    const host = document.createElement('div'); document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => { root.render(createElement(SkillListPanel, { catalog, detail, loadingDetail: false, onSelect: vi.fn(), onEdit })) })
+    expect(host.textContent).toContain('来源技能包（只读）')
+    expect(host.textContent).not.toContain('基于此技能新建')
+    expect(onEdit).not.toHaveBeenCalled()
     await act(async () => { root.unmount() })
   })
 })
