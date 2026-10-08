@@ -1,3 +1,5 @@
+import type { SkillDocumentDescriptor, SkillDocumentReadRequest, SkillDocumentReadResult } from '@dsh-cyber/contracts'
+
 /**
  * Host-provided World Skill Availability seam.
  *
@@ -19,6 +21,10 @@ export interface WorldSkillAvailabilityPort {
   availableSkillIds?(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): readonly string[] | Promise<readonly string[]>
   /** Package-authored declarative recipes loaded by the current World. */
   instructionsForWorld?(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): readonly string[] | Promise<readonly string[]>
+  /** Metadata only; a caller must intersect with its character's current grants. */
+  documentsForWorld?(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): Promise<SkillDocumentDescriptor[]>
+  /** Read a pinned document under current World availability, never execute it. */
+  readDocumentForWorld?(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & SkillDocumentReadRequest & { expectedRevision: string; redactText?: (text: string) => string }): Promise<SkillDocumentReadResult>
 }
 
 export async function unavailableWorldSkillIds(

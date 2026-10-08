@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
 import { DeepSeekHarness, type HarnessNotification } from '@deepseek-ai/dsh-sdk-client'
+import { createSkillDocumentBridge, type SkillDocumentBridge } from './skill-document-bridge.js'
 import { summarizeToolCall } from './tool-summary.js'
 import { summarizeToolResult, ToolTraceSubjects } from './tool-result-summary.js'
 import type {
@@ -32,6 +33,7 @@ import {
 import { applyWebSearchPlanToEnvironment, type WorkerWebSearchPlan } from './web-search.js'
 
 export interface EmployeeTurnRequest {
+  skillDocuments?: AgentTurnRequest['skillDocuments']
   worldDirectory?: AgentTurnRequest['worldDirectory']
   employee: EmployeeInstance
   revision: EmployeeRevision
@@ -64,6 +66,7 @@ export interface HarnessRuntime {
     prompt: string,
     onNotification?: (notification: HarnessNotification) => void,
     worldDirectory?: AgentTurnRequest['worldDirectory'],
+    skillDocuments?: AgentTurnRequest['skillDocuments'],
   ): Promise<{ finalResponse: string; notifications: HarnessNotification[] }>
   decideApproval?(approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void>
   close(): Promise<void>
@@ -100,6 +103,7 @@ interface EmployeeLane {
   /** The persona this lane's runtime was started with; it is the process's system prompt. */
   persona: string | undefined
   hasWorldDirectory?: boolean
+  hasSkillDocuments?: boolean
   runtime: HarnessRuntime | undefined
   agentSessionId: string | undefined
   /** Conservative estimate of user/assistant/tool content retained by the live Harness session. */
@@ -138,6 +142,8 @@ export const PINNED_HARNESS_NATIVE_SYSTEM_OVERHEAD_TOKENS = 1_400
 export const PINNED_HARNESS_NATIVE_TURN_CONTEXT_TOKENS = 256
 /** Conservative reserve, tested against the directory tools' actual schemas. */
 export const WORLD_DIRECTORY_TOOL_SCHEMA_RESERVE = 1_600
+/** Conservative reserve, checked against the real skills_list/skills_read schemas. */
+export const SKILL_DOCUMENT_TOOL_SCHEMA_RESERVE = 1_200
 
 export interface HarnessAdapterOptions {
   stateRoot: string
@@ -177,6 +183,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   async runTurn(request: AgentTurnRequest): Promise<AgentTurnResult> {
+    assertSkillDocumentScope(request.skillDocuments, request.agent)
     const directory = request.worldDirectory
     if (directory !== undefined && (
       directory.actorId !== request.agent.id || directory.worldId !== request.agent.worldId
@@ -185,6 +192,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     )) throw new Error('成员目录与当前角色或世界不匹配。')
     const employeeRequest: EmployeeTurnRequest = {
       employee: request.agent,
+      ...(request.skillDocuments === undefined ? {} : { skillDocuments: request.skillDocuments }),
       ...(request.worldDirectory === undefined ? {} : { worldDirectory: request.worldDirectory }),
       revision: request.revision,
       conversationId: request.conversationId,
@@ -220,6 +228,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   async runEmployeeTurn(request: EmployeeTurnRequest): Promise<EmployeeTurnResult> {
+    assertSkillDocumentScope(request.skillDocuments, request.employee)
     if (request.worldDirectory !== undefined && (
       request.worldDirectory.actorId !== request.employee.id
       || request.worldDirectory.worldId !== request.employee.worldId
@@ -274,7 +283,8 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       (lane.permissionMode !== undefined && lane.permissionMode !== permissionMode) ||
       (lane.workspacePath !== undefined && lane.workspacePath !== workspacePath) ||
       (lane.persona !== undefined && lane.persona !== request.revision.persona) ||
-      (lane.hasWorldDirectory !== undefined && lane.hasWorldDirectory !== (request.worldDirectory !== undefined))
+      (lane.hasWorldDirectory !== undefined && lane.hasWorldDirectory !== (request.worldDirectory !== undefined)) ||
+      (lane.hasSkillDocuments !== undefined && lane.hasSkillDocuments !== (request.skillDocuments !== undefined))
     // This is the last provider-neutral boundary where the complete
     // server-authored input is available. The ContextPlanningRuntime usually
     // supplied the plan; the provider-profile fallback keeps direct adapter
@@ -283,6 +293,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const existingSessionId = needsReset ? undefined : lane.agentSessionId
     const nativeContext = resolveNativeContextTokens(this.#options)
     if (request.worldDirectory !== undefined) nativeContext.fixedTokens += WORLD_DIRECTORY_TOOL_SCHEMA_RESERVE
+    if (request.skillDocuments !== undefined) nativeContext.fixedTokens += SKILL_DOCUMENT_TOOL_SCHEMA_RESERVE
     const preparePrompt = (
       freshSession: boolean,
       observedThroughSequence = request.observedThroughSequence,
@@ -386,6 +397,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       lane.workspacePath = workspacePath
       lane.persona = request.revision.persona
       lane.hasWorldDirectory = request.worldDirectory !== undefined
+      lane.hasSkillDocuments = request.skillDocuments !== undefined
       lane.runtime = runtime
     }
     // The pinned SDK server creates its session through
@@ -421,7 +433,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         }
     try {
       assertLaneTaskActive(task)
-      const result = await lane.runtime!.run(agentSessionId, prepared.prompt, onNotification, request.worldDirectory)
+      const result = await lane.runtime!.run(agentSessionId, prepared.prompt, onNotification, request.worldDirectory, request.skillDocuments)
       const safeResult = {
         ...result,
         finalResponse: redactor.text(result.finalResponse),
@@ -457,6 +469,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         recovered.prompt,
         request.onNotification,
         request.worldDirectory,
+        request.skillDocuments,
       )
       lane.retainedContextTokens += estimateRetainedTurnTokens(recovered.prompt, result) + nativeContext.retainedPerTurnTokens
       return { agentSessionId: recoveredSessionId, ...result, contextUsage: recovered.contextUsage }
@@ -749,16 +762,39 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       model: this.#options.model ?? 'deepseek-flash',
       initializeTimeoutMs: boundedInitializeTimeout(this.#options.initializeTimeoutMs),
     })
+    let bridge: SkillDocumentBridge | undefined
+    let openingBridge: Promise<SkillDocumentBridge> | undefined
+    let closed = false
     return {
-      async run(sessionId, prompt, onNotification, worldDirectory) {
-        if (worldDirectory !== undefined) {
+      async run(sessionId, prompt, onNotification, worldDirectory, skillDocuments) {
+        if (closed) throw new Error('Employee runtime closed')
+        let workerClient: typeof harness.client | undefined
+        try {
           await harness.start()
-          await harness.client.request('world-directory/set', worldDirectory)
+          workerClient = harness.client
+          if (closed) throw new Error('Employee runtime closed')
+          if (worldDirectory !== undefined) await harness.client.request('world-directory/set', worldDirectory)
+          if (skillDocuments !== undefined) {
+            openingBridge = createSkillDocumentBridge(skillDocuments, sessionId)
+            bridge = await openingBridge
+            if (closed) throw new Error('Employee runtime closed')
+          }
+          // This private RPC is not a session event. Credentials never enter
+          // model messages, persistent logs, inherited environment or traces.
+          await harness.client.request('skill-documents/set', bridge?.binding ?? { binding: null })
+          if (closed) throw new Error('Employee runtime closed')
+          const result = await harness
+            .session(sessionId)
+            .run(prompt, onNotification === undefined ? undefined : { onNotification })
+          return { finalResponse: result.finalResponse, notifications: result.notifications }
+        } finally {
+          await bridge?.close()
+          bridge = undefined
+          openingBridge = undefined
+          // Host callback revocation precedes clearing the worker binding, so
+          // even a disconnected worker cannot keep reading the old turn.
+          if (!closed && workerClient) await workerClient.request('skill-documents/set', { binding: null }, 1_000).catch(() => undefined)
         }
-        const result = await harness
-          .session(sessionId)
-          .run(prompt, onNotification === undefined ? undefined : { onNotification })
-        return { finalResponse: result.finalResponse, notifications: result.notifications }
       },
       async decideApproval(approvalRequestId, decision) {
         await harness.start()
@@ -767,7 +803,12 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
           outcome: decision === 'approved' ? 'allowed-once' : 'rejected',
         })
       },
-      close: () => harness.close(),
+      async close() {
+        closed = true
+        await openingBridge?.then((value) => value.close()).catch(() => undefined)
+        await bridge?.close()
+        await harness.close()
+      },
     }
   }
 }
@@ -1402,4 +1443,9 @@ function employeeSystemPrompt(employee: EmployeeInstance, revision: EmployeeRevi
     '联网搜索不可用时，用简明中文说明原因，并引导用户前往“连接中心 → 联网搜索”添加一家搜索服务商（或“设置 → 模型”里为当前模型启用联网搜索）。不得编造搜索结果，也不得引导用户寻找不存在的隐藏页面。',
     '基于当前身份、记忆和已授权能力，使用简洁中文给出有证据的回答。需要调用工具时，向用户提供可公开、安全、简短的中文推理摘要，说明目标、判断依据和工具调度结果；不得暴露隐藏思维链或凭据；可以解释经脱敏的工具参数、结果片段和变更证据，执行详情由轨迹展示。',
   ].join('\n\n')
+}
+
+function assertSkillDocumentScope(documents: AgentTurnRequest['skillDocuments'], employee: EmployeeInstance): void {
+  if (documents !== undefined && (documents.actorId !== employee.id || documents.worldId !== employee.worldId
+    || documents.workspaceId !== employee.workspaceId)) throw new Error('技能文档与当前角色或世界不匹配。')
 }

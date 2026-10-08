@@ -18,9 +18,10 @@ describe('Skill authoring', () => {
 
   it('compiles skill.json, SKILL.md and an immutable package manifest', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-skill-compile-')); roots.push(root)
-    const draft = normalizeSkillDraft({ id: 'custom.release-check', displayName: '发布检查', summary: '检查发布条件。', routingHints: ['发布', '检查'], instructions: '核对测试、版本和回滚方案。' })
+    const draft = normalizeSkillDraft({ id: 'custom.release-check', displayName: '发布检查', summary: '检查发布条件。', routingHints: ['发布', '检查'], instructions: '核对测试、版本和回滚方案。\n\n记录验证结果。' })
     const { manifest } = await compileSkillPackage({ sourceDirectory: join(root, 'package'), packageId: 'generated.skill.release-check', packageVersion: '1.0.0', draft })
     expect(manifest).toMatchObject({ kind: 'skill', capabilities: ['skill:recipe'], dataEgress: [], entrypoints: [{ id: draft.id, kind: 'skill', path: 'skill.json' }] })
+    expect(manifest).toMatchObject({ license: 'LicenseRef-Unknown', publisher: '来源未声明' })
     expect(await readFile(join(root, 'package', 'SKILL.md'), 'utf8')).toContain('## 使用说明')
     expect(JSON.parse(await readFile(join(root, 'package', 'skill.json'), 'utf8'))).toMatchObject({ integrationId: 'builtin.recipe', instructions: draft.instructions })
   })

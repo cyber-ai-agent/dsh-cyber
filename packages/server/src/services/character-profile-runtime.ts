@@ -43,6 +43,7 @@ import {
 import type { AgentRunFileEvidencePort } from './agent-run-file-evidence.js'
 import type { EnvironmentContextPort, EnvironmentSnapshot } from '../environments/environment-service.js'
 import type { EnvironmentSignal } from '../environments/environment-change-collector.js'
+import { characterSkillDocuments, composeSkillDocumentCatalog } from './character-skill-documents.js'
 
 type CharacterRuntimeStore = Pick<
   SqliteStore,
@@ -176,16 +177,22 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       worldId: agent.worldId,
       skillIds: revision.skillGrants,
     })
+    const skillDocumentHandle = await characterSkillDocuments({
+      store: this.#store, availability: this.#skillAvailability, agent, grantedSkillIds,
+      ...(this.#redactText === undefined ? {} : { redactText: this.#redactText }),
+    })
+    const lazySkillIds = new Set(skillDocumentHandle?.documents.skills.map((skill) => skill.id) ?? [])
+    const inlineSkillIds = grantedSkillIds.filter((skillId) => !lazySkillIds.has(skillId))
     const registryInstructions = this.#skills?.instructionsForCharacter({
       worldId: agent.worldId,
       characterId: agent.id,
       workspaceId: agent.workspaceId,
-      grantedSkillIds,
+      grantedSkillIds: inlineSkillIds,
     }) ?? []
     const packageInstructions = await this.#skillAvailability?.instructionsForWorld?.({
       workspaceId: agent.workspaceId,
       worldId: agent.worldId,
-      skillIds: grantedSkillIds,
+      skillIds: inlineSkillIds,
     }) ?? []
     const recipeInstructions = [...registryInstructions, ...packageInstructions]
     const profiledPersona = profile === undefined ? revision.persona : composeCharacterPersona(revision.persona, profile)
@@ -202,7 +209,10 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         )
       : composeWorldAuthorityPersona(profiledPersona, currentAuthority)
     const runtimePersona = composeConversationPermissionPersona(persona, request.permissionMode ?? 'read-only')
-    const composedPersona = composeSkillRecipes(runtimePersona, recipeInstructions)
+    const composedPersona = [
+      composeSkillRecipes(runtimePersona, recipeInstructions),
+      composeSkillDocumentCatalog(skillDocumentHandle?.documents.skills ?? []),
+    ].filter(Boolean).join('\n\n')
     const effectivePersona = this.#redactText?.(composedPersona, agent.workspaceId) ?? composedPersona
 
     const durableMessages = this.#store.listMessages?.(request.conversationId)
@@ -400,6 +410,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       result = await this.#inner.runTurn({
         ...request,
         agent,
+        ...(skillDocumentHandle === undefined ? {} : { skillDocuments: skillDocumentHandle.documents }),
         ...(worldDirectory === undefined ? {} : { worldDirectory }),
         ...(effectiveContextBudget === undefined ? {} : { contextBudget: effectiveContextBudget }),
         prompt,
@@ -432,6 +443,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       })
       if (this.#redactText !== undefined) result = { ...result, finalResponse: this.#redactText(result.finalResponse, agent.workspaceId) }
     } finally {
+      skillDocumentHandle?.close()
       // A failed or aborted turn may still have written files, and it is the
       // run most likely to be argued about, so it is closed exactly like a
       // successful one. The recorder never throws back into the turn.

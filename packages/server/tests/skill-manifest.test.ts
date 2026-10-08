@@ -29,6 +29,24 @@ describe('skill manifest', () => {
     })).toEqual(valid)
   })
 
+  it('supports multiline instructions while still rejecting control characters', () => {
+    const instructions = '# Steps\r\n\n1. Check sources.\n\t- Preserve evidence.'
+    expect(parseSkillManifest({ ...valid, instructions }, { packageId: 'test', entrypointId: valid.id }).instructions).toBe(instructions)
+    for (const control of ['\u0000', '\u0008', '\u000b', '\u001b', '\u007f']) {
+      expect(() => parseSkillManifest({ ...valid, instructions: `Step${control}` }, { packageId: 'test', entrypointId: valid.id })).toThrow()
+    }
+    expect(() => parseSkillManifest({ ...valid, summary: 'Line 1\nLine 2' }, { packageId: 'test', entrypointId: valid.id })).toThrow()
+  })
+
+  it('accepts deferred file references as metadata only', () => {
+    const deferred = { ...valid, instructionFile: 'source/SKILL.md', resources: ['source/references/guide.md'] }
+    expect(parseSkillManifest(deferred, { packageId: 'test', entrypointId: valid.id })).toEqual(deferred)
+    for (const path of ['../outside', '/absolute', 'C:/file', 'source/../file', 'source\\file', 'source/file:stream', 'source/.secret']) {
+      expect(() => parseSkillManifest({ ...valid, instructionFile: path }, { packageId: 'test', entrypointId: valid.id })).toThrow()
+      expect(() => parseSkillManifest({ ...valid, resources: [path] }, { packageId: 'test', entrypointId: valid.id })).toThrow()
+    }
+  })
+
   it.each([
     ['unknown field', { ...valid, executable: 'node script.js' }],
     ['wrong schema', { ...valid, schemaVersion: 2 }],

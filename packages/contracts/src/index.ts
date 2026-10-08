@@ -4,6 +4,7 @@ import type { UiLocale } from './locales.js'
 export const CYBER_SCHEMA_VERSION = 54 as const
 
 export * from './runtime-access.js'
+export * from './skill-documents.js'
 export * from './locales.js'
 export * from './voice.js'
 
@@ -1387,6 +1388,7 @@ export interface ConversationHistoryEntry {
 }
 
 export interface AgentTurnRequest {
+  skillDocuments?: import('./skill-documents.js').AgentSkillDocuments
   /** Public turn-start membership snapshot for read-only directory tools. */
   worldDirectory?: import('./world-directory.js').WorldDirectorySnapshot
   agent: EmployeeInstance

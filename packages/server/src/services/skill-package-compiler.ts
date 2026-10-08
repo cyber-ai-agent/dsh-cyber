@@ -27,7 +27,8 @@ export async function compileSkillPackage(input: { sourceDirectory: string; pack
     }
     const manifest: CyberPackageManifest = {
       schemaVersion: 1, id: input.packageId, version: input.packageVersion, kind: 'skill',
-      displayName: skill.displayName, summary: skill.summary, license: 'MIT', publisher: 'DSH Cyber Skill Center',
+      // Authoring or importing source text does not confer a license or establish its author.
+      displayName: skill.displayName, summary: skill.summary, license: 'LicenseRef-Unknown', publisher: '来源未声明',
       capabilities: ['skill:recipe'], dataEgress: [], files: files.map((file) => ({ path: file.path, sha256: sha256(file.bytes) })),
       entrypoints: [{ id: skill.id, kind: 'skill', path: 'skill.json' }],
     }

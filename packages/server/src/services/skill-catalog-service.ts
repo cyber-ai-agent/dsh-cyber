@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises'
-import { extname, resolve, sep } from 'node:path'
+import { createHash } from 'node:crypto'
+import { basename, extname } from 'node:path'
 
 import type {
   CharacterSkillDescriptor,
@@ -13,19 +13,24 @@ import type {
   SkillDependency,
   SkillSettingsScope,
   SkillSettingsView,
+  SkillDocumentDescriptor,
+  SkillDocumentReadRequest,
+  SkillDocumentReadResult,
 } from '@dsh-cyber/contracts'
 import type { SkillScopeSettingsRepository, SqliteStore } from '@dsh-cyber/persistence'
 
 import {
   loadInstalledSkills,
+  InstalledPackageVerificationCache,
   type InstalledSkillManifest,
 } from '../installed-package-runtime.js'
 import { skillSourceFromAdapter } from '../skill-manifest.js'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import type { WorldSkillAvailabilityInput, WorldSkillAvailabilityPort } from './world-skill-availability.js'
 import type { WorldPackageInstanceService } from './world-package-instance-service.js'
+import { parseSkillMarkdown } from './skill-markdown-import.js'
 
-type CatalogStore = Pick<SqliteStore, 'getWorkspace' | 'getWorld' | 'listInstalledPackages'> & Partial<Pick<SqliteStore, 'listWorlds'>>
+type CatalogStore = Pick<SqliteStore, 'getWorkspace' | 'getWorld' | 'listInstalledPackages'> & Partial<Pick<SqliteStore, 'listWorlds' | 'listWorldPackageInstances'>>
 type CatalogRegistry = Pick<CharacterSkillAdapterRegistry, 'list'> & Partial<Pick<CharacterSkillAdapterRegistry, 'recipeForSkill'>>
 type CatalogWorldPackages = Pick<WorldPackageInstanceService, 'listRuntimePackages'> & Partial<Pick<WorldPackageInstanceService, 'instantiate'>>
 
@@ -62,6 +67,7 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
   readonly #registry: CatalogRegistry
   readonly #worldPackages: CatalogWorldPackages
   readonly #scopeSettings: SkillCatalogServiceOptions['scopeSettings']
+  readonly #documentFiles = new InstalledPackageVerificationCache()
 
   constructor(options: SkillCatalogServiceOptions) {
     this.#store = options.store
@@ -177,10 +183,89 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
   }
 
   async instructionsForWorld(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): Promise<string[]> {
+    if (input.skillIds.length === 0) return []
     const available = new Set(await this.availableSkillIds(input))
     const manifests = await loadInstalledSkills(await this.#worldPackages.listRuntimePackages(input.worldId))
     return manifests.filter((item) => available.has(item.manifest.id) && item.manifest.integrationId === 'builtin.recipe')
       .map((item) => `${item.manifest.displayName}：${item.manifest.instructions.trim()}`)
+  }
+
+  /** Only metadata enters the turn prefix. Bodies remain in the immutable package. */
+  async documentsForWorld(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): Promise<SkillDocumentDescriptor[]> {
+    const world = this.#store.getWorld(input.worldId)
+    if (world?.workspaceId !== input.workspaceId || world.status !== 'active' || input.skillIds.length === 0) return []
+    const wanted = new Set(input.skillIds)
+    const entries = (await this.listWorld(input.worldId)).filter((entry) => wanted.has(entry.id) && entry.worldAvailable && entry.kind === 'recipe')
+    const packages = await this.#worldPackages.listRuntimePackages(input.worldId)
+    const latestWorld = this.#store.getWorld(input.worldId)
+    if (latestWorld?.workspaceId !== input.workspaceId || latestWorld.status !== 'active') return []
+    const latestSelection = this.#effectiveScopeSkillIds(input.workspaceId, input.worldId)
+    const latestInstances = this.#store.listWorldPackageInstances?.(input.worldId, 'active')
+    return entries.flatMap((entry): SkillDocumentDescriptor[] => {
+      if (latestSelection !== undefined && !latestSelection.has(entry.id)) return []
+      const installed = packages.find((item) => item.status === 'active' && item.workspaceId === input.workspaceId && item.packageId === entry.packageId && item.version === entry.packageVersion)
+      if (installed !== undefined && latestInstances !== undefined && !latestInstances.some((instance) => instance.packageId === installed.packageId && instance.packageVersion === installed.version)) return []
+      const recipe = entry.packageId === undefined ? this.#registry.recipeForSkill?.(entry.id) : undefined
+      if (installed === undefined && recipe === undefined) return []
+      const revision = documentRevision(installed === undefined ? recipe : { id: installed.packageId, version: installed.version, files: installed.manifest.files })
+      return [{ id: entry.id, displayName: entry.displayName, summary: entry.summary, revision }]
+    })
+  }
+
+  async readDocumentForWorld(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & SkillDocumentReadRequest & { expectedRevision: string; redactText?: (text: string) => string }): Promise<SkillDocumentReadResult> {
+    const current = async () => {
+      const descriptor = (await this.documentsForWorld({ ...input, skillIds: [input.skillId] }))[0]
+      if (descriptor === undefined || descriptor.revision !== input.expectedRevision) throw new Error('工作方法已停用或版本已改变，请在下一轮重新加载。')
+      return descriptor
+    }
+    const descriptor = await current()
+    const packages = (await this.#worldPackages.listRuntimePackages(input.worldId)).filter((item) => item.workspaceId === input.workspaceId && item.status === 'active')
+    const records = await loadInstalledSkills(packages.filter((item) => item.manifest.entrypoints?.some((entry) => entry.kind === 'skill' && entry.id === input.skillId)))
+    const record = records.find((item) => item.manifest.id === input.skillId)
+    let content: string
+    let path: string
+    let resources: string[] = []
+    if (record === undefined) {
+      const recipe = this.#registry.recipeForSkill?.(input.skillId)
+      if (recipe === undefined || documentRevision(recipe) !== descriptor.revision) throw new Error('工作方法不存在。')
+      path = 'SKILL.md'
+      if (input.path !== undefined && input.path !== path) throw new Error('工作方法没有此引用文件。')
+      content = recipe.instruction
+    } else {
+      const installed = packages.find((item) => item.packageId === record.packageId && item.version === record.packageVersion)!
+      if (documentRevision({ id: installed.packageId, version: installed.version, files: installed.manifest.files }) !== descriptor.revision) throw new Error('工作方法版本已改变。')
+      const bodyPath = 'SKILL.md'
+      path = input.path ?? bodyPath
+      resources = [...(record.manifest.resources ?? [])]
+      if (path === bodyPath) {
+        if (record.manifest.instructionFile === undefined) content = record.manifest.instructions
+        else {
+          content = await readDocumentText(this.#documentFiles, installed, record.manifest.instructionFile)
+          if (basename(record.manifest.instructionFile) === 'SKILL.md') content = parseSkillMarkdown(content).body
+        }
+      } else {
+        if (!resources.includes(path)) throw new Error('工作方法没有声明此引用文件。')
+        content = await readDocumentText(this.#documentFiles, installed, path)
+      }
+    }
+    // Redact complete values BEFORE paging, including credentials spanning a
+    // page boundary. Cursors describe the safe text, never the raw source.
+    content = input.redactText?.(content) ?? content
+    const offset = boundedInteger(input.offset, 0, 0, content.length, 'offset')
+    const limit = boundedInteger(input.limit, 8_000, 1, 12_000, 'limit')
+    let end = Math.min(content.length, offset + limit)
+    if (offset > 0 && /[\uD800-\uDBFF]/u.test(content[offset - 1]!) && /[\uDC00-\uDFFF]/u.test(content[offset] ?? '')) throw new Error('工作方法 offset 不能分割 Unicode 字符。')
+    if (end < content.length && /[\uD800-\uDBFF]/u.test(content[end - 1] ?? '') && /[\uDC00-\uDFFF]/u.test(content[end]!)) end -= 1
+    if (end === offset && offset < content.length) throw new Error('工作方法 limit 太小，请至少使用 2 个字符。')
+    const resourceOffset = boundedInteger(input.resourceOffset, 0, 0, resources.length, 'resourceOffset')
+    const totalResources = resources.length
+    resources = resources.slice(resourceOffset, resourceOffset + 8)
+    const resourceEnd = resourceOffset + resources.length
+    // A package may have been removed/rebound while the file was being read.
+    await current()
+    return { skillId: input.skillId, revision: descriptor.revision, path, content: content.slice(offset, end), totalChars: content.length, resources, totalResources,
+      ...(resourceEnd < totalResources ? { nextResourceOffset: resourceEnd } : {}),
+      ...(end < content.length ? { nextOffset: end } : {}) }
   }
 
   #effectiveScopeSkillIds(workspaceId: string, worldId: string): Set<string> | undefined {
@@ -202,9 +287,17 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
   async availableSkillIds(input: Omit<WorldSkillAvailabilityInput, 'skillId'> & { skillIds: readonly string[] }): Promise<string[]> {
     const world = this.#store.getWorld(input.worldId)
     if (world === undefined || world.workspaceId !== input.workspaceId) return []
+    const entries = await this.listWorld(input.worldId)
+    // listWorld performs package I/O. Read current authority again after that
+    // await, so a revocation during the final read check cannot use its earlier
+    // scope or active-instance snapshot.
+    const latestWorld = this.#store.getWorld(input.worldId)
+    if (latestWorld?.workspaceId !== input.workspaceId || latestWorld.status !== 'active') return []
+    const selected = this.#effectiveScopeSkillIds(input.workspaceId, input.worldId)
+    const instances = this.#store.listWorldPackageInstances?.(input.worldId, 'active')
     const available = new Set(
-      (await this.listWorld(input.worldId))
-        .filter((item) => item.worldAvailable)
+      entries.filter((item) => item.worldAvailable && (selected === undefined || selected.has(item.id))
+          && (item.packageId === undefined || instances === undefined || instances.some((instance) => instance.packageId === item.packageId && instance.packageVersion === item.packageVersion)))
         .map((item) => item.id),
     )
     return input.skillIds.filter((skillId) => available.has(skillId))
@@ -378,18 +471,48 @@ function isDeclarativeRecipe(record: PackageSkillRecord | undefined): boolean {
 }
 
 async function readSkillFiles(installed: InstalledPackage): Promise<SkillDetailFile[]> {
-  const root = resolve(installed.installedPath)
+  const verification = new InstalledPackageVerificationCache()
   const files: SkillDetailFile[] = []
   for (const declared of installed.manifest.files) {
     const extension = extname(declared.path).toLowerCase()
     if (!['.md', '.json', '.txt'].includes(extension)) continue
-    const path = resolve(root, declared.path)
-    if (path !== root && !path.startsWith(`${root}${sep}`)) continue
-    const content = await readFile(path, 'utf8')
+    let content: string
+    try { content = await readDocumentText(verification, installed, declared.path) }
+    catch (error) {
+      if (error instanceof Error && ['skill_document_too_large', 'skill_document_not_text'].includes(error.message)) continue
+      throw error
+    }
     if (content.length > 64_000) continue
     files.push({ path: declared.path, content, language: extension === '.md' ? 'markdown' : extension === '.json' ? 'json' : 'text', editable: installed.packageId.startsWith('generated.skill.') })
   }
   return files.sort((left, right) => left.path.localeCompare(right.path))
+}
+
+const MAX_DOCUMENT_BYTES = 512 * 1024
+async function readDocumentText(verification: InstalledPackageVerificationCache, installed: InstalledPackage, path: string): Promise<string> {
+  const file = await verification.openFile(installed, path)
+  try {
+    if (file.byteLength > MAX_DOCUMENT_BYTES) throw new Error('skill_document_too_large')
+    const chunks: Buffer[] = []
+    let length = 0
+    for await (const chunk of file.body) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      length += bytes.length
+      if (length > MAX_DOCUMENT_BYTES) throw new Error('skill_document_too_large')
+      chunks.push(bytes)
+    }
+    let text: string
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)) }
+    catch { throw new Error('skill_document_not_text') }
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) throw new Error('skill_document_not_text')
+    return text
+  } finally { file.body.destroy() }
+}
+function documentRevision(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex') }
+function boundedInteger(value: number | undefined, fallback: number, minimum: number, maximum: number, label: string): number {
+  if (value === undefined) return fallback
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error(`工作方法 ${label} 超出范围。`)
+  return value
 }
 
 function skillMarkdown(entry: SkillCatalogEntry, instruction: string): string {

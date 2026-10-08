@@ -45,7 +45,7 @@ export async function installSkillPackage(workspaceId: string, manifest: CyberPa
   }
 }
 
-export async function importSkillPackage(workspaceId: string, files: File[], worldId?: string): Promise<void> {
+export async function importSkillPackage(workspaceId: string, files: File[], worldId?: string): Promise<{ warnings: string[] }> {
   if (files.length === 0) throw new Error('请选择 ZIP 或技能包文件夹。')
   const form = new FormData()
   const relativePaths = files.map((file) => {
@@ -55,7 +55,8 @@ export async function importSkillPackage(workspaceId: string, files: File[], wor
   files.forEach((file) => form.append('files', file, file.name))
   form.append('relativePaths', JSON.stringify(relativePaths))
   if (worldId !== undefined) form.append('worldId', worldId)
-  await requestForm(`/api/workspaces/${encodeURIComponent(workspaceId)}/skill-authoring/import`, form)
+  const result = await requestForm(`/api/workspaces/${encodeURIComponent(workspaceId)}/skill-authoring/import`, form) as { warnings?: unknown } | undefined
+  return { warnings: Array.isArray(result?.warnings) ? result.warnings.filter((value): value is string => typeof value === 'string').slice(0, 20) : [] }
 }
 
 async function requestForm(path: string, body: FormData): Promise<unknown> {

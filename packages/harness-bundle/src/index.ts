@@ -1,3 +1,4 @@
+import { SkillDocumentTools } from './skill-document-tools.js'
 import { WorldDirectoryTools } from './world-directory-tools.js'
 import type { Context } from '@deepseek-ai/cordis'
 import {
@@ -58,6 +59,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
   })
   const pending = new Map<string, PendingApproval>()
   const directory = new WorldDirectoryTools(ctx)
+  const skillDocuments = new SkillDocumentTools(ctx)
   let exitTask: Promise<void> | undefined
 
   const settleAll = (outcome: ApprovalOutcome) => {
@@ -67,6 +69,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
   const disposeAndExit = () => {
     exitTask ??= (async () => {
       settleAll('unavailable')
+      skillDocuments.clear()
       await Promise.allSettled([Promise.resolve().then(() => transport.flush())])
       await Promise.allSettled([Promise.resolve().then(() => rootFiber.dispose())])
       exit(0)
@@ -104,6 +107,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
 
   transport.onRequest(async (method, params) => {
     if (method === 'initialize') await ctx.get('loader')?.await()
+    if (method === 'skill-documents/set') return skillDocuments.update(params)
     if (method === 'world-directory/set') return directory.update(params)
     if (method === 'approval/decide') return decideApproval(pending, params)
     const result = await server.handleRequest(method, params)
@@ -115,6 +119,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
     transport.start()
     return async () => {
       settleAll('unavailable')
+      skillDocuments.clear()
       await server.shutdown()
       transport.close()
     }

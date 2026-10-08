@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -98,6 +98,65 @@ describe('Skill Center authoring routes', () => {
     folderForm.append('relativePaths', JSON.stringify(['folder-root/dsh-cyber.package.json', 'folder-root/skill.json']))
     const folderResponse = await fetch(`${origin}/api/workspaces/${workspace.id}/skill-authoring/import`, { method: 'POST', body: folderForm })
     expect(folderResponse.status).toBe(201)
+  })
+
+  it('imports standard SKILL.md ZIPs and folders as immutable native packages without granting execution', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-skill-md-import-route-')); roots.push(root)
+    const server = await createCyberServer({ stateRoot: root, workspacePath: root, port: 0, bootstrapDefaultWorld: true, runtime: new QuietRuntime() }); servers.push(server)
+    const { origin } = await server.start()
+    const workspace = (await get(origin, '/api/workspaces')).items[0]
+    const world = (await get(origin, `/api/workspaces/${workspace.id}/worlds`)).items[0]
+    const source = Buffer.from('---\nname: standard-guide\ndescription: 整理项目证据。\nlicense: Apache-2.0\nallowed-tools: Bash(*) Read\nmetadata:\n  display-name: 项目证据\n  publisher: Original Author\n  source: https://example.test/original\n  commit: "abc123"\n---\n# 完整步骤\n\n核对资料并保留来源。\n')
+    const license = Buffer.from('Copyright Original Author\r\nOriginal terms\r\n')
+    const script = Buffer.from('throw new Error("import must not execute")\n')
+    const originals: Array<[string, Buffer]> = [['SKILL.md', source], ['LICENSE', license], ['scripts/tool.js', script]]
+    for (const mode of ['zip', 'folder']) {
+      const form = new FormData()
+      if (mode === 'zip') form.append('files', new Blob([zipStore(originals.map(([path, bytes]) => [`standard-guide/${path}`, bytes]))]), 'guide.zip')
+      else {
+        for (const [path, bytes] of originals) form.append('files', new Blob([bytes]), path.split('/').pop()!)
+        form.append('relativePaths', JSON.stringify(originals.map(([path]) => `standard-guide/${path}`)))
+      }
+      form.append('worldId', world.id)
+      const response = await fetch(`${origin}/api/workspaces/${workspace.id}/skill-authoring/import`, { method: 'POST', body: form })
+      const result = await response.json() as any
+      expect(response.status, JSON.stringify(result)).toBe(201)
+      expect(result.warnings.join('\n')).toContain('allowed-tools')
+      expect(result.installed.manifest).toMatchObject({ kind: 'skill', displayName: '项目证据', license: 'Apache-2.0', publisher: 'Original Author', capabilities: ['skill:recipe'], dataEgress: [] })
+      const skill = JSON.parse(await readFile(join(result.installed.installedPath, 'skill.json'), 'utf8'))
+      expect(skill).toMatchObject({ instructionFile: 'source/SKILL.md', resources: ['source/LICENSE', 'source/scripts/tool.js'], integrationId: 'builtin.recipe', dependencies: [], dataEgress: [] })
+      expect(skill.instructions).not.toContain('核对资料并保留来源')
+      for (const [path, bytes] of originals) expect(await readFile(join(result.installed.installedPath, 'source', path))).toEqual(bytes)
+      const catalog = await get(origin, `/api/worlds/${world.id}/skill-catalog`)
+      expect(catalog.items).toContainEqual(expect.objectContaining({ id: skill.id, displayName: '项目证据', kind: 'recipe', worldAvailable: true }))
+    }
+  })
+
+  it('rejects ambiguous roots, traversal, symlinks and malformed SKILL.md metadata', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-skill-md-import-reject-')); roots.push(root)
+    const server = await createCyberServer({ stateRoot: root, workspacePath: root, port: 0, bootstrapDefaultWorld: true, runtime: new QuietRuntime() }); servers.push(server)
+    const { origin } = await server.start()
+    const workspace = (await get(origin, '/api/workspaces')).items[0]
+    const source = Buffer.from('---\nname: valid-guide\ndescription: Safe description.\n---\n# Steps\n')
+    const symlink = zipStore([['SKILL.md', source], ['references/link', Buffer.from('/etc/passwd')]])
+    let position = 0
+    while ((position = symlink.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), position)) !== -1) {
+      if (symlink.subarray(position + 46, position + 46 + symlink.readUInt16LE(position + 28)).toString() === 'references/link') symlink.writeUInt32LE((0xa1ff << 16) >>> 0, position + 38)
+      position += 4
+    }
+    const archives = [
+      zipStore([['first/SKILL.md', source], ['second/SKILL.md', source]]),
+      zipStore([['guide/SKILL.md', source], ['other.txt', Buffer.from('outside root')]]),
+      zipStore([['SKILL.md', source], ['../outside', Buffer.from('escape')]]),
+      zipStore([['SKILL.md', source], ['../escape/', Buffer.alloc(0)]]),
+      zipStore([['SKILL.md', Buffer.from('---\nname: valid\ndescription: text\nname: duplicate\n---\n')]]),
+      symlink,
+    ]
+    for (const archive of archives) {
+      const form = new FormData(); form.append('files', new Blob([archive]), 'invalid.zip')
+      const response = await fetch(`${origin}/api/workspaces/${workspace.id}/skill-authoring/import`, { method: 'POST', body: form })
+      expect(response.status, await response.text()).toBe(422)
+    }
   })
 })
 
