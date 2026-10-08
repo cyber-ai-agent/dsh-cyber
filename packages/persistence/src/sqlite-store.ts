@@ -7,6 +7,7 @@ import {
   CONTEXT_SNAPSHOT_VERSION,
   CYBER_SCHEMA_VERSION,
   copyRuntimeContextUsage,
+  conversationTurnFailure,
   RECOMMENDED_ADMIN_PERMISSIONS,
   WORKSPACE_PREFERENCES_LIMITS,
   parseWorkspacePaneWidth,
@@ -4586,6 +4587,7 @@ export class SqliteStore {
          WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
       ).run(finalErrorCode, now, now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      this.#appendWorkTurnFailureNotice(turn, finalErrorCode)
       return this.getConversationQueueEntry(entry.id)!
     })
   }
@@ -4711,7 +4713,11 @@ export class SqliteStore {
   }
 
   failWorkTurn(turnId: string, errorCode: string): WorkTurn {
-    return this.#transitionWorkTurn(turnId, ['running'], 'failed', errorCode)
+    return this.#transaction(() => {
+      const turn = this.#transitionWorkTurn(turnId, ['running'], 'failed', errorCode)
+      this.#appendWorkTurnFailureNotice(turn, errorCode)
+      return turn
+    })
   }
 
   interruptWorkTurn(turnId: string, errorCode = 'interrupted'): WorkTurn {
@@ -7226,6 +7232,40 @@ export class SqliteStore {
       throw new EntityNotFoundError(`Employee relationship not found: ${employeeId}/${colleagueId}`)
     }
     return mapEmployeeRelationship(row)
+  }
+
+  /** Called inside the same transaction as the failed lifecycle transition. */
+  #appendWorkTurnFailureNotice(turn: WorkTurn, errorCode: string): void {
+    const ownerMessage = this.database.prepare(
+      `SELECT id FROM messages WHERE session_id = ? AND sender_kind = 'owner' AND kind = 'user'
+       AND json_extract(metadata_json, '$.workTurnId') = ? LIMIT 1`,
+    ).get(turn.sessionId, turn.id) as { id: string } | undefined
+    // Autonomous runs without an accepted owner message do not invent chat turns.
+    if (ownerMessage === undefined) return
+    const existing = this.database.prepare(
+      `SELECT id FROM messages WHERE session_id = ? AND kind = 'system'
+       AND json_extract(metadata_json, '$.control') = 'failure'
+       AND json_extract(metadata_json, '$.workTurnId') = ? LIMIT 1`,
+    ).get(turn.sessionId, turn.id)
+    if (existing !== undefined) return
+    const failure = conversationTurnFailure(errorCode)
+    this.#appendMessage({
+      sessionId: turn.sessionId,
+      senderId: 'system',
+      senderKind: 'system',
+      kind: 'system',
+      content: `本次处理未完成：${failure.message}`,
+      metadata: {
+        productNotice: true,
+        control: 'failure',
+        status: 'failed',
+        workTurnId: turn.id,
+        errorCode: failure.code,
+        ...(turn.clientTurnId === undefined ? {} : { clientTurnId: turn.clientTurnId }),
+      },
+      causationId: ownerMessage.id,
+      correlationId: turn.sessionId,
+    })
   }
 
   #transitionWorkTurn(

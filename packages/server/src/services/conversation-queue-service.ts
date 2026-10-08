@@ -679,7 +679,8 @@ export class ConversationQueueService implements AsyncDisposable {
 
 function queueFailureCode(error: unknown): string {
   if (error instanceof AgentTurnFailedError) return `runtime-${error.failureKind}`
-  return error instanceof Error ? error.message.slice(0, 120) || 'queue-run-failed' : 'queue-run-failed'
+  // Preparation exceptions may contain credentials, paths or provider payloads.
+  return 'queue-run-failed'
 }
 
 function boundedTimeout(value: number | undefined, fallback: number): number {
