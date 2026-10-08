@@ -7,6 +7,7 @@ import type { ImageGenerationService } from './image-generation-service.js'
 import { isImageGenerationModel } from './image-generation-service.js'
 import type { ModelCredentialService } from './model-credential-service.js'
 import type { ModelInteractionService } from './model-interaction-service.js'
+import { resolveModelCredential } from './model-readiness-service.js'
 import { ServiceError } from './service-error.js'
 import type { WorldFileService } from './world-file-service.js'
 
@@ -60,7 +61,8 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
     }
     emit('turn.started', { metadata: { modelProfileId: profile.id } })
     try {
-      const key = resolveKey(deps.credentials, profile)
+      const credential = resolveModelCredential(deps.store, deps.credentials, profile)
+      const key = credential.credentialEnvName === undefined ? undefined : process.env[credential.credentialEnvName]
       const image = await deps.images.generate({
         baseUrl: profile.baseUrl,
         ...(key === undefined ? {} : { apiKey: key }),
@@ -152,18 +154,6 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
     ...(deps.inner.closeAgent === undefined ? {} : { closeAgent: (agentId: string) => deps.inner.closeAgent!(agentId) }),
     close: () => deps.inner.close(),
   }
-}
-
-function resolveKey(credentials: ModelCredentialService, profile: { id: string; providerId?: string; credentialEnvName?: string }): string | undefined {
-  const direct = credentials.resolve(profile.id)
-  if (direct !== undefined) return direct
-  // A profile imported through the hub shares its provider connection's key;
-  // the vault is keyed by either id, and the env reference is the fallback.
-  if (profile.providerId !== undefined) {
-    const viaProvider = credentials.resolve(profile.providerId)
-    if (viaProvider !== undefined) return viaProvider
-  }
-  return profile.credentialEnvName === undefined ? undefined : process.env[profile.credentialEnvName]
 }
 
 function profileDisplayName(profile: { displayName: string; modelId: string }): string {

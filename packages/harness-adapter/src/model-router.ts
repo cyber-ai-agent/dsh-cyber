@@ -25,6 +25,8 @@ export interface HarnessModelRoute {
   baseURL: string
   modelId: string
   apiKeyEnv?: string
+  /** Explicitly credential-free private provider; omission keeps normal auth validation. */
+  requiresApiKey?: boolean
   webSearch?: {
     baseURL: string
     apiKeyEnv: string
@@ -398,6 +400,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
         },
         ...(route.reasoning === undefined ? {} : { reasoning: route.reasoning }),
         ...(route.apiKeyEnv === undefined ? {} : { apiKeyEnv: route.apiKeyEnv }),
+        ...(route.requiresApiKey === undefined ? {} : { requiresApiKey: route.requiresApiKey }),
         ...(route.webSearch === undefined ? {} : { webSearch: route.webSearch }),
       }
     }

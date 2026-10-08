@@ -12,6 +12,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
+import { harnessModelRoute } from './harness-model-route.js'
 import { createLocalBackupBundle } from './local-backup-service.js'
 import { ServiceError } from './service-error.js'
 
@@ -20,12 +21,14 @@ export class RuntimeUpdateService {
   readonly #stateRoot: string
   readonly #runtimeRoot: string
   readonly #workspaceRoot: string
+  readonly #resolveModelRoute: (profile: ModelProfile) => HarnessModelRoute
 
-  constructor(store: SqliteStore, stateRoot: string, workspaceRoot: string) {
+  constructor(store: SqliteStore, stateRoot: string, workspaceRoot: string, resolveModelRoute: (profile: ModelProfile) => HarnessModelRoute = harnessModelRoute) {
     this.#store = store
     this.#stateRoot = stateRoot
     this.#runtimeRoot = join(stateRoot, 'runtime')
     this.#workspaceRoot = workspaceRoot
+    this.#resolveModelRoute = resolveModelRoute
   }
 
   async verify(candidateRoot: string) {
@@ -80,7 +83,7 @@ export class RuntimeUpdateService {
         candidateRoot: transaction.candidateRoot,
         stateRoot: join(this.#runtimeRoot, 'updates', transaction.id),
         workspacePath: this.#workspaceRoot,
-        route: harnessModelRoute(modelProfile),
+        route: this.#resolveModelRoute(modelProfile),
         inheritedEnvironment: process.env,
       })
       const updated = this.#store.transitionRuntimeUpdate({
@@ -191,29 +194,10 @@ export class RuntimeUpdateService {
   }
 }
 
-function harnessModelRoute(profile: ModelProfile): HarnessModelRoute {
-  const contextWindow = optionalPositiveInteger(profile.settings.contextWindow)
-  const maxTokens = optionalPositiveInteger(profile.settings.maxTokens)
-  return {
-    id: profile.id,
-    displayName: profile.displayName,
-    api: profile.api,
-    baseURL: profile.baseUrl,
-    modelId: profile.modelId,
-    ...(profile.credentialEnvName === undefined ? {} : { apiKeyEnv: profile.credentialEnvName }),
-    ...(contextWindow === undefined ? {} : { contextWindow }),
-    ...(maxTokens === undefined ? {} : { maxTokens }),
-  }
-}
-
 function artifactTimestamp(): string {
   return new Date().toISOString().replaceAll(/[:.]/g, '-').replace('T', '_').replace('Z', '')
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function optionalPositiveInteger(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
 }

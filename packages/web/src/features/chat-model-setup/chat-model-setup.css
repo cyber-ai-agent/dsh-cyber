@@ -1,0 +1,15 @@
+.chat-model-readiness { width: min(440px, 100%); box-sizing: border-box; margin-top: 20px; padding: 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-1); color: var(--text-soft); }
+.chat-model-readiness strong { display: block; color: var(--text-strong); font-size: 15px; }
+.chat-model-readiness p { margin: 8px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.chat-model-readiness .primary-button, .chat-model-readiness .secondary-button { margin-top: 14px; }
+.chat-model-entry { display: inline-flex; align-items: center; gap: 6px; max-width: 230px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: var(--surface-1); color: var(--text-soft); font-size: 12px; cursor: pointer; }
+.chat-model-entry span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-model-entry:hover, .chat-model-entry:focus-visible { color: var(--text-strong); border-color: var(--accent); }
+.chat-system-notice__action { display: block; margin: 8px auto 0; border: 0; background: transparent; color: var(--accent); font-size: 13px; cursor: pointer; text-decoration: underline; }
+.chat-first-task { margin-top: 18px; max-width: 440px; }
+.chat-first-task button { margin-top: 12px; }
+@media (max-width: 900px) { .chat-model-entry { max-width: 155px; } }
+/* Use the theme's readable foreground/surface pair for this primary path;
+   arbitrary skin accent colors do not guarantee readable button labels. */
+.chat-model-readiness .primary-button,
+.chat-model-readiness .primary-button:hover:not(:disabled) { color: var(--surface-0); background: var(--text-strong); border-color: var(--text-strong); }

@@ -1,9 +1,10 @@
 import { CircleNotch, Paperclip } from '@phosphor-icons/react'
 import { useChatSubmissions, type ChatSubmission } from '../chat-submission-store.js'
 
-export function ChatSubmissionRecovery({ ownerKey, hasDraft, onRetry, onRestore }: {
+export function ChatSubmissionRecovery({ ownerKey, hasDraft, onRetry, onRestore, onOpenModelSetup }: {
   ownerKey: string | undefined
   hasDraft: boolean
+  onOpenModelSetup?(): void
   onRetry(submission: ChatSubmission): Promise<void>
   onRestore(submission: ChatSubmission): void
 }) {
@@ -19,6 +20,7 @@ export function ChatSubmissionRecovery({ ownerKey, hasDraft, onRetry, onRestore 
           {item.draft.attachments.map((attachment) => <p key={attachment.id}><Paperclip size={14} /> {attachment.name}</p>)}
         </details>
         <div className="composer-recovery__actions">
+          {item.errorCode !== 'model_setup_required' || onOpenModelSetup === undefined ? null : <button type="button" className="secondary-button" onClick={onOpenModelSetup}>配置对话模型</button>}
           {item.status === 'rejected' ? <button type="button" className="secondary-button" disabled={hasDraft} title={hasDraft ? '请先发送或清空当前草稿，再恢复这条消息。' : '恢复文字、附件和本次模型选择'} onClick={() => onRestore(item)}>恢复到输入框</button> : null}
           <button type="button" className="secondary-button" onClick={() => void onRetry(item)}>重试提交</button>
           <span>{item.status === 'uncertain' ? '使用同一提交核对结果' : '按原内容重新提交'}</span>

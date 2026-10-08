@@ -26,7 +26,7 @@ export async function deliverChatSubmission(submission: ChatSubmission): Promise
   } catch (cause) {
     const rejected = cause instanceof ApiError && [400, 401, 403, 404, 413, 422].includes(cause.status)
     const error = cause instanceof ApiError ? cause.message : '连接中断，服务端接收结果尚待确认。请恢复连接后重试提交。'
-    chatSubmissionStore.put({ ...submission, status: rejected ? 'rejected' : 'uncertain', error })
+    chatSubmissionStore.put({ ...submission, status: rejected ? 'rejected' : 'uncertain', error, ...(cause instanceof ApiError && cause.code !== undefined ? { errorCode: cause.code } : {}) })
     return { kind: 'failed', permissionDenied: cause instanceof ApiError && cause.code === 'owner_runtime_access_denied' }
   } finally {
     sending.delete(submission.id)

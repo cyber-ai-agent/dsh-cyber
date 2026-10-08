@@ -95,7 +95,7 @@ async function sendFromComposer(page: Page, expectBusy = true) {
 async function expectSettled(page: Page, preparation: boolean) {
   await expect(page.locator('.chat-system-notice')).toHaveCount(1)
   await expect(page.locator('.chat-system-notice')).toContainText('本次处理未完成：')
-  await expect(page.locator('.chat-system-notice')).toContainText(preparation ? '处理消息时发生错误' : 'API 密钥被模型服务拒绝')
+  await expect(page.locator('.chat-system-notice')).toContainText(preparation ? '处理消息时发生错误' : '模型服务未接受当前认证')
   await expect(page.locator('.message-scroll')).toHaveAttribute('aria-busy', 'false')
   await expect(page.locator('.message--streaming')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '停止当前回复', exact: true })).toHaveCount(0)

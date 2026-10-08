@@ -76,6 +76,9 @@ import {
 import { ChatWorkbench, isChatMessage } from './components/ChatWorkbench.js'
 import type { ConversationPermissionMode } from './components/ConversationPermissionControl.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
+import { useModelReadiness } from './features/chat-model-setup/use-model-readiness.js'
+import { readConversationModelReadiness } from './features/chat-model-setup/readiness.js'
+import type { ModelHubChatContext } from './features/model-hub/ModelHubDialog.js'
 import { ModelHubLauncher } from './features/model-hub/ModelHubLauncher.js'
 import { ConnectionHubLauncher } from './features/connection-hub/ConnectionHubLauncher.js'
 import { SkillCenterLauncher } from './features/skill-center/SkillCenterLauncher.js'
@@ -117,6 +120,7 @@ import { chatSubmissionStore, type ChatSubmission } from './chat-submission-stor
 import { deliverChatSubmission } from './chat-submission-delivery.js'
 import { WorkbenchToolsMenu } from './components/WorkbenchToolsMenu.js'
 
+const ChatModelHubDialog = lazy(async () => ({ default: (await import('./features/model-hub/ModelHubDialog.js')).ModelHubDialog }))
 const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
 const WorldSideDock = lazy(async () => ({ default: (await import('./components/WorldSideDock.js')).WorldSideDock }))
 const ArtifactCenter = lazy(async () => ({ default: (await import('./features/artifacts/ArtifactCenter.js')).ArtifactCenter }))
@@ -177,6 +181,10 @@ export default function App() {
   const [transcriptReload, setTranscriptReload] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
+  const [chatModelSetup, setChatModelSetup] = useState<{ context: ModelHubChatContext; ownerKey: string | undefined }>()
+  const [modelReadinessRevision, setModelReadinessRevision] = useState(0)
+  const modelPreparationRef = useRef(new Set<string>())
+  const activeComposerOwnerRef = useRef<string | undefined>(undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
   const [discoveredCatalog] = useState<Record<string, CachedModelCatalog>>(() => loadDiscoveredModelsCache())
@@ -290,6 +298,18 @@ export default function App() {
     ? undefined
     : composerDraftOwnerKey(activeWorld.id, activeConversationKey ?? '__scratch__')
   const activeComposerDraft = useComposerDraft(activeComposerOwnerKey)
+  activeComposerOwnerRef.current = activeComposerOwnerKey
+  const readinessTargets = activeParticipantIds.length > 0 ? activeParticipantIds : employees.filter((employee) => activeComposerDraft.text.includes(`@${employee.displayName}`)).map((employee) => employee.id)
+  const modelReadinessVersion = useMemo(() => [modelReadinessRevision, models, modelAssignments], [modelReadinessRevision, models, modelAssignments])
+  const modelReadiness = useModelReadiness({ worldId: activeWorld?.id, employeeIds: readinessTargets, modelProfileId: activeComposerDraft.modelProfileId, revision: modelReadinessVersion, enabled: !demoMode })
+  const openChatModelSetup = useCallback(() => {
+    if (activeWorld === undefined || demoMode) return
+    const employee = readinessTargets.length === 1 ? employees.find((item) => item.id === readinessTargets[0]) : undefined
+    setChatModelSetup({ ownerKey: activeComposerOwnerKey, context: {
+      worldId: activeWorld.id, worldName: activeWorld.name,
+      ...(employee === undefined ? {} : { employeeId: employee.id, employeeName: employee.displayName }),
+    } })
+  }, [activeWorld, activeComposerOwnerKey, readinessTargets.join('|'), employees])
   const draft = activeComposerDraft.text
   const setDraft = useCallback((value: string) => {
     composerDraftStore.setText(activeComposerOwnerKey, value)
@@ -1520,6 +1540,7 @@ export default function App() {
         }))
         for (const session of matchingDirectSessions) persistConversationPermissionMode(managingEmployee.worldId, `session:${session.id}`, input.runtimePermissionMode)
       }
+      setModelReadinessRevision((value) => value + 1)
       setManagingEmployeeId(undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '角色设定保存失败')
@@ -1882,7 +1903,7 @@ export default function App() {
     setComposerFocusRequest((value) => value + 1)
   }, [])
 
-  const send = useCallback((prompt: string, attachments: ChatAttachment[], queueMode: 'normal' | 'next' = 'normal', speechSurface?: SpeechInputSurface): Promise<void> => {
+  const send = useCallback(async (prompt: string, attachments: ChatAttachment[], queueMode: 'normal' | 'next' = 'normal', speechSurface?: SpeechInputSurface): Promise<void> => {
     const world = activeWorld
     if (world === undefined) return Promise.resolve()
     const explicitEmployeeIds = conversationIntent?.employeeIds
@@ -1894,13 +1915,45 @@ export default function App() {
       return Promise.resolve()
     }
 
+    const capturedComposerOwnerKey = activeComposerOwnerKey
+    // Keep dictated text reviewable when setup or a transport check interrupts
+    // the send, without replacing an existing typed draft.
+    if (speechSurface !== undefined && composerDraftStore.get(capturedComposerOwnerKey).text.length === 0) {
+      composerDraftStore.setText(capturedComposerOwnerKey, prompt)
+    }
+    const submittedDraft = composerDraftStore.get(capturedComposerOwnerKey)
+    const approvalPending = pendingApprovals.some((item) => item.request.sessionId === undefined || item.request.sessionId === activeSessionId)
+      || pendingWorldPermissionRequests.some((item) => item.sessionId === undefined || item.sessionId === activeSessionId)
+    if (!demoMode && !approvalPending) {
+      const preparationKey = capturedComposerOwnerKey ?? world.id
+      if (modelPreparationRef.current.has(preparationKey)) return
+      modelPreparationRef.current.add(preparationKey)
+      try {
+        const readiness = await readConversationModelReadiness(world.id, targetIds, submittedDraft.modelProfileId)
+        if (activeComposerOwnerRef.current !== capturedComposerOwnerKey) return
+        if (composerDraftStore.get(capturedComposerOwnerKey).revision !== submittedDraft.revision) {
+          setError('草稿已更新，请确认后重新发送。')
+          return
+        }
+        if (!readiness.canSend) {
+          setModelReadinessRevision((value) => value + 1)
+          openChatModelSetup()
+          return
+        }
+      } catch (cause) {
+        if (activeComposerOwnerRef.current === capturedComposerOwnerKey) setError(cause instanceof ApiError ? cause.message : '暂时无法读取模型配置，草稿已保留。请稍后重试。')
+        return
+      } finally {
+        modelPreparationRef.current.delete(preparationKey)
+      }
+    }
+
     const title = conversationIntent?.title
       ?? activeSession?.title
       ?? (targetIds.length === 1
         ? `与 ${employees.find((employee) => employee.id === targetIds[0])?.displayName ?? '角色'} 对话`
         : compactPrompt(prompt))
     const queueKey = activeConversationKey ?? targetConversationQueueKey(targetIds, title)
-    const capturedComposerOwnerKey = activeComposerOwnerKey
     const startedFromWorldScratch = activeConversationKey === undefined
       && activeSessionId === undefined
       && conversationIntent === undefined
@@ -1933,7 +1986,6 @@ export default function App() {
       surface: speechSurface,
     })
 
-    const submittedDraft = composerDraftStore.get(capturedComposerOwnerKey)
     const pendingTurn: PendingChatTurn = {
       id: clientTurnId,
       queueKey,
@@ -2091,6 +2143,9 @@ export default function App() {
     employees,
     conversationPermissionMode,
     patchPendingTurn,
+    pendingApprovals,
+    pendingWorldPermissionRequests,
+    openChatModelSetup,
     reasoningEffort,
     refreshConversationTranscript,
     removePendingTurn,
@@ -2258,6 +2313,7 @@ export default function App() {
   // the settings panels and role assignments see the new configuration
   // without a page reload.
   const refreshModelProfiles = useCallback(async (): Promise<void> => {
+    setModelReadinessRevision((value) => value + 1)
     if (workspace === undefined || demoMode) return
     try {
       const result = await api<{ items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${workspace.id}/model-profiles`)
@@ -2499,6 +2555,7 @@ export default function App() {
             {...(activeSession === undefined ? {} : { session: activeSession })}
             {...(conversationIntent === undefined ? {} : { intent: conversationIntent })}
             participantIds={activeParticipantIds}
+            {...(demoMode ? {} : { modelReadiness: modelReadiness?.readiness, modelReadinessFailed: modelReadiness?.failed, onOpenModelSetup: openChatModelSetup })}
             messages={chatMessages}
             employees={employees}
             dossiers={dossiers}
@@ -2667,6 +2724,15 @@ export default function App() {
           onRecruit={recruitEmployee}
         /></Suspense>
       ) : null}
+      {chatModelSetup === undefined ? null : <Suspense fallback={<div className="dialog-loading" role="status">正在打开模型中心…</div>}><ChatModelHubDialog
+        workspaceId={workspace.id} worlds={worlds} employees={employees} chatContext={chatModelSetup.context}
+        onApplied={() => { composerDraftStore.setModelProfile(chatModelSetup.ownerKey, undefined) }}
+        onClose={() => {
+          if (activeComposerOwnerRef.current === chatModelSetup.ownerKey) setComposerFocusRequest((value) => value + 1)
+          setChatModelSetup(undefined)
+          void refreshModelProfiles()
+        }}
+      /></Suspense>}
       {packageMarketOpen ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开市场…</div>}><PackageMarketDialog
           workspaceId={workspace.id}
@@ -3408,7 +3474,7 @@ function runtimeFailureMessage(event: AgentRuntimeEvent): string {
     return '本次输入和角色资料过长，超过当前模型可用上下文。请缩短消息、角色设定或资料，或切换更大上下文的模型后重试。'
   }
   if (failure === 'provider-authentication' || failure === 'authentication') {
-    return 'API 密钥被模型服务拒绝。请打开“设置 → 模型”重新填写密钥，并先获取模型列表确认连接成功。'
+    return 'API 密钥被模型服务拒绝。请打开模型中心检查服务商的密钥和接口设置，再手动重试。'
   }
   if (failure === 'provider-rate-limited' || failure === 'rate-limited') return '模型服务正在限流或账户额度不足，请稍后重试。'
   if (failure === 'provider-timeout' || failure === 'timeout') return '模型服务响应超时，请检查连接后重试。'

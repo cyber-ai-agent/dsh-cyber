@@ -1580,3 +1580,5 @@ export { parseModelStatsQuery, ModelStatsQueryError } from './model-stats-query.
 export * from './tool-trace.js'
 export * from './credentials.js'
 export * from './world-directory.js'
+
+export * from './model-readiness.js'

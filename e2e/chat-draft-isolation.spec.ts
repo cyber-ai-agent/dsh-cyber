@@ -66,7 +66,7 @@ async function selectConversation(page: Page, name: string) {
   await expect(entry).toBeEnabled()
   await entry.click()
   const composer = page.locator('.composer textarea')
-  await expect(composer).toHaveAttribute('placeholder', new RegExp(name))
+  await expect(page.locator('.chat-header h1')).toContainText(name)
   return composer
 }
 

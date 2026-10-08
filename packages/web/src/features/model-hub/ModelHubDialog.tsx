@@ -5,9 +5,13 @@ import { ArrowCounterClockwise, ArrowLeft, ArrowsClockwise, CheckCircle, ImageSq
 
 import './model-hub.css'
 import { ModelStatsPanel } from './ModelStatsPanel.js'
+import { ChatModelSetupPanel, type ModelHubChatContext } from './ChatModelSetupPanel.js'
+import './chat-setup-messages.js'
+export type { ModelHubChatContext } from './ChatModelSetupPanel.js'
 import '../../i18n/model-hub-messages.js'
 import { useI18n } from '../../i18n/runtime.js'
 import { ApiError } from '../../api.js'
+import { useDialogFocusTrap } from '../../components/useDialogFocusTrap.js'
 import {
   addManualModel,
   clearAssignment,
@@ -95,9 +99,23 @@ function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback
 }
 
-export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { workspaceId: string; worlds: World[]; employees: EmployeeInstance[]; onClose(): void }) {
+export function ModelHubDialog({ workspaceId: openingWorkspaceId, worlds, employees, chatContext, onApplied, onClose }: {
+  workspaceId: string
+  worlds: World[]
+  employees: EmployeeInstance[]
+  chatContext?: ModelHubChatContext
+  onApplied?(): void
+  onClose(): void
+}) {
   const { t } = useI18n()
-  const [tab, setTab] = useState<'providers' | 'pool' | 'assign' | 'stats'>('providers')
+  const [workspaceId] = useState(openingWorkspaceId)
+  // A handoff belongs to the conversation that opened it, even if the shell
+  // receives a different active world/character while this dialog is open.
+  const [origin] = useState(() => chatContext === undefined ? undefined : { ...chatContext, workspaceId })
+  const [tab, setTab] = useState<'chat' | 'providers' | 'pool' | 'assign' | 'stats'>(origin === undefined ? 'providers' : 'chat')
+  const [loaded, setLoaded] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [importedModels, setImportedModels] = useState<{ providerId: string; modelIds: string[] }>()
   const [catalog, setCatalog] = useState<HubCatalogState>()
   const [providers, setProviders] = useState<HubProvider[]>([])
   const [profiles, setProfiles] = useState<HubProfile[]>([])
@@ -122,9 +140,46 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   const [wizard, setWizard] = useState<WizardState>()
   const [modelQuery, setModelQuery] = useState('')
   const panelRef = useRef<HTMLElement>(null)
+  const activeRef = useRef(true)
+  const wizardGeneration = useRef(0)
+  const pendingWizard = useRef(false)
+  const pendingApply = useRef(false)
+  const reloadGeneration = useRef(0)
+
+  useEffect(() => {
+    activeRef.current = true
+    return () => {
+      activeRef.current = false
+      wizardGeneration.current += 1
+      reloadGeneration.current += 1
+    }
+  }, [])
+
+  const closeDialog = useCallback(() => {
+    // An assignment already submitted is not a cancellable draft. Keep the
+    // destination visible until its outcome is known.
+    if (!activeRef.current || pendingApply.current) return
+    activeRef.current = false
+    wizardGeneration.current += 1
+    reloadGeneration.current += 1
+    onClose()
+  }, [onClose])
 
   const reload = useCallback(async () => {
-    const [nextCatalog, nextProviders, nextProfiles] = await Promise.all([loadCatalog(), listProviders(workspaceId), listProfiles(workspaceId)])
+    if (!activeRef.current) return
+    const generation = ++reloadGeneration.current
+    setLoadFailed(false)
+    let data: [HubCatalogState, HubProvider[], Awaited<ReturnType<typeof listProfiles>>]
+    try {
+      data = await Promise.all([loadCatalog(), listProviders(workspaceId), listProfiles(workspaceId)])
+    } catch (cause) {
+      if (!activeRef.current || generation !== reloadGeneration.current) return
+      setLoadFailed(true)
+      throw cause
+    }
+    if (!activeRef.current || generation !== reloadGeneration.current) return
+    const [nextCatalog, nextProviders, nextProfiles] = data
+    setLoaded(true)
     setCatalog(nextCatalog)
     setProviders(nextProviders)
     setProfiles(nextProfiles.profiles)
@@ -136,19 +191,17 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
     let cancelled = false
     void (async () => {
       try { await reload() } catch (cause) {
-        if (!cancelled) setError(errorMessage(cause, t('modelHub.loadFailed', '模型中心数据加载失败。')))
+        if (!cancelled && activeRef.current) setError(errorMessage(cause, t('modelHub.loadFailed', '模型中心数据加载失败。')))
       }
     })()
     return () => { cancelled = true }
   }, [reload, t])
 
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && wizard === undefined) onClose()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [onClose, wizard])
+  useDialogFocusTrap(panelRef, () => {
+    // Escape keeps the existing wizard draft open; its own cancel control
+    // leaves the wizard, while Escape from the hub returns to the caller.
+    if (wizard === undefined) closeDialog()
+  })
 
   const entryForRef = (ref: string): HubCatalogEntry | undefined =>
     catalog?.catalog.providers.find((candidate) => candidate.id === ref)
@@ -164,12 +217,16 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   }
 
   const runWizardTest = async (state: WizardState): Promise<void> => {
+    if (!activeRef.current || pendingWizard.current || busy !== undefined) return
+    pendingWizard.current = true
+    const generation = wizardGeneration.current
+    const isCurrent = () => activeRef.current && generation === wizardGeneration.current
     setBusy('test')
     setError(undefined)
     const entry = entryForRef(state.form.providerRef)
     try {
       const saved = await saveProvider(workspaceId, {
-        ...(state.editing === undefined ? {} : { id: state.editing.id }),
+        ...(state.providerId === undefined && state.editing === undefined ? {} : { id: state.providerId ?? state.editing!.id }),
         name: state.form.name,
         baseUrl: state.form.baseUrl,
         api: state.form.api,
@@ -185,19 +242,31 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
           ? {}
           : { credentialEnvName: null }),
       })
+      if (activeRef.current) setProviders((current) => [...current.filter((provider) => provider.id !== saved.id), saved])
+      if (!isCurrent()) {
+        if (activeRef.current) await reload()
+        return
+      }
+      // Retain the committed row BEFORE fetching its directory: a failed
+      // directory request must retry against this ID, not create another row.
+      const savedState = { ...state, providerId: saved.id, editing: saved, form: { ...state.form, apiKey: '' } }
+      setWizard(savedState)
       const models = await testProvider(workspaceId, saved.id)
-      // From here the connection row exists: editing the form and re-testing
-      // must upsert this row, never mint a duplicate provider.
-      setWizard({ ...state, step: 'models', providerId: saved.id, editing: state.editing ?? saved, models, selected: defaultSelection(models, entry?.popularModels ?? []) })
+      if (!isCurrent()) return
+      setWizard({ ...savedState, step: 'models', models, selected: defaultSelection(models, entry?.popularModels ?? []) })
       await reload()
     } catch (cause) {
-      setError(errorMessage(cause, t('modelHub.testFailed', '测试连接失败，请检查地址与密钥。')))
+      if (isCurrent()) setError(errorMessage(cause, t('modelHub.testFailed', '测试连接失败，请检查地址与密钥。')))
     } finally {
-      setBusy(undefined)
+      pendingWizard.current = false
+      if (activeRef.current) setBusy(undefined)
     }
   }
 
   const openWizard = (editing?: HubProvider): void => {
+    if (!activeRef.current || pendingWizard.current || busy !== undefined) return
+    wizardGeneration.current += 1
+    setError(undefined)
     setModelQuery('')
     const ref = editing === undefined
       ? CUSTOM_REF
@@ -205,7 +274,17 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
     setWizard({ step: 'form', ...(editing === undefined ? {} : { editing }), form: formForRef(ref, editing), models: [], selected: new Set<string>() })
   }
 
+  const closeWizard = (): void => {
+    wizardGeneration.current += 1
+    setWizard(undefined)
+    setError(undefined)
+    void reload().catch((cause) => {
+      if (activeRef.current) setError(errorMessage(cause, t('modelHub.loadFailed', '模型中心数据加载失败。')))
+    })
+  }
+
   const confirmImport = async (state: WizardState): Promise<void> => {
+    if (!activeRef.current || pendingWizard.current || busy !== undefined) return
     const chosen = selectionModels(state.models, state.selected).slice(0, IMPORT_CAP)
     if (chosen.length === 0) {
       setWizard(undefined)
@@ -215,15 +294,47 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
       setError(t('modelHub.importFailed', '模型导入失败。'))
       return
     }
+    pendingWizard.current = true
+    const generation = wizardGeneration.current
+    const isCurrent = () => activeRef.current && generation === wizardGeneration.current
     setBusy('import')
+    setError(undefined)
     try {
       await importModels(workspaceId, state.providerId, chosen)
+      if (!isCurrent()) {
+        if (activeRef.current) await reload()
+        return
+      }
+      if (origin !== undefined) {
+        setImportedModels({ providerId: state.providerId, modelIds: chosen.map((model) => model.id) })
+        setTab('chat')
+      }
       setWizard(undefined)
       await reload()
     } catch (cause) {
-      setError(errorMessage(cause, t('modelHub.importFailed', '模型导入失败。')))
+      if (isCurrent()) setError(errorMessage(cause, t('modelHub.importFailed', '模型导入失败。')))
     } finally {
-      setBusy(undefined)
+      pendingWizard.current = false
+      if (activeRef.current) setBusy(undefined)
+    }
+  }
+
+  const applyToChat = async (profileId: string): Promise<void> => {
+    if (origin === undefined || !activeRef.current || pendingApply.current || pendingWizard.current || busy !== undefined || !profiles.some((profile) => profile.id === profileId)) return
+    pendingApply.current = true
+    setBusy('chat-apply')
+    setError(undefined)
+    try {
+      await setAssignment(origin.workspaceId, origin.employeeId === undefined ? 'world' : 'employee', origin.employeeId ?? origin.worldId, profileId)
+      if (!activeRef.current) return
+      onApplied?.()
+      pendingApply.current = false
+      closeDialog()
+    } catch (cause) {
+      if (activeRef.current) setError(errorMessage(cause, t('modelHub.assignFailed', '分配模型失败。')))
+    } finally {
+      pendingApply.current = false
+      if (activeRef.current) setBusy(undefined)
     }
   }
 
@@ -434,7 +545,7 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   // rules like `.topbar nav { height: 100% }` would claim the hub's own tab
   // strip, and a modal belongs outside the banner landmark anyway.
 
-  return createPortal(<div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && wizard === undefined) onClose() }}>
+  return createPortal(<div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && wizard === undefined) closeDialog() }}>
     <section ref={panelRef} className="model-hub" role="dialog" aria-modal="true" aria-labelledby="model-hub-title">
       <header className="model-hub__header">
         <div>
@@ -442,22 +553,41 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
           <p>{sourceBadge}{catalog === undefined ? '' : ` · ${t('modelHub.catalogVersion', '目录版本 {version}', { version: catalog.catalog.version })}`}{catalog?.notice === undefined ? '' : ` · ${catalog.notice}`}</p>
         </div>
         <div className="model-hub__header-actions">
-          <button type="button" className="icon-button" aria-label={t('modelHub.refresh', '刷新服务商目录')} disabled={busy === 'catalog-refresh'} onClick={async () => {
+          <button type="button" className="icon-button" aria-label={t('modelHub.refresh', '刷新服务商目录')} disabled={busy !== undefined} onClick={async () => {
             setBusy('catalog-refresh')
             try { setCatalog(await refreshCatalog()) } catch (cause) { setError(errorMessage(cause, t('modelHub.refreshFailed', '目录刷新失败。'))) } finally { setBusy(undefined) }
           }}><ArrowsClockwise size={16} className={busy === 'catalog-refresh' ? 'spin' : undefined} /></button>
-          <button type="button" className="icon-button" aria-label={t('modelHub.close', '关闭模型中心')} data-dialog-initial-focus onClick={onClose}><X size={18} /></button>
+          <button type="button" className="icon-button" aria-label={t('modelHub.close', '关闭模型中心')} data-dialog-initial-focus disabled={busy === 'chat-apply'} onClick={closeDialog}><X size={18} /></button>
         </div>
       </header>
 
+      {origin === undefined ? null : <div className="model-hub__chat-context">
+        <div><strong>{origin.employeeId === undefined
+          ? t('modelHub.chat.worldContext', '为世界「{name}」选择模型', { name: origin.worldName })
+          : t('modelHub.chat.employeeContext', '为角色「{name}」选择模型', { name: origin.employeeName ?? origin.employeeId })}</strong>
+          <span>{origin.employeeId === undefined
+            ? t('modelHub.chat.worldScope', '用于该世界中继承世界设置的角色；已有单独设置的角色不变。')
+            : t('modelHub.chat.employeeScope', '仅用于「{world}」中的此角色。', { world: origin.worldName })}</span></div>
+        <button type="button" disabled={busy === 'chat-apply'} onClick={closeDialog}><ArrowLeft size={14} />{t('modelHub.chat.return', '返回对话')}</button>
+      </div>}
+
       <nav className="model-hub__tabs" aria-label={t('modelHub.tabsAria', '模型中心分区')}>
-        <button type="button" aria-current={tab === 'providers'} className={tab === 'providers' ? 'is-active' : ''} onClick={() => setTab('providers')}>{t('modelHub.tabProviders', '模型服务商')}</button>
-        <button type="button" aria-current={tab === 'pool'} className={tab === 'pool' ? 'is-active' : ''} onClick={() => setTab('pool')}>{t('modelHub.tabPool', '模型池')}</button>
-        <button type="button" aria-current={tab === 'assign'} className={tab === 'assign' ? 'is-active' : ''} onClick={() => setTab('assign')}>{t('modelHub.tabAssign', '模型设置')}</button>
-        <button type="button" aria-current={tab === 'stats'} className={tab === 'stats' ? 'is-active' : ''} onClick={() => setTab('stats')}>{t('modelHub.tabStats', '模型统计')}</button>
+        {origin === undefined ? null : <button type="button" aria-current={tab === 'chat'} className={tab === 'chat' ? 'is-active' : ''} disabled={busy !== undefined} onClick={() => { setWizard(undefined); setTab('chat') }}>{t('modelHub.chat.tab', '用于此对话')}</button>}
+        <button type="button" aria-current={tab === 'providers'} className={tab === 'providers' ? 'is-active' : ''} disabled={busy !== undefined} onClick={() => setTab('providers')}>{t('modelHub.tabProviders', '模型服务商')}</button>
+        <button type="button" aria-current={tab === 'pool'} className={tab === 'pool' ? 'is-active' : ''} disabled={busy !== undefined} onClick={() => setTab('pool')}>{t('modelHub.tabPool', '模型池')}</button>
+        <button type="button" aria-current={tab === 'assign'} className={tab === 'assign' ? 'is-active' : ''} disabled={busy !== undefined} onClick={() => setTab('assign')}>{t('modelHub.tabAssign', '模型设置')}</button>
+        <button type="button" aria-current={tab === 'stats'} className={tab === 'stats' ? 'is-active' : ''} disabled={busy !== undefined} onClick={() => setTab('stats')}>{t('modelHub.tabStats', '模型统计')}</button>
       </nav>
 
       {error !== undefined ? <div className="model-hub__error" role="alert"><WarningCircle size={15} /><span>{error}</span><button type="button" className="icon-button" aria-label={t('modelHub.dismissError', '收起提示')} onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
+
+      {wizard === undefined && tab === 'chat' && origin !== undefined ? <ChatModelSetupPanel
+        context={origin} profiles={profiles} providers={providers} loaded={loaded} loadFailed={loadFailed} busy={busy !== undefined}
+        applying={busy === 'chat-apply'} importedModels={importedModels}
+        onRetry={() => { setError(undefined); void reload().catch((cause) => { if (activeRef.current) setError(errorMessage(cause, t('modelHub.loadFailed', '模型中心数据加载失败。'))) }) }}
+        onShowAll={() => setImportedModels(undefined)} onAddProvider={() => openWizard()}
+        onManageProviders={() => setTab('providers')} onApply={(profileId) => void applyToChat(profileId)}
+      /> : null}
 
       {wizard === undefined && tab === 'providers' ? <div className="model-hub__body">
         <div className="model-hub__toolbar">
@@ -656,15 +786,15 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
 
       {wizard !== undefined ? <div className="model-hub__wizard" role="region" aria-label={t('modelHub.wizardAria', '添加或编辑服务商')}>
         <header>
-          {wizard.step === 'models' ? <button type="button" className="icon-button" aria-label={t('modelHub.wizardBack', '上一步')} onClick={() => setWizard({ ...wizard, step: 'form' })}><ArrowLeft size={15} /></button> : null}
+          {wizard.step === 'models' ? <button type="button" className="icon-button" aria-label={t('modelHub.wizardBack', '上一步')} disabled={busy !== undefined} onClick={() => setWizard({ ...wizard, step: 'form' })}><ArrowLeft size={15} /></button> : null}
           <strong>{wizard.step === 'form' ? (wizard.editing === undefined ? t('modelHub.formTitle', '填写连接信息') : t('modelHub.editTitle', '编辑服务商')) : t('modelHub.modelsTitle', '选择要导入的模型')}</strong>
-          <button type="button" className="icon-button" aria-label={wizard.step === 'models' ? t('modelHub.wizardDone', '完成（服务商已保存，可稍后同步模型）') : t('modelHub.wizardCancel', '取消并返回')} onClick={() => { setWizard(undefined); void reload() }}>{wizard.step === 'models' ? <CheckCircle size={16} /> : <X size={16} />}</button>
+          <button type="button" className="icon-button" aria-label={wizard.step === 'models' ? t('modelHub.wizardDone', '完成（服务商已保存，可稍后同步模型）') : t('modelHub.wizardCancel', '取消并返回')} onClick={closeWizard}>{wizard.step === 'models' ? <CheckCircle size={16} /> : <X size={16} />}</button>
         </header>
         {wizard.step === 'form' ? (() => {
           const selectedEntry = entryForRef(wizard.form.providerRef)
-          const setForm = (patch: Partial<FormState>) => setWizard({ ...wizard, form: { ...wizard.form, ...patch } })
-          const switchRef = (ref: string) => setWizard({ ...wizard, form: { ...formForRef(ref), apiKey: wizard.form.apiKey, credentialEnvName: wizard.form.credentialEnvName } })
-          return <div className="model-hub__form">
+          const setForm = (patch: Partial<FormState>) => { if (!pendingWizard.current) setWizard({ ...wizard, form: { ...wizard.form, ...patch } }) }
+          const switchRef = (ref: string) => { if (!pendingWizard.current) setWizard({ ...wizard, form: { ...formForRef(ref), apiKey: wizard.form.apiKey, credentialEnvName: wizard.form.credentialEnvName } }) }
+          return <fieldset className="model-hub__form" disabled={busy !== undefined}>
             <label><span>{t('modelHub.fieldProvider', '选择服务商')}</span><select value={wizard.form.providerRef} onChange={(event) => switchRef(event.target.value)}>
               <option value={CUSTOM_REF}>{t('modelHub.sourceCustom', '自定义 HTTPS 服务')}</option>
               <option value={LOCAL_REF}>{t('modelHub.sourceLocal', '本机 / 局域网推理服务')}</option>
@@ -677,9 +807,9 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
             <label><span>{t('modelHub.fieldEnvName', '凭据环境变量名（可选，与 API 密钥二选一）')}</span><input value={wizard.form.credentialEnvName} onChange={(event) => setForm({ credentialEnvName: event.target.value.toUpperCase() })} placeholder="MY_MODEL_API_KEY" /></label>
             {selectedEntry !== undefined ? <p className="model-hub__signup">{selectedEntry.signup.text} <a href={selectedEntry.signup.url} target="_blank" rel="noopener noreferrer">{t('modelHub.openSignup', '打开注册页 ↗')}</a></p> : <p className="model-hub__signup">{wizard.form.providerRef === LOCAL_REF ? t('modelHub.sourceLocalHint', 'vLLM、Ollama、LM Studio、Sub2API 等 HTTP 端点。') : t('modelHub.sourceCustomHint', '连接其他可信的 OpenAI 兼容网关。')}</p>}
             <footer>
-              <button type="button" className="primary-button" disabled={busy === 'test' || !wizard.form.name.trim() || !wizard.form.baseUrl.trim()} onClick={() => void runWizardTest(wizard)}>{busy === 'test' ? t('modelHub.testing', '正在测试并获取模型…') : t('modelHub.testFetch', '测试服务商并获取模型列表')}</button>
+              <button type="button" className="primary-button" disabled={busy !== undefined || !wizard.form.name.trim() || !wizard.form.baseUrl.trim()} onClick={() => void runWizardTest(wizard)}>{busy === 'test' ? t('modelHub.chat.fetching', '正在保存并获取模型…') : t('modelHub.chat.saveFetch', '保存服务商并获取模型列表')}</button>
             </footer>
-          </div>
+          </fieldset>
         })() : null}
         {wizard.step === 'models' ? (() => {
           const visible = searchModels(wizard.models, modelQuery)
@@ -687,14 +817,15 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
           const everyVisible = allSelected(visible, wizard.selected)
           return <div className="model-hub__models-step">
             <p>{t('modelHub.modelsFound', '获取到 {count} 个模型，勾选后导入模型池。', { count: wizard.models.length })}</p>
+            <p className="model-hub__hint">{t('modelHub.chat.unverified', '模型目录只说明服务商列出了这些模型，尚未验证对话或工具调用能力。')}</p>
             <div className="model-hub__models-tools">
               <label className="model-hub__search"><MagnifyingGlass size={15} /><input value={modelQuery} onChange={(event) => setModelQuery(event.target.value)} placeholder={t('modelHub.searchModels', '搜索模型（不影响已勾选）')} aria-label={t('modelHub.searchModelsAria', '搜索模型列表')} /></label>
-              <button type="button" disabled={visible.length === 0} onClick={() => setWizard({ ...wizard, selected: everyVisible ? unmergeSelection(wizard.selected, visibleIds) : mergeSelection(wizard.selected, visibleIds) })}>
+              <button type="button" disabled={busy !== undefined || visible.length === 0} onClick={() => setWizard({ ...wizard, selected: everyVisible ? unmergeSelection(wizard.selected, visibleIds) : mergeSelection(wizard.selected, visibleIds) })}>
                 {everyVisible ? t('modelHub.clearVisible', '取消本页全选') : t('modelHub.selectAllVisible', '全选搜索结果')}
               </button>
             </div>
             <ul>{visible.map((model) => <li key={model.id}>
-              <label><input type="checkbox" checked={wizard.selected.has(model.id)} onChange={() => setWizard({ ...wizard, selected: toggleSelection(wizard.selected, model.id) })} />
+              <label><input type="checkbox" disabled={busy !== undefined} checked={wizard.selected.has(model.id)} onChange={() => setWizard({ ...wizard, selected: toggleSelection(wizard.selected, model.id) })} />
                 <span><strong>{model.displayName ?? model.id}</strong><code>{model.id}</code>
                   {model.contextLength === undefined ? null : <small>{t('modelHub.contextBadge', '上下文 {tokens}', { tokens: model.contextLength.toLocaleString() })}</small>}
                   {model.inputTypes === undefined || model.inputTypes.length === 0 ? null : <small>{model.inputTypes.map(modalityLabel).join('/')}</small>}
@@ -704,7 +835,7 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
             </li>)}{visible.length === 0 ? <li><span className="model-hub__empty-inline">{t('modelHub.noModelMatches', '没有匹配的模型')}</span></li> : null}</ul>
             <footer>
               <span>{t('modelHub.selectedCount', '已选 {count} 个', { count: wizard.selected.size })}{wizard.selected.size > IMPORT_CAP ? t('modelHub.overImportCap', '（单次最多导入 {max} 个，将取前 {max} 个）', { max: IMPORT_CAP }) : ''}</span>
-              <button type="button" className="primary-button" disabled={busy === 'import' || wizard.selected.size === 0} onClick={() => void confirmImport(wizard)}>{busy === 'import' ? t('modelHub.importing', '正在导入…') : t('modelHub.import', '保存并导入模型池')}</button>
+              <button type="button" className="primary-button" disabled={busy !== undefined || wizard.selected.size === 0} onClick={() => void confirmImport(wizard)}>{busy === 'import' ? t('modelHub.importing', '正在导入…') : t('modelHub.import', '保存并导入模型池')}</button>
             </footer>
           </div>
         })() : null}
