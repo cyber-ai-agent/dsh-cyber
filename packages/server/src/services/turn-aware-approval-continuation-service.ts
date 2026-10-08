@@ -1,4 +1,4 @@
-import type { AgentPermissionMode, ApprovalScope, JsonObject, ReasoningEffort, WorkMessage } from '@dsh-cyber/contracts'
+import { redactToolTraceText, type AgentPermissionMode, type ApprovalScope, type JsonObject, type ReasoningEffort, type WorkMessage } from '@dsh-cyber/contracts'
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 import type { WorldAuthorityActor, WorldPermissionRequest } from '@dsh-cyber/contracts/world-authority'
 import type { ConversationOrchestrator, ConversationResult, ContinueDirectConversationInput, DirectConversationInput } from '@dsh-cyber/orchestration'
@@ -404,7 +404,7 @@ const EXTERNAL_BLOCK_CLOSE = '[外部来源内容结束]'
 /** Delimiters a payload must never be able to forge. */
 const FORGEABLE_MARKERS = [FACT_BLOCK_OPEN, EXTERNAL_BLOCK_OPEN, EXTERNAL_BLOCK_CLOSE]
 
-const MAX_EXTERNAL_LINES = 40
+const MAX_EXTERNAL_CONTENT_LENGTH = 12_000
 const MAX_EXTERNAL_LINE_LENGTH = 300
 
 const sanitizer = new TraceSanitizer()
@@ -481,16 +481,17 @@ function unhandledClauseNotice(action: CharacterSkillAction): string | undefined
 
 function quoteExternalContent(detail: string | undefined): string | undefined {
   if (detail === undefined) return undefined
-  let payload = detail
+  // Bound the complete excerpt rather than each line: MCP text and JSON often
+  // contain long single lines whose actual answer used to disappear at 300
+  // characters. Redact before splitting so multiline credentials stay hidden.
+  let payload = redactToolTraceText(sanitizer.redact(detail), MAX_EXTERNAL_CONTENT_LENGTH)
   for (const marker of FORGEABLE_MARKERS) payload = payload.replaceAll(marker, '［已移除的标记］')
   const lines = payload
     .split(/\r?\n/)
-    .map((line) => sanitizer.text(line, MAX_EXTERNAL_LINE_LENGTH))
+    .map((line) => sanitizer.text(line, MAX_EXTERNAL_CONTENT_LENGTH))
     .filter((line) => line.length > 0)
   if (lines.length === 0) return undefined
-  const kept = lines.slice(0, MAX_EXTERNAL_LINES)
-  if (lines.length > MAX_EXTERNAL_LINES) kept.push('［内容因上下文预算已截断］')
-  return kept.map((line) => `> ${line}`).join('\n')
+  return lines.map((line) => `> ${line}`).join('\n')
 }
 
 function currentTurnUserMessage(messages: WorkMessage[], workTurnId: string): WorkMessage | undefined {
