@@ -1,9 +1,7 @@
-import type { AgentPermissionMode, JsonObject, ReasoningEffort } from '@dsh-cyber/contracts'
+import { conversationTurnFailure, type AgentPermissionMode, type JsonObject, type ReasoningEffort } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
-import { agentTurnFailureMessage } from '../http/errors.js'
-import type { AgentTurnFailureKind } from '@dsh-cyber/orchestration'
 import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 import { optionalString, readJson, requiredString } from '../http/request.js'
 import type { Router } from '../http/router.js'
@@ -170,7 +168,9 @@ export function registerConversationQueueRoutes(router: Router, dependencies: Co
         ...(Array.isArray(userMessage?.metadata.attachments) ? { attachments: userMessage.metadata.attachments } : {}),
         ...(typeof userMessage?.metadata.modelProfileId === 'string' ? { modelProfileId: userMessage.metadata.modelProfileId } : {}),
         createdAt: item.enqueuedAt,
-        ...(item.errorCode === undefined ? {} : { error: queueErrorMessage(item.errorCode) }),
+        ...(item.errorCode === undefined ? {} : item.status === 'failed'
+          ? { errorCode: conversationTurnFailure(item.errorCode).code, error: conversationTurnFailure(item.errorCode).message }
+          : { error: item.errorCode }),
       }
     })
     writeJson(response, 200, { items })
@@ -242,23 +242,6 @@ function queuedReceipt(receipt: import('@dsh-cyber/contracts').ConversationSubmi
     queueItem: receipt.queueEntry,
     status: 'queued' as const,
   }
-}
-
-function queueErrorMessage(errorCode: string): string {
-  if (!errorCode.startsWith('runtime-')) return errorCode
-  const kind = errorCode.slice('runtime-'.length)
-  if (!isAgentTurnFailureKind(kind)) return errorCode
-  return agentTurnFailureMessage(kind)
-}
-
-function isAgentTurnFailureKind(value: string): value is AgentTurnFailureKind {
-  return value === 'context-limit'
-    || value === 'authentication'
-    || value === 'model-not-found'
-    || value === 'rate-limited'
-    || value === 'timeout'
-    || value === 'unreachable'
-    || value === 'unknown'
 }
 
 function parsePermissionMode(value: unknown): AgentPermissionMode | undefined {

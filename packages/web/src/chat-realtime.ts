@@ -22,6 +22,8 @@ export interface PendingChatTurn {
   workTurnId?: string
   serverQueueId?: string
   error?: string
+  /** Queue is terminal; retain only HTTP reconciliation, never a running indicator. */
+  awaitingTranscriptAfter?: number
 }
 
 export interface StreamingChatReply {
@@ -107,6 +109,21 @@ export function messageClientTurnId(message: WorkMessage): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
+/** Only a durable notice for this exact accepted turn can settle its client state. */
+export function hasDurableTurnFailure(
+  messages: WorkMessage[],
+  turn: Pick<PendingChatTurn, 'id' | 'sessionId' | 'workTurnId'>,
+): boolean {
+  return messages.some((message) =>
+    message.kind === 'system' && message.metadata.productNotice === true &&
+    message.metadata.control === 'failure' && message.metadata.status === 'failed' &&
+    (turn.sessionId === undefined || message.sessionId === turn.sessionId) &&
+    (turn.workTurnId !== undefined
+      ? message.metadata.workTurnId === turn.workTurnId
+      : messageClientTurnId(message) === turn.id),
+  )
+}
+
 /**
  * Builds the visible conversation without exposing reasoning/tool events.
  * A running assistant bubble is inserted directly after the user turn it
@@ -118,7 +135,7 @@ export function mergeChatTimeline(
   pendingTurns: PendingChatTurn[],
   streamingReplies: StreamingChatReply[],
 ): WorkMessage[] {
-  const queuedTurnIds = new Set(pendingTurns.filter((turn) => turn.status === 'queued').map((turn) => turn.id))
+  const queuedTurnIds = new Set(pendingTurns.filter((turn) => turn.status === 'queued' && turn.awaitingTranscriptAfter === undefined).map((turn) => turn.id))
   const timeline = durableMessages.filter((message) => {
     const clientTurnId = messageClientTurnId(message)
     return message.senderKind !== 'owner' || clientTurnId === undefined || !queuedTurnIds.has(clientTurnId)
@@ -142,7 +159,8 @@ export function mergeChatTimeline(
       message.metadata.streaming !== true &&
       messageClientTurnId(message) === turn.id,
     )
-    if (!hasDurableAssistant) {
+    const hasDurableFailure = hasDurableTurnFailure(timeline, turn)
+    if (!hasDurableAssistant && !hasDurableFailure && turn.awaitingTranscriptAfter === undefined) {
       const replies = streamingReplies
         .filter((reply) => reply.clientTurnId === turn.id)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
@@ -153,7 +171,7 @@ export function mergeChatTimeline(
       }
     }
 
-    if (turn.status === 'failed' && turn.error !== undefined) {
+    if (turn.status === 'failed' && turn.error !== undefined && !hasDurableFailure) {
       const failureId = `local-turn-failure-${turn.id}`
       if (!timeline.some((message) => message.id === failureId)) {
         const insertAt = Math.max(ownerIndex, lastTurnMessageIndex(timeline, turn.id)) + 1

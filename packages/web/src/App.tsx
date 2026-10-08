@@ -66,6 +66,7 @@ import { useQueuedTurnEdit } from './use-queued-turn-edit.js'
 import { resolveUiLocale, setUiLocale, useI18n } from './i18n/runtime.js'
 import { formatTime } from './i18n/format.js'
 import {
+  hasDurableTurnFailure,
   ChatTurnQueue,
   mergeChatTimeline,
   messageClientTurnId,
@@ -328,9 +329,10 @@ export default function App() {
     () => mergeChatTimeline(messages, activeOutboxMessages, activePendingTurns, activeStreamingReplies),
     [activeOutboxMessages, activePendingTurns, activeStreamingReplies, messages],
   )
-  const activePendingCount = activePendingTurns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
-  const activeRunningCount = activePendingTurns.filter((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
-  const queuedInConversation = activePendingTurns.filter((turn) => turn.status === 'queued').length
+  const activeQueueTurns = activePendingTurns.filter((turn) => turn.awaitingTranscriptAfter === undefined)
+  const activePendingCount = activeQueueTurns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
+  const activeRunningCount = activeQueueTurns.filter((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
+  const queuedInConversation = activeQueueTurns.filter((turn) => turn.status === 'queued').length
   const activeQueuedCount = Math.max(0, queuedInConversation - (activeRunningCount === 0 && queuedInConversation > 0 ? 1 : 0))
   activeWorldRef.current = activeWorld
   activeSessionIdRef.current = activeSessionId
@@ -688,9 +690,29 @@ export default function App() {
     }
   }, [])
 
+  const transcriptRefreshGenerationRef = useRef(0)
+  const reconcileDurableTurns = useCallback((items: WorkMessage[], sessionId: string, worldId: string, readGeneration?: number) => {
+    const settled = new Set(pendingTurnsRef.current.filter((turn) =>
+      turn.worldId === worldId && (turn.sessionId ?? sessionByQueueKeyRef.current.get(turn.queueKey)) === sessionId &&
+      (hasDurableTurnFailure(items, { ...turn, sessionId }) ||
+        turn.awaitingTranscriptAfter !== undefined && readGeneration !== undefined && readGeneration > turn.awaitingTranscriptAfter),
+    ).map((turn) => turn.id))
+    if (settled.size === 0) return
+    setPendingTurns((current) => {
+      const next = current.filter((turn) => !settled.has(turn.id) || turn.worldId !== worldId)
+      pendingTurnsRef.current = next
+      return next
+    })
+    setStreamingReplies((current) => Object.fromEntries(Object.entries(current).filter(([, reply]) =>
+      reply.worldId !== worldId || reply.sessionId !== sessionId || !settled.has(reply.clientTurnId),
+    )))
+  }, [])
+
   const refreshConversationTranscript = useCallback(async (sessionId: string, queueKey: string, worldId: string, reportError = false) => {
+    const readGeneration = ++transcriptRefreshGenerationRef.current
     try {
       const result = await api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${sessionId}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}`)
+      reconcileDurableTurns(result.items, sessionId, worldId, readGeneration)
       setOutboxMessages((current) => reconcileOutboxMessages(current, queueKey, result.items))
       if (activeWorldRef.current?.id === worldId && activeConversationKeyRef.current === queueKey) {
         // Merge rather than replace: this refresh returns only the newest page,
@@ -710,7 +732,7 @@ export default function App() {
       }
       return undefined
     }
-  }, [])
+  }, [reconcileDurableTurns])
 
   const loadedTranscriptOwnerRef = useRef<string | undefined>(undefined)
   useEffect(() => {
@@ -744,6 +766,7 @@ export default function App() {
           activeSessionIdRef.current !== sessionId ||
           activeWorldRef.current?.id !== worldId
         ) return
+        if (worldId !== undefined) reconcileDurableTurns(result.items, sessionId, worldId)
         setMessages((current) => changedOwner ? result.items : mergeMessages(current, result.items))
         setMessagePage((current) => ({ hasMore: (!changedOwner && current.hasMore) || result.hasMore === true, loading: false }))
         if (queueKey !== undefined) {
@@ -770,7 +793,7 @@ export default function App() {
       window.clearTimeout(timeout)
       controller.abort()
     }
-  }, [activeSessionId, transcriptReload])
+  }, [activeSessionId, transcriptReload, reconcileDurableTurns])
 
   useEffect(() => {
     if (demoMode || activeWorld === undefined) return
@@ -950,7 +973,7 @@ export default function App() {
     const world = activeWorld
     const reconcile = () => {
       for (const turn of pendingTurnsRef.current) {
-        if (turn.worldId !== world.id || (turn.status !== 'queued' && turn.status !== 'running')) continue
+        if (turn.worldId !== world.id || turn.awaitingTranscriptAfter === undefined && !['queued', 'running', 'waiting-approval', 'failed'].includes(turn.status)) continue
         const sessionId = turn.sessionId ?? sessionByQueueKeyRef.current.get(turn.queueKey)
         if (sessionId !== undefined) void refreshConversationTranscript(sessionId, turn.queueKey, world.id)
       }
@@ -970,18 +993,32 @@ export default function App() {
           : queueKeyBySessionRef.current.get(item.sessionId)
             ?? composerDraftStore.getSessionOwnerAlias(worldId, item.sessionId) ?? item.queueKey,
       }))
+      const receivedIds = new Set(items.map((item) => item.id))
+      const unconfirmed = new Set(chatSubmissionStore.getSnapshot().filter((item) => item.status === 'sending').map((item) => item.id))
+      const readBoundary = transcriptRefreshGenerationRef.current
+      const departed = pendingTurnsRef.current.filter((turn) => turn.worldId === worldId &&
+        !receivedIds.has(turn.id) && !unconfirmed.has(turn.id) && !wasCancelled(turn.id) &&
+        (turn.sessionId ?? sessionByQueueKeyRef.current.get(turn.queueKey)) !== undefined,
+      ).map((turn) => ({ ...turn, awaitingTranscriptAfter: readBoundary }))
       setPendingTurns((current) => {
-        const unconfirmed = new Set(chatSubmissionStore.getSnapshot().filter((item) => item.status === 'sending').map((item) => item.id))
-        const received = new Set(items.map((item) => item.id))
-        const next = [...current.filter((item) => item.worldId !== worldId || unconfirmed.has(item.id) && !received.has(item.id)), ...items]
+        // A new submission can enter the store before React applies this updater.
+        const currentUnconfirmed = new Set(chatSubmissionStore.getSnapshot().filter((item) => item.status === 'sending').map((item) => item.id))
+        const next = [...current.filter((item) => item.worldId !== worldId || currentUnconfirmed.has(item.id) && !receivedIds.has(item.id)), ...items, ...departed]
         pendingTurnsRef.current = next
         return next
       })
+      // Keep a read-only reconciliation owner until a post-terminal read succeeds.
+      // A transient HTTP failure must not strand the saved result, and an older
+      // overlapping response must not clear that ownership. No runtime is replayed.
+      await Promise.all(departed.map((turn) => {
+        const sessionId = turn.sessionId ?? sessionByQueueKeyRef.current.get(turn.queueKey)
+        return sessionId === undefined ? undefined : refreshConversationTranscript(sessionId, turn.queueKey, worldId)
+      }))
     } catch {
       // The live runtime stream and the next explicit action will reconcile
       // the durable queue; a transient read must not interrupt the chat.
     }
-  }, [demoMode, wasCancelled])
+  }, [demoMode, wasCancelled, refreshConversationTranscript])
 
   useEffect(() => {
     if (activeWorld === undefined) return
@@ -2473,7 +2510,7 @@ export default function App() {
             onClearDraft={clearActiveComposerDraft}
             pendingCount={activePendingCount}
             queuedCount={activeQueuedCount}
-            queueItems={activePendingTurns}
+            queueItems={activeQueueTurns}
             draft={draft}
             focusRequest={composerFocusRequest}
             onDraftChange={setDraft}

@@ -4,6 +4,7 @@ import type { UiLocale } from './locales.js'
 export const CYBER_SCHEMA_VERSION = 54 as const
 
 export * from './runtime-access.js'
+export * from './conversation-failure.js'
 export * from './skill-documents.js'
 export * from './locales.js'
 export * from './voice.js'

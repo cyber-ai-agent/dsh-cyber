@@ -4,6 +4,7 @@ import type { WorkMessage } from '@dsh-cyber/contracts'
 
 import {
   ChatTurnQueue,
+  hasDurableTurnFailure,
   mergeChatTimeline,
   type PendingChatTurn,
   type StreamingChatReply,
@@ -119,5 +120,26 @@ describe('mergeChatTimeline', () => {
     const timeline = mergeChatTimeline([first, durableReply], [], pending, streaming)
 
     expect(timeline.map((message) => message.content)).toEqual(['先分析问题', '最终答案'])
+  })
+})
+
+
+describe('durable failure reconciliation', () => {
+  const turn: PendingChatTurn = { id: 'turn-1', worldId: 'world-1', queueKey: 'direct:a', employeeIds: ['a'], title: 'A', status: 'failed', error: '临时失败', createdAt: '2026-10-08T00:00:00.000Z', sessionId: 'session-1', workTurnId: 'work-1' }
+  const notice: WorkMessage = { id: 'failure-1', sessionId: 'session-1', sequence: 2, senderId: 'system', senderKind: 'system', kind: 'system', content: '本次处理未完成：安全提示', createdAt: turn.createdAt, metadata: { productNotice: true, control: 'failure', status: 'failed', clientTurnId: turn.id, workTurnId: turn.workTurnId! } }
+
+  it('keeps one durable notice instead of a local duplicate or an obsolete stream', () => {
+    const owner = ownerMessage(turn.id, '原消息', 1)
+    const stream: StreamingChatReply = { id: 'stream-1', queueKey: turn.queueKey, worldId: turn.worldId, sessionId: 'session-1', employeeId: 'a', clientTurnId: turn.id, traceTurnId: 'trace-1', workTurnId: 'work-1', agentRunId: 'run-1', content: '尚未完成的流式内容', createdAt: turn.createdAt }
+    expect(mergeChatTimeline([owner, notice], [], [turn], [stream])).toEqual([owner, notice])
+    expect(mergeChatTimeline([owner, notice], [], [], [])).toEqual([owner, notice])
+  })
+
+  it('requires matching session and turn, and never treats a Stop notice as failure', () => {
+    expect(hasDurableTurnFailure([notice], turn)).toBe(true)
+    expect(hasDurableTurnFailure([notice], { id: turn.id, sessionId: turn.sessionId })).toBe(true)
+    expect(hasDurableTurnFailure([notice], { ...turn, workTurnId: 'other-turn' })).toBe(false)
+    expect(hasDurableTurnFailure([notice], { ...turn, sessionId: 'other-session' })).toBe(false)
+    expect(hasDurableTurnFailure([{ ...notice, metadata: { ...notice.metadata, control: 'stop' } }], turn)).toBe(false)
   })
 })
