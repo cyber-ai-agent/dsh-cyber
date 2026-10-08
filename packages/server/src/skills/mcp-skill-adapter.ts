@@ -1,5 +1,5 @@
 import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/contracts/skill-runtime'
-import { redactCredentialPatternText, type JsonObject } from '@dsh-cyber/contracts'
+import { CredentialRedactor, credentialVariable, redactCredentialPatternText, redactToolTraceText, type JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { MCP_INTEGRATION_ID, mcpConnectSpecFor, normalizeMcpServiceSlug } from '../integrations/mcp-provider.js'
@@ -7,6 +7,7 @@ import type { McpClientFactory, McpToolDefinition } from '../integrations/mcp-cl
 import type { IntegrationService } from '../integrations/integration-service.js'
 import type { CredentialManager } from '../services/credential-manager.js'
 import { ServiceError } from '../services/service-error.js'
+import { projectMcpToolResult } from './mcp-tool-result.js'
 import type { CharacterSkillActionProposal, CharacterSkillAdapter, CharacterSkillExecutionResult, CharacterSkillMatchContext } from './skill-adapter.js'
 
 export const MCP_ADAPTER_ID = 'builtin.mcp'
@@ -202,16 +203,26 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
     const args = this.#integrations.resolveMcpPayload(payloadRef)
     if (args === undefined) return { status: 'failed', detail: 'MCP 工具参数已过期或无法解密，未调用外部工具' }
     const resolvedArgs = this.#credentials?.resolveConnectionJson(world.workspaceId, connectionId, args) ?? args
+    // Embedders may omit CredentialManager; still remove this host's known
+    // integration values before preserving any returned evidence.
+    const fallbackRedactor = new CredentialRedactor(this.#integrations.credentialValues().map((entry) => ({
+      ref: `integration:${entry.connectionId}:${entry.field}`,
+      variable: entry.workspaceId === world.workspaceId
+        ? credentialVariable(`integration:${entry.connectionId}:${entry.field}`)
+        : '[已隐藏敏感信息]',
+      value: entry.value,
+    })))
+    const redact = (text: string): string => this.#credentials?.redactText(text, world.workspaceId) ?? fallbackRedactor.text(text)
     let client
     try {
       client = await this.#clients.connect(
         mcpConnectSpecFor(connection.config, this.#integrations.credentialForConnection(world.workspaceId, connectionId)),
       )
       const result = await client.callTool(toolName, resolvedArgs)
-      return { status: 'executed', detail: summarizeMcpResult(discovered.service, toolName, result) }
+      return projectMcpToolResult(discovered.service, toolName, result, redact)
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'MCP 工具执行失败'
-      return { status: 'outcome-unknown', detail: `MCP 工具执行异常：${this.#credentials?.redactText(detail, world.workspaceId) ?? redactCredentialPatternText(detail)}；不得自动重试` }
+      return { status: 'outcome-unknown', detail: `MCP 工具执行异常：${redactToolTraceText(redact(detail), 11_000)}；不得自动重试` }
     } finally {
       await client?.close().catch(() => undefined)
       await this.#integrations.deleteMcpPayload(payloadRef).catch(() => undefined)
@@ -284,15 +295,4 @@ function validateTool(tool: McpToolDefinition): void {
 function safeToolDescription(tool: McpToolDefinition, service: string): string {
   const description = tool.description?.replace(/[\r\n]+/g, ' ').trim().slice(0, 240)
   return description || `由 MCP 服务 ${service} 提供的工具 ${tool.name}。调用前需要明确授权。`
-}
-
-function summarizeMcpResult(service: string, toolName: string, value: unknown): string {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return `MCP 服务 ${service} 的工具 ${toolName} 已完成；原始结果未持久化`
-  const record = value as Record<string, unknown>
-  const content = Array.isArray(record.content) ? record.content : []
-  const types = content.flatMap((item) => item !== null && typeof item === 'object' && !Array.isArray(item) && typeof (item as Record<string, unknown>).type === 'string' ? [(item as Record<string, unknown>).type as string] : [])
-  const fields = record.structuredContent !== null && typeof record.structuredContent === 'object' && !Array.isArray(record.structuredContent)
-    ? Object.keys(record.structuredContent as Record<string, unknown>).slice(0, 20)
-    : []
-  return `MCP 服务 ${service} 的工具 ${toolName} 已完成，返回 ${content.length} 个内容块${types.length ? `（${[...new Set(types)].join('、')}）` : ''}${fields.length ? `，结构化字段：${fields.join('、')}` : ''}；原始结果未持久化`
 }
