@@ -1,4 +1,4 @@
-import type { AgentPermissionMode, ChatAttachment, ConversationSubmissionReceipt, JsonObject, ReasoningEffort, WorkSessionCollaborationMode, WorkTask } from '@dsh-cyber/contracts'
+import type { ConversationModelReadinessInput, AgentPermissionMode, ChatAttachment, ConversationSubmissionReceipt, JsonObject, ReasoningEffort, WorkSessionCollaborationMode, WorkTask } from '@dsh-cyber/contracts'
 import type {
   ConversationOrchestrator,
   DirectConversationInput,
@@ -95,6 +95,8 @@ export interface ConversationRoutesDependencies {
    * every conversation path behaves exactly as it did before.
    */
   taskIntent?: ConversationTaskIntentService
+  /** Only the real model runtime composes this configuration guard. */
+  modelReadinessPreflight?: (worldId: string, input: ConversationModelReadinessInput) => Promise<void>
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
@@ -124,6 +126,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     conversationQueue,
     acceptedGroupRunner,
     taskIntent,
+    modelReadinessPreflight,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
     store,
@@ -328,6 +331,21 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       }
     }
 
+    // Existing claims must replay even if credentials/configuration changed
+    // after acceptance. The ingress layer still validates their fingerprint.
+    // Raw approval continuations have already returned above. For new turns,
+    // reject an impossible model setup before touching attachments or planning.
+    const priorClaim = clientTurnId === undefined ? undefined
+      : store.getConversationSubmissionClaim(world.workspaceId, world.id, clientTurnId)
+    if (priorClaim === undefined && modelReadinessPreflight !== undefined) {
+      const modelProfileId = optionalString(body.modelProfileId)
+      const modelProfileIds = participantModelProfileIds(body.modelProfileIds, world.workspaceId, store, employeeIds)
+      await modelReadinessPreflight(world.id, {
+        employeeIds,
+        ...(modelProfileId === undefined ? {} : { modelProfileId }),
+        ...(modelProfileIds === undefined ? {} : { modelProfileIds }),
+      })
+    }
     const attachments = await validatedChatAttachments(body.attachments, store, world.workspaceId, world.id, worldFiles)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
     const claimedDirect = employeeIds.length === 1 && clientTurnId !== undefined

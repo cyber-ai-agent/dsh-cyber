@@ -37,6 +37,12 @@ describe('harnessModelRoute', () => {
     })
   })
 
+  it('marks only explicitly credential-free local routes as not requiring a key', () => {
+    expect(harnessModelRoute(profile({ providerKind: 'openai-compatible-local', baseUrl: 'http://127.0.0.1:9/v1', credentialEnvName: undefined }))).toMatchObject({ requiresApiKey: false })
+    expect(harnessModelRoute(profile({ providerKind: 'openai-compatible-local', credentialEnvName: 'MISSING_API_KEY' }))).not.toHaveProperty('requiresApiKey')
+    expect(harnessModelRoute(profile({ providerKind: 'openai-compatible-remote', credentialEnvName: undefined }))).not.toHaveProperty('requiresApiKey')
+  })
+
   it('keeps a requested effort the profile declares', () => {
     const route = harnessModelRoute(profile({
       settings: { reasoningEfforts: { off: 'none', low: 'low', medium: 'medium', high: 'high' } },

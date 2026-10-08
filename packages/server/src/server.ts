@@ -30,6 +30,8 @@ import { registerGroupTaskRoutes } from './routes/group-task-routes.js'
 import { registerEmployeeRoutes } from './routes/employee-routes.js'
 import { registerIntegrationRoutes } from './routes/integration-routes.js'
 import { registerModelInteractionRoutes } from './routes/model-interaction-routes.js'
+import { registerModelReadinessRoutes } from './routes/model-readiness-routes.js'
+import { ModelReadinessService, resolveModelCredential } from './services/model-readiness-service.js'
 import { registerModelRoutes } from './routes/model-routes.js'
 import { registerModelHubRoutes } from './routes/model-hub-routes.js'
 import { registerPackageRoutes } from './routes/package-routes.js'
@@ -305,14 +307,18 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     ...(options.knowledgeExtractionPort === undefined ? {} : { extractionPort: options.knowledgeExtractionPort }),
     publish: (worldId, payload) => publishKnowledgeChanged?.(worldId, payload),
   })
-  const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, request) }, resolveWebSearchPlan: webSearch.resolveWebSearchPlan, credentialRedactor: (workspaceId) => credentialManager.redactor(workspaceId) })
+  const modelReadiness = new ModelReadinessService({
+    store, credentials, runtimeStateRoot, externalRuntime: options.runtime !== undefined,
+    resolveWorkspacePath: async (worldId, employeeId) => (await worldRuntimePermissions.resolve({ worldId, employeeId })).workspacePath,
+  })
+  const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, credentials, request) }, resolveWebSearchPlan: webSearch.resolveWebSearchPlan, credentialRedactor: (workspaceId) => credentialManager.redactor(workspaceId) })
   // World settings and the host-probed machine profile are rendered by the runtime into the cacheable prefix.
   const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, new ContextInspectionService({ sanitizer: traceSanitizer }), worldSettings, runFileEvidence, environments, {
     redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId),
     redactRuntimeEvent: (event, workspaceId) => credentialManager.redactRuntimeEvent(event, workspaceId),
   })
-  const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
-  const loggingRuntime = new TurnInteractionLoggingRuntime({ inner: contextRuntime, service: interactions, resolveRoute(request) { return resolveHarnessRoute(store, request) } })
+  const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, credentials, request)))
+  const loggingRuntime = new TurnInteractionLoggingRuntime({ inner: contextRuntime, service: interactions, resolveRoute(request) { return resolveHarnessRoute(store, credentials, request) } })
   // Image-model turns branch before the chat stack: the prompt goes to the images endpoint.
   const runtime = createImageAwareRuntime({ inner: loggingRuntime, store, credentials, images: new ImageGenerationService(), worldFiles, interactions, redactText: (value, workspaceId) => credentialManager.redactText(value, workspaceId) })
   const completionWorker = composeCompletionWorker(store, worldArtifacts)
@@ -444,7 +450,10 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
   const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity, skills: skillRuntime, continuations: turnContinuations })
-  const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
+  const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot, (profile) => {
+    const credential = resolveModelCredential(store, credentials, profile)
+    return harnessModelRoute({ ...profile, ...(credential.credentialEnvName === undefined ? {} : { credentialEnvName: credential.credentialEnvName }) })
+  })
   const applicationUpdates = new ApplicationUpdateService(store, stateRoot, workspaceRoot)
   const applicationAccess = new ApplicationAccessService(stateRoot)
   const assets = new AssetService(store, stateRoot)
@@ -496,7 +505,8 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   registerModelInteractionRoutes(router, { store, interactions })
   const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext, skillRuntime, work: workSystem })
   taskSchedules.setQueue(conversationControl.queue)
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, taskIntent, conversationQueue: conversationControl.queue, acceptedGroupRunner: conversationControl.runAcceptedGroup, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  registerModelReadinessRoutes(router, { readiness: modelReadiness, worldAccess })
+  registerConversationRoutes(router, { ...(options.runtime === undefined ? { modelReadinessPreflight: (worldId, input) => modelReadiness.assertCanSend(worldId, input) } : {}), store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, taskIntent, conversationQueue: conversationControl.queue, acceptedGroupRunner: conversationControl.runAcceptedGroup, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {
     store,
@@ -588,10 +598,12 @@ async function sweepOrphanedPackageStaging(store: SqliteStore, worldPackages: Wo
 }
 
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error) }
-function resolveHarnessRoute(store: SqliteStore, request: AgentTurnRequest): HarnessModelRoute | undefined {
+function resolveHarnessRoute(store: SqliteStore, credentials: ModelCredentialService, request: AgentTurnRequest): HarnessModelRoute | undefined {
   const temporary = request.modelProfileId === undefined ? undefined : store.getModelProfile(request.modelProfileId)
   const profile = temporary?.workspaceId === request.agent.workspaceId
     ? temporary
     : store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
-  return profile === undefined ? undefined : harnessModelRoute(profile, request.reasoningEffort)
+  if (profile === undefined) return undefined
+  const credential = resolveModelCredential(store, credentials, profile)
+  return harnessModelRoute({ ...profile, ...(credential.credentialEnvName === undefined ? {} : { credentialEnvName: credential.credentialEnvName }) }, request.reasoningEffort)
 }

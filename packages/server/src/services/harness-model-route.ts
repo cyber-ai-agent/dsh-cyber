@@ -43,6 +43,7 @@ export function harnessModelRoute(
     api: profile.api,
     baseURL: profile.baseUrl,
     modelId: profile.modelId,
+    ...(profile.providerKind === 'openai-compatible-local' && profile.credentialEnvName === undefined ? { requiresApiKey: false } : {}),
     ...(profile.credentialEnvName === undefined ? {} : { apiKeyEnv: profile.credentialEnvName }),
     ...(webSearchEnabled && webSearchBaseUrl && profile.credentialEnvName !== undefined
       ? {

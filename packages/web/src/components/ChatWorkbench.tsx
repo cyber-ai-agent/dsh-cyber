@@ -17,8 +17,9 @@ import {
 } from '@phosphor-icons/react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type EmployeeDossier, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
+import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ConversationModelReadiness, type ChatAttachment, type CompletionJob, type EmployeeDossier, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
+import { ChatModelReadiness } from '../features/chat-model-setup/ChatModelReadiness.js'
 import { api } from '../api.js'
 import { formatDateTime, formatTime } from '../i18n/format.js'
 import { useI18n } from '../i18n/runtime.js'
@@ -49,6 +50,9 @@ const EMPTY_PARTICIPANT_IDS: string[] = []
 
 interface ChatWorkbenchProps {
   demoMode: boolean
+  modelReadiness?: ConversationModelReadiness | undefined
+  modelReadinessFailed?: boolean | undefined
+  onOpenModelSetup?(): void
   world: World
   session?: WorkSession
   intent?: ConversationIntent
@@ -100,7 +104,7 @@ interface ChatWorkbenchProps {
   speechConversationKey?: string
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = EMPTY_PARTICIPANT_IDS, messages, employees, dossiers = {}, installedPlugins = [], attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onRetrySubmission, onRestoreSubmission, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onEditQueuedTurn, onPromoteQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, modelReadiness, modelReadinessFailed, onOpenModelSetup, world, session, intent, participantIds = EMPTY_PARTICIPANT_IDS, messages, employees, dossiers = {}, installedPlugins = [], attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onRetrySubmission, onRestoreSubmission, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onEditQueuedTurn, onPromoteQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const composingRef = useRef(false)
@@ -517,6 +521,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           <span><h1>{conversationTitle}{conversationKind === 'direct' ? <AuthorityBadge role={directEmployee?.authorityRole} /> : null}</h1><p aria-live="polite">{conversationSubtitle}</p></span>
         </div>
         <div className="chat-header__actions">
+          {onOpenModelSetup === undefined ? null : <ChatModelReadiness compact readiness={modelReadiness} failed={modelReadinessFailed} employeeNames={new Map(employees.map((item) => [item.id, item.displayName]))} onOpen={onOpenModelSetup} />}
           {onOpenHistory === undefined || session === undefined ? null : <button className="chat-header__history" type="button" aria-label={t('workbench.history', '查看历史消息')} title={t('workbench.history', '查看历史消息')} onClick={onOpenHistory}><ClockCounterClockwise size={19} /><span>{t('workbench.history', '查看历史消息')}</span></button>}
         </div>
       </header>
@@ -533,12 +538,14 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               {employees.length === 0 ? <button className="primary-button" type="button" onClick={onRecruit}>添加第一个角色，开始聊天</button> : null}
               <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? t('workbench.startChat', '开始与角色对话') : '选择会话开始互动'}</h2>
               <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '发送消息后，系统会根据意图自动组织讨论或分工协作；执行细节统一进入轨迹。' : conversationKind === 'direct' ? t('workbench.startChatHint', '历史记录保留在当前世界；发送消息后角色才会开始处理。') : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
+              {employees.length === 0 || onOpenModelSetup === undefined || participantIds.length === 0 ? null : <ChatModelReadiness readiness={modelReadiness} failed={modelReadinessFailed} employeeNames={new Map(employees.map((item) => [item.id, item.displayName]))} onOpen={onOpenModelSetup} />}
+              {conversationKind !== 'direct' || modelReadiness?.canSend !== true || draft.length > 0 || attachments.length > 0 ? null : <div className="chat-first-task"><p>{t('chatModel.exampleHint', '写下目标或粘贴笔记；回复后可将内容保存为文档。')}</p><button type="button" className="secondary-button" onClick={() => { onDraftChange(t('chatModel.examplePrompt', '请把下面的笔记整理成一份简报：先给结论，再列关键事实、待确认的问题和下一步。\n\n[在这里粘贴笔记]')); inputRef.current?.focus() }}>{t('chatModel.example', '试试整理一份简报')}</button></div>}
             </div>
           ) : visibleMessages.map((message) => {
             const employee = employeeById.get(message.senderId)
             const owner = message.senderKind === 'owner'
             const streaming = message.metadata.streaming === true
-            if (message.kind === 'system') return <div key={message.id} className="chat-system-notice" role="status">{message.content}</div>
+            if (message.kind === 'system') return <div key={message.id} className="chat-system-notice" role="status">{message.content}{onOpenModelSetup !== undefined && ['runtime-authentication', 'runtime-model-not-found', 'runtime-unreachable'].includes(String(message.metadata.errorCode)) ? <button type="button" className="chat-system-notice__action" onClick={onOpenModelSetup}>{t('chatModel.open', '配置对话模型')}</button> : null}</div>
             return (
               <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
                 {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} assetUrl={employee?.avatarAssetUrl} rendererKind={employee?.avatarProfile?.rendererKind} /></button>}
@@ -588,7 +595,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       ]} />}
       <div className="composer-zone">
         <QueuedMessageRecovery ownerKey={composerOwnerKey} onRestored={() => inputRef.current?.focus()} />
-        {onRetrySubmission === undefined || onRestoreSubmission === undefined ? null : <ChatSubmissionRecovery ownerKey={composerOwnerKey} hasDraft={draft.length > 0 || attachments.length > 0} onRetry={onRetrySubmission} onRestore={onRestoreSubmission} />}
+        {onRetrySubmission === undefined || onRestoreSubmission === undefined ? null : <ChatSubmissionRecovery ownerKey={composerOwnerKey} hasDraft={draft.length > 0 || attachments.length > 0} onRetry={onRetrySubmission} onRestore={onRestoreSubmission} {...(onOpenModelSetup === undefined ? {} : { onOpenModelSetup })} />}
         {copyError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{copyError}</span><button type="button" onClick={() => setCopyError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {saveDocumentError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{saveDocumentError}</span><button type="button" onClick={() => setSaveDocumentError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {knowledgeError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{knowledgeError}</span><button type="button" onClick={() => setKnowledgeError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}

@@ -1,7 +1,9 @@
 import type { AgentRuntimeEvent, AgentTurnRequest, ModelProfile } from '@dsh-cyber/contracts'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createImageAwareRuntime } from '../src/services/image-turn-runtime.js'
+
+afterEach(() => vi.unstubAllEnvs())
 
 const IMAGE_PROFILE = {
   id: 'profile-img',
@@ -41,12 +43,13 @@ function makeAssignedRequest(events: AgentRuntimeEvent[]): AgentTurnRequest {
 }
 
 function deps(overrides: Record<string, unknown> = {}) {
+  vi.stubEnv('IMAGE_TEST_API_KEY', 'sk-key')
   const events: AgentRuntimeEvent[] = []
   const inner = { runTurn: vi.fn(async () => ({ agentSessionId: 'inner', finalResponse: 'chat', eventCount: 1 })), close: vi.fn(async () => {}) }
   const d = {
     inner,
     store: { getModelProfile: vi.fn((id: string) => (id === IMAGE_PROFILE.id ? IMAGE_PROFILE : id === CHAT_PROFILE.id ? CHAT_PROFILE : undefined)), resolveModelProfile: vi.fn(() => IMAGE_PROFILE) },
-    credentials: { resolve: vi.fn(() => 'sk-key') },
+    credentials: { resolve: vi.fn(() => 'sk-key'), credentialEnvName: () => 'IMAGE_TEST_API_KEY' },
     images: { generate: vi.fn(async () => ({ bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 1]), mimeType: 'image/png' })) },
     worldFiles: { saveGeneratedImage: vi.fn(async () => ({ assetId: 'asset-1', name: 'x.png', mimeType: 'image/png', byteLength: 13, url: '/api/worlds/world-1/file?path=x.png' })) },
     interactions: { recordTurn: vi.fn(), captureProvider: () => ({}) },
@@ -79,6 +82,7 @@ describe('image-aware runtime', () => {
     expect(metadata.generatedImage).toBe(true)
     expect(metadata.imageModel).toBe('wan2.7-image')
     expect(result.finalResponse).toBe(message.content)
+    expect(d.images.generate).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'sk-key' }))
     expect(d.interactions.recordTurn).toHaveBeenCalledWith(expect.objectContaining({ status: 'success', modelId: 'wan2.7-image', agentRunId: 'run-1' }))
     // One generation must produce exactly one durable artifact, and it is the
     // run-completion worker - not this runtime - who registers the world file

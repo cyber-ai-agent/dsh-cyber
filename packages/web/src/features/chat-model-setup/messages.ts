@@ -1,0 +1,25 @@
+import { registerMessages } from '../../i18n/runtime.js'
+const messages = {
+  'chatModel.title': ['对话模型', '對話模型', 'Conversation model'],
+  'chatModel.none': ['先连接一个模型', '先連接一個模型', 'Connect a model to start'],
+  'chatModel.missing': ['当前模型还缺少密钥', '目前模型還缺少金鑰', 'This model needs a credential'],
+  'chatModel.hint': ['在模型中心连接服务商，选择用于当前角色或世界的模型，再回来发送。草稿和附件会保留。', '在模型中心連接服務商，選擇用於目前角色或世界的模型，再回來傳送。草稿和附件會保留。', 'Connect a provider in Model Hub, choose a model for this character or world, then return to send. Your draft and attachments stay here.'],
+  'chatModel.open': ['配置对话模型', '設定對話模型', 'Set up conversation model'],
+  'chatModel.edit': ['更换或检查模型', '更換或檢查模型', 'Change or inspect model'],
+  'chatModel.loading': ['正在读取模型配置…', '正在讀取模型設定…', 'Reading model configuration…'],
+  'chatModel.unknown': ['暂时无法读取模型配置', '暫時無法讀取模型設定', 'Model configuration is unavailable'],
+  'chatModel.unverified': ['已配置 · 对话连接未验证', '已設定 · 對話連線未驗證', 'Configured · chat connection not verified'],
+  'chatModel.group': ['部分角色需要配置模型', '部分角色需要設定模型', 'Some characters need model setup'],
+  'chatModel.source.temporary': ['本条消息指定', '本則訊息指定', 'This message'],
+  'chatModel.source.employee': ['角色指定', '角色指定', 'Character assignment'],
+  'chatModel.source.world': ['继承世界', '繼承世界', 'Inherited from world'],
+  'chatModel.source.workspace': ['继承全局', '繼承全域', 'Inherited from workspace'],
+  'chatModel.source.default': ['工作区默认', '工作區預設', 'Workspace default'],
+  'chatModel.source.first-profile': ['模型池首项回退', '模型池首項回退', 'First available profile'],
+  'chatModel.source.harness-default': ['运行时环境配置', '執行階段環境設定', 'Runtime environment'],
+  'chatModel.source.external-runtime': ['宿主运行时', '宿主執行階段', 'Host runtime'],
+  'chatModel.example': ['试试整理一份简报', '試試整理一份簡報', 'Start with a short brief'],
+  'chatModel.examplePrompt': ['请把下面的笔记整理成一份简报：先给结论，再列关键事实、待确认的问题和下一步。\n\n[在这里粘贴笔记]', '請把下面的筆記整理成一份簡報：先給結論，再列關鍵事實、待確認的問題和下一步。\n\n[在這裡貼上筆記]', 'Turn the notes below into a short brief. Start with the conclusion, then list key facts, open questions, and next steps.\n\n[Paste your notes here]'],
+  'chatModel.exampleHint': ['写下目标或粘贴笔记；回复后可将内容保存为文档。', '寫下目標或貼上筆記；回覆後可將內容儲存為文件。', 'Describe your goal or paste notes. You can save the reply as a document.'],
+} as const
+for (const [index, locale] of (['zh-CN', 'zh-TW', 'en-US'] as const).entries()) registerMessages(locale, Object.fromEntries(Object.entries(messages).map(([key, values]) => [key, values[index]!])) )

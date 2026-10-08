@@ -159,6 +159,7 @@ export async function runHarnessCandidateCanary(options: {
       api: options.route.api,
       baseURL: options.route.baseURL,
       ...(options.route.apiKeyEnv === undefined ? {} : { apiKeyEnv: options.route.apiKeyEnv }),
+      ...(options.route.requiresApiKey === undefined ? {} : { requiresApiKey: options.route.requiresApiKey }),
       model: {
         id: options.route.modelId,
         ...(options.route.contextWindow === undefined ? {} : { contextWindow: options.route.contextWindow }),

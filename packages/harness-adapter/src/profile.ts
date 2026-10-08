@@ -39,6 +39,8 @@ export interface HarnessProviderProfile {
   }
   reasoning?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   apiKeyEnv?: string
+  /** Explicitly credential-free private provider; never inferred from a missing key. */
+  requiresApiKey?: boolean
   webSearch?: {
     baseURL: string
     apiKeyEnv: string
@@ -189,6 +191,13 @@ function providerRoute(providerProfile: HarnessProviderProfile): Record<string, 
     ...(providerProfile.apiKeyEnv === undefined
       ? {}
       : { apiKeyEnv: providerProfile.apiKeyEnv }),
+    // The pinned pi-ai OpenAI transports insist on an auth-shaped value even
+    // for credential-free servers. Use their supported header seam with a
+    // public, nonsecret marker only for explicitly keyless private routes.
+    // Never infer this mode from an absent/misconfigured credential.
+    ...(providerProfile.requiresApiKey === false
+      ? { headers: { Authorization: 'Bearer dsh-cyber-local-no-auth' } }
+      : {}),
   }
 }
 
@@ -341,6 +350,14 @@ export function validateProviderProfile(profile: HarnessProviderProfile): void {
   }
   if (profile.apiKeyEnv !== undefined && !/^[A-Z_][A-Z0-9_]*$/.test(profile.apiKeyEnv)) {
     throw new Error('Invalid provider credential environment variable')
+  }
+  if (profile.requiresApiKey === false) {
+    if (!isExplicitPrivateHostname(normalizeHostname(endpoint.hostname))) {
+      throw new Error('Credential-free providers must use a private-network endpoint')
+    }
+    if (profile.apiKeyEnv !== undefined) {
+      throw new Error('Credential-free providers cannot name a credential environment variable')
+    }
   }
   if (profile.webSearch !== undefined) {
     const searchEndpoint = new URL(profile.webSearch.baseURL)

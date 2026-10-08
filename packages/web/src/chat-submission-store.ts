@@ -17,6 +17,7 @@ export interface ChatSubmission {
   draft: ComposerDraftContent
   status: 'sending' | 'uncertain' | 'rejected'
   error?: string
+  errorCode?: string
 }
 
 export class ChatSubmissionStore {

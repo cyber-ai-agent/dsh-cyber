@@ -5,7 +5,9 @@ import { classifyTurnFailure, friendlyRuntimeErrorMessage } from '../src/service
 
 describe('model turn failure guidance', () => {
   it('gives a concrete recovery path for each known failure kind', () => {
-    expect(agentTurnFailureMessage('authentication')).toContain('重新填写密钥')
+    expect(agentTurnFailureMessage('authentication')).toContain('模型中心')
+    expect(agentTurnFailureMessage('authentication')).toContain('检查服务商密钥')
+    expect(agentTurnFailureMessage('authentication')).toContain('并不代表对话调用已验证')
     expect(agentTurnFailureMessage('model-not-found')).toContain('重新获取模型列表')
     expect(agentTurnFailureMessage('rate-limited')).toContain('额度')
     expect(agentTurnFailureMessage('timeout')).toContain('接口地址')

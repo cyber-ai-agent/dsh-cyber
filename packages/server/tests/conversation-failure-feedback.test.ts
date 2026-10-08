@@ -60,7 +60,7 @@ describe('accepted conversation failure feedback', () => {
     const notices = first.items.filter((message: any) => message.kind === 'system')
     expect(notices).toHaveLength(1)
     expect(notices[0]).toMatchObject({ sessionId: receipt.session.id, metadata: { control: 'failure', status: 'failed', workTurnId: receipt.workTurnId, clientTurnId: request.clientTurnId } })
-    expect(notices[0].content).toContain(mode === 'preparation' ? '处理消息时发生错误' : 'API 密钥被模型服务拒绝')
+    expect(notices[0].content).toContain(mode === 'preparation' ? '处理消息时发生错误' : '模型服务未接受当前认证')
     expect(first.items.filter((message: any) => message.kind === 'user')).toHaveLength(1)
     expect(JSON.stringify(first)).not.toContain('secret-fixture-value')
     const failureQueue = await getJson(origin, `/api/worlds/${world.id}/chat-queue?status=failed`)
