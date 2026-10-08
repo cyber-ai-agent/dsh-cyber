@@ -94,6 +94,9 @@ describe('MCP Skill Adapter V1', () => {
       args: { title: 'secret subject', body: 'secret body' },
     }])
     expect(JSON.stringify(result.action)).not.toContain('secret body')
+    expect(JSON.stringify(result.action)).not.toContain('private-bearer')
+    expect(result.action.detail).toContain('sensitive remote result')
+    expect(result.action.detail).toContain('42')
     expect(await readFile(join(root, 'integrations', 'connections.json'), 'utf8')).not.toContain('private-bearer')
     expect(await readFile(join(root, 'credentials', 'integration-credentials.json'), 'utf8')).not.toContain('secret subject')
     integrations.close()
@@ -238,7 +241,7 @@ class FakeMcpClientFactory implements McpClientFactory {
       listTools: async () => tools,
       callTool: async (name, args) => {
         this.calls.push({ spec, name, args })
-        return { content: [{ type: 'text', text: 'sensitive remote result' }], structuredContent: { issueId: 42 } }
+        return { content: [{ type: 'text', text: `sensitive remote result ${spec.kind === 'remote' ? spec.bearerToken ?? '' : ''}` }], structuredContent: { issueId: 42 } }
       },
       close: async () => undefined,
     }
