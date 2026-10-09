@@ -61,7 +61,9 @@ describe('SkillCatalogService', () => {
     const beforeInstall = await service.listWorld(worldA.id)
     expect(find(beforeInstall, 'web.search.firecrawl')).toMatchObject({
       source: 'plugin', globalKnown: true, worldAvailable: false, availability: 'unavailable',
+      availabilityReason: 'package-unavailable',
     })
+    expect(find(await service.listWorkspace(workspace.id), 'web.search.firecrawl').availabilityReason).toBe('package-unavailable')
     installedPackages.push(installed)
 
     const workspaceItems = await service.listWorkspace(workspace.id)
@@ -81,11 +83,13 @@ describe('SkillCatalogService', () => {
       adapterId: 'builtin.firecrawl',
     })
     expect(worldAFirecrawl.routingHints).toEqual(['联网', '搜索官网', 'firecrawl search'])
+    for (const item of [...workspaceItems, ...worldAItems]) expect(item).not.toHaveProperty('availabilityReason')
 
     const worldBItems = await service.listWorld(worldB.id)
     expect(find(worldBItems, 'web.search.firecrawl')).toMatchObject({
       source: 'plugin', scope: 'world', globalKnown: true, worldAvailable: false, availability: 'unavailable',
       packageVersion: installed.version,
+      availabilityReason: 'package-unavailable',
     })
     expect(await service.isAvailable({ workspaceId: workspace.id, worldId: worldA.id, skillId: 'web.search.firecrawl' })).toBe(true)
     expect(await service.isAvailable({ workspaceId: workspace.id, worldId: worldB.id, skillId: 'web.search.firecrawl' })).toBe(false)
@@ -116,6 +120,7 @@ describe('SkillCatalogService', () => {
     expect(await service.listWorld(world.id)).toContainEqual(expect.objectContaining({
       id: 'mcp.search', source: 'mcp', scope: 'workspace', globalKnown: true, worldAvailable: true,
     }))
+    expect(find(await service.listWorld(world.id), 'mcp.search')).not.toHaveProperty('availabilityReason')
   })
 
   it('does not make a package declaration executable without a trusted descriptor', async () => {
@@ -143,8 +148,43 @@ describe('SkillCatalogService', () => {
     const item = (await service.listWorld(world.id)).find((entry) => entry.id === 'web.search.firecrawl')
     expect(item).toMatchObject({
       source: 'plugin', globalKnown: true, worldAvailable: false, availability: 'unavailable', adapterId: 'unbound.package',
+      availabilityReason: 'adapter-unavailable',
     })
     expect(item?.routingHints).toEqual(['搜索官网', 'firecrawl search'])
+    expect(find(await service.listWorkspace(workspace.id), 'web.search.firecrawl').availabilityReason).toBe('adapter-unavailable')
+  })
+
+  it.each(['workspace', 'world'] as const)('reports %s package conflicts without treating either declaration as available', async (conflictScope) => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-skill-catalog-conflict-')); roots.push(root)
+    const installed = await skillPackage(root)
+    const conflicting = await skillPackage(root, 'conflicting-firecrawl-search')
+    const { workspace, world, store } = catalogFixture(conflictScope === 'workspace' ? [installed, conflicting] : [installed])
+    const service = new SkillCatalogService({
+      store,
+      registry: { list: () => [{ ...descriptor('web.search.firecrawl', '联网搜索', 'builtin.firecrawl', 'integration'), packageId: installed.packageId }] },
+      worldPackages: { listRuntimePackages: async () => conflictScope === 'world' ? [installed, conflicting] : [installed] },
+    })
+    expect(find(await service.listWorld(world.id), 'web.search.firecrawl')).toMatchObject({
+      worldAvailable: false, availability: 'unavailable', availabilityReason: 'package-conflict',
+    })
+    const workspaceItem = find(await service.listWorkspace(workspace.id), 'web.search.firecrawl')
+    if (conflictScope === 'workspace') expect(workspaceItem.availabilityReason).toBe('package-conflict')
+    else expect(workspaceItem).not.toHaveProperty('availabilityReason')
+    expect(await service.isAvailable({ workspaceId: workspace.id, worldId: world.id, skillId: 'web.search.firecrawl' })).toBe(false)
+  })
+
+  it.each([undefined, 'another-package'])('preserves host package binding checks for %s', async (packageId) => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-skill-catalog-binding-')); roots.push(root)
+    const installed = await skillPackage(root)
+    const { workspace, world, store } = catalogFixture([installed])
+    const host = { ...descriptor('web.search.firecrawl', '联网搜索', 'builtin.firecrawl', 'integration'), ...(packageId === undefined ? {} : { packageId }) }
+    const service = new SkillCatalogService({ store, registry: { list: () => [host] }, worldPackages: { listRuntimePackages: async () => [installed] } })
+    for (const item of [find(await service.listWorkspace(workspace.id), host.id), find(await service.listWorld(world.id), host.id)]) {
+      expect(item.worldAvailable).toBe(packageId === undefined)
+      if (packageId === undefined) expect(item).not.toHaveProperty('availabilityReason')
+      else expect(item.availabilityReason).toBe('adapter-package-mismatch')
+    }
+    expect(await service.isAvailable({ workspaceId: workspace.id, worldId: world.id, skillId: host.id })).toBe(packageId === undefined)
   })
 
   it('applies global defaults and exact World overrides without copying Skill definitions', async () => {
@@ -163,9 +203,21 @@ describe('SkillCatalogService', () => {
     })
     await service.saveSettings({ workspaceId: workspace.id, scope: 'workspace', scopeId: workspace.id, skillIds: ['coding'] })
     expect(Object.fromEntries((await service.listWorld(world.id)).map((item) => [item.id, item.worldAvailable]))).toEqual({ coding: true, testing: false })
+    expect(find(await service.listWorld(world.id), 'testing').availabilityReason).toBe('workspace-disabled')
+    expect(find(await service.listWorld(world.id), 'coding')).not.toHaveProperty('availabilityReason')
+    // The workspace catalog is discovery; workspace settings govern inherited World selections.
+    expect(find(await service.listWorkspace(workspace.id), 'testing')).not.toHaveProperty('availabilityReason')
     await service.saveSettings({ workspaceId: workspace.id, scope: 'world', scopeId: world.id, skillIds: ['testing'] })
     expect(Object.fromEntries((await service.listWorld(world.id)).map((item) => [item.id, item.worldAvailable]))).toEqual({ coding: false, testing: true })
+    expect(find(await service.listWorld(world.id), 'coding').availabilityReason).toBe('world-disabled')
+    expect(find(await service.listWorld(world.id), 'testing')).not.toHaveProperty('availabilityReason')
     expect((await service.listSettings(workspace.id)).worlds[0]).toMatchObject({ configured: true, inherited: false, skillIds: ['testing'] })
+    await service.saveSettings({ workspaceId: workspace.id, scope: 'world', scopeId: world.id, skillIds: [] })
+    for (const item of await service.listWorld(world.id)) expect(item).toMatchObject({ worldAvailable: false, availabilityReason: 'world-disabled' })
+    await service.saveSettings({ workspaceId: workspace.id, scope: 'world', scopeId: world.id, inherit: true })
+    expect(find(await service.listWorld(world.id), 'coding')).not.toHaveProperty('availabilityReason')
+    expect(find(await service.listWorld(world.id), 'testing').availabilityReason).toBe('workspace-disabled')
+    expect((await service.listSettings(workspace.id)).worlds[0]).toMatchObject({ configured: false, inherited: true, skillIds: ['coding'] })
   })
 
   it('loads generated declarative recipes without an executable Adapter and exposes their file tree', async () => {
@@ -178,12 +230,26 @@ describe('SkillCatalogService', () => {
       registry: { list: () => [] }, worldPackages: { listRuntimePackages: async () => [installed] },
     })
     expect(await service.listWorld(world.id)).toContainEqual(expect.objectContaining({ id: 'custom.release-check', kind: 'recipe', adapterId: 'builtin.recipe', worldAvailable: true }))
+    expect(find(await service.listWorld(world.id), 'custom.release-check')).not.toHaveProperty('availabilityReason')
     expect(await service.instructionsForWorld({ workspaceId: workspace.id, worldId: world.id, skillIds: ['custom.release-check'] })).toEqual(['发布检查：核对测试、版本和回滚方案。'])
     const detail = await service.detailWorkspace(workspace.id, 'custom.release-check')
     expect(detail).toMatchObject({ editable: true, packageId: installed.packageId, tree: expect.arrayContaining([{ path: 'SKILL.md', kind: 'file' }]) })
     expect(detail.files.find((file) => file.path === 'SKILL.md')?.content).toContain('## 使用说明')
   })
 })
+
+function catalogFixture(packages: InstalledPackage[]) {
+  const workspace: Workspace = { id: 'workspace-a', name: '技能工作区', status: 'active', createdAt: '2026-09-14T00:00:00.000Z', updatedAt: '2026-09-14T00:00:00.000Z' }
+  const world: World = { id: 'world-a', workspaceId: workspace.id, name: '技能世界', templateId: 'personal-world', status: 'active', createdAt: workspace.createdAt, updatedAt: workspace.updatedAt }
+  return {
+    workspace, world,
+    store: {
+      getWorkspace: (id: string) => id === workspace.id ? workspace : undefined,
+      getWorld: (id: string) => id === world.id ? world : undefined,
+      listInstalledPackages: () => packages,
+    },
+  }
+}
 
 function find(items: SkillCatalogEntry[], id: string): SkillCatalogEntry {
   const item = items.find((entry) => entry.id === id)

@@ -12,17 +12,18 @@ import {
   type SkillEntityGroup,
 } from '../../components/skill-entity-grouping.js'
 
-export function SkillSettingsPanel({ catalog, settings, busy, onSave }: {
+export function SkillSettingsPanel({ catalog, settings, busy, onSave, initialScopeKey }: {
   catalog: SkillCatalogEntry[]
   settings?: SkillSettingsView
   busy: boolean
+  initialScopeKey?: string
   onSave(scope: SkillScopeView, skillIds: string[], inherit?: boolean): Promise<void>
 }) {
   const scopes = useMemo(() => settings === undefined ? [] : [settings.global, ...settings.worlds], [settings])
-  const [scopeKey, setScopeKey] = useState<string>()
+  const [scopeKey, setScopeKey] = useState<string | undefined>(initialScopeKey)
   const [selected, setSelected] = useState<string[]>([])
   const [query, setQuery] = useState('')
-  const activeScope = scopes.find((scope) => `${scope.scope}:${scope.scopeId}` === scopeKey) ?? scopes[0]
+  const activeScope = scopeKey === undefined ? scopes[0] : scopes.find((scope) => `${scope.scope}:${scope.scopeId}` === scopeKey)
   useEffect(() => {
     if (activeScope === undefined) return
     setScopeKey(`${activeScope.scope}:${activeScope.scopeId}`)
@@ -50,7 +51,7 @@ export function SkillSettingsPanel({ catalog, settings, busy, onSave }: {
       })}
     </aside>
     <section className="skill-center__settings-main">
-      {activeScope === undefined ? <div className="skill-center__empty">正在读取技能设置…</div> : <>
+      {activeScope === undefined ? <div className="skill-center__empty">{settings === undefined ? '正在读取技能设置…' : '此技能设置范围已不可用，请选择另一个范围。'}</div> : <>
         <header className="skill-center__settings-header">
           <div><h3>{activeScope.displayName}</h3><p>{activeScope.scope === 'workspace' ? '作为所有世界的默认 Skill 集合；世界可以保存自己的覆盖配置。' : '勾选当前世界加载的 Skill。角色仍通过自己的技能引用获得使用资格。'}</p></div>
           <div className="skill-center__settings-actions">

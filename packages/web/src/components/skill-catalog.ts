@@ -65,6 +65,7 @@ export function normalizeSkillCatalogEntry(value: unknown): SkillCatalogEntry | 
     globalKnown: value.globalKnown !== false,
     worldAvailable,
     availability,
+    ...(['world-disabled', 'workspace-disabled', 'package-conflict', 'package-unavailable', 'adapter-unavailable', 'adapter-package-mismatch'].includes(String(value.availabilityReason)) ? { availabilityReason: value.availabilityReason as NonNullable<SkillCatalogEntry['availabilityReason']> } : {}),
     ...(typeof value.packageId === 'string' ? { packageId: value.packageId } : {}),
     ...(typeof value.packageVersion === 'string' ? { packageVersion: value.packageVersion } : {}),
     ...(skillPackage === undefined ? {} : { skillPackage }),

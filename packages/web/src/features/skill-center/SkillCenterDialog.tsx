@@ -14,8 +14,8 @@ import './skill-center.css'
 
 type Tab = 'list' | 'settings' | 'add'
 
-export function SkillCenterDialog({ world, worlds, onClose, onOpenMarket }: { world: World; worlds: World[]; onClose(): void; onOpenMarket?(): void }) {
-  const [tab, setTab] = useState<Tab>('list')
+export function SkillCenterDialog({ world, worlds, onClose, onOpenMarket, initialTab = 'list', initialScopeKey }: { world: World; worlds: World[]; onClose(): void; onOpenMarket?(): void; initialTab?: Tab; initialScopeKey?: string }) {
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [catalog, setCatalog] = useState<SkillCatalogEntry[]>([])
   const [settings, setSettings] = useState<SkillSettingsView>()
   const [selectedId, setSelectedId] = useState<string>()
@@ -41,7 +41,7 @@ export function SkillCenterDialog({ world, worlds, onClose, onOpenMarket }: { wo
     finally { setBusy(undefined) }
   }, [world.workspaceId])
 
-  useEffect(() => { if (selectedId !== undefined && detail?.entry.id !== selectedId) void selectSkill(selectedId) }, [detail?.entry.id, selectSkill, selectedId])
+  useEffect(() => { if (tab === 'list' && selectedId !== undefined && detail?.entry.id !== selectedId) void selectSkill(selectedId) }, [detail?.entry.id, selectSkill, selectedId, tab])
 
   const saveScope = async (scope: SkillScopeView, skillIds: string[], inherit = false): Promise<void> => {
     setBusy('settings'); setError(undefined)
@@ -76,7 +76,7 @@ export function SkillCenterDialog({ world, worlds, onClose, onOpenMarket }: { wo
       </nav>
       {error === undefined ? null : <div className="skill-center__error" role="alert"><WarningCircle size={15} /><span>{error}</span><button type="button" className="icon-button" aria-label="收起提示" onClick={() => setError(undefined)}><X size={13} /></button></div>}
       {tab === 'list' ? <SkillListPanel catalog={catalog} {...(detail === undefined ? {} : { detail })} {...(selectedId === undefined ? {} : { selectedId })} loadingDetail={busy === 'detail'} onSelect={(skillId) => void selectSkill(skillId)} onEdit={editSkill} /> : null}
-      {tab === 'settings' ? <SkillSettingsPanel catalog={catalog} {...(settings === undefined ? {} : { settings })} busy={busy === 'settings'} onSave={saveScope} /> : null}
+      {tab === 'settings' ? <SkillSettingsPanel {...(initialScopeKey === undefined ? {} : { initialScopeKey })} catalog={catalog} {...(settings === undefined ? {} : { settings })} busy={busy === 'settings'} onSave={saveScope} /> : null}
       {tab === 'add' ? <SkillAuthoringPanel workspaceId={world.workspaceId} worldId={world.id} {...(editSeed === undefined ? {} : { editSeed })} onInstalled={installed} onClearEdit={() => setEditSeed(undefined)} /> : null}
       <footer className="skill-center__footer"><span>技能包安装入口仍可从市场访问。</span>{onOpenMarket === undefined ? null : <button type="button" onClick={() => { onClose(); onOpenMarket() }}>打开市场技能包</button>}<span>{worlds.filter((item) => item.status === 'active').length} 个活动世界可在“技能设置”中独立配置。</span></footer>
     </section>

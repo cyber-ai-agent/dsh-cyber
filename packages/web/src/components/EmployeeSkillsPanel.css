@@ -1,0 +1,30 @@
+.role-skills { display: grid; gap: 14px; min-width: 0; color: var(--text); font-size: 14px; }
+.role-skills__header, .role-skills__summary, .role-skills__row > header, .role-skills__evidence article > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.role-skills__header h3 { margin: 0; font-size: 15px; }
+.role-skills p { margin: 6px 0 0; line-height: 1.6; color: var(--text-soft); overflow-wrap: anywhere; }
+.role-skills__header p, .role-skills__note, .role-skills__more, .role-skills__row > header > span, .role-skills__evidence { font-size: 12px; }
+.role-skills button { min-height: 32px; font-size: 12px; }
+.role-skills__list { display: grid; gap: 10px; }
+.role-skills__row, .role-skills__notice { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-1); }
+.role-skills__row strong { overflow-wrap: anywhere; }
+.role-skills__row > header > span { color: var(--text-soft); }
+.role-skills__row > header > .is-usable { color: var(--accent); }
+.role-skills__actions, .role-skills__more { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.role-skills__actions { margin-top: 8px; justify-content: flex-start; }
+.role-skills__more, .role-skills__evidence { border-top: 1px solid var(--border); padding-top: 12px; }
+.role-skills details summary { cursor: pointer; line-height: 1.6; }
+.role-skills__row details { margin-top: 8px; font-size: 12px; }
+.role-skills__row ul { display: grid; gap: 10px; padding-left: 16px; }
+.role-skills__row li > span { display: block; color: var(--text-soft); }
+.role-skills__evidence article { margin-top: 12px; }
+
+.role-skills .dock-empty-state { min-height: 0; padding: 14px; gap: 8px; border: 1px solid var(--border); border-radius: 9px; }
+.role-skills .dock-empty-state__mark { width: 34px; height: 34px; }
+.role-skills .dock-empty-state__title { font-size: 14px; }
+.role-skills .dock-empty-state__description { margin: 0; font-size: 12px; }
+.role-skills .dock-empty-state__action { margin-top: 2px; }
+
+/* Use neutral theme colors: accent colors are not guaranteed to contrast with
+   the shared primary button's fixed dark label in light themes. */
+.role-skills .primary-button, .role-skills .primary-button:hover:not(:disabled) { color: var(--surface-0); background: var(--text-strong); border-color: var(--text-strong); box-shadow: none; }
+.role-skills .secondary-button { color: var(--text-strong); }

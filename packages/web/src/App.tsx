@@ -2658,7 +2658,8 @@ export default function App() {
             onCollapse={() => setDockCollapsed(true)}
             onSelectEmployee={(employeeId) => void openDossier(employeeId)}
             onDirectEmployee={directEmployee}
-            onManageEmployee={(employee) => { setManagingEmployeeSection('profile'); setManagingEmployeeAvatarFocus(false); setManagingEmployeeId(employee.id) }}
+            worlds={worlds}
+            onManageEmployee={(employee, section = 'profile') => { setManagingEmployeeSection(section); setManagingEmployeeAvatarFocus(false); setManagingEmployeeId(employee.id) }}
             onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
             onInvite={() => void openRecruitment()}
             onOpenTaskSession={(session, participantIds) => selectSession(session.id, session, participantIds)}
