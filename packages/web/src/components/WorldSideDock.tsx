@@ -32,6 +32,7 @@ interface WorldSideDockProps {
   dossiers: Record<string, EmployeeDossierData>
   employees: CyberEmployee[]
   world: World
+  worlds?: World[]
   sceneImage?: string
   worldContent?: ReactNode
   knowledgeContent?: ReactNode
@@ -42,7 +43,7 @@ interface WorldSideDockProps {
   onCollapse(): void
   onSelectEmployee(employeeId: string): void
   onDirectEmployee(employee: CyberEmployee): void
-  onManageEmployee(employee: CyberEmployee): void
+  onManageEmployee(employee: CyberEmployee, section?: 'profile' | 'abilities'): void
   onShowAllDossiers(): void
   onInvite(): void
   onOpenTaskSession(session: WorkSession, participantIds: string[]): void
@@ -72,6 +73,7 @@ export function WorldSideDock({
   dossiers,
   employees,
   world,
+  worlds,
   sceneImage,
   worldContent,
   knowledgeContent,
@@ -216,7 +218,7 @@ export function WorldSideDock({
     </header>
     <div id="world-side-dock-panel" className="dock-content" role="tabpanel" aria-labelledby={`world-side-dock-tab-${activeTab}`}>
       {activeTab === 'world' ? worldContent ?? <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} /> : null}
-      {activeTab === 'dossier' ? selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined ? <EmployeeDossier dossier={dossiers[selectedEmployee.id]!} employees={employees} world={world} avatarIndex={selectedEmployee.avatarIndex} onDirect={() => onDirectEmployee(selectedEmployee)} onManage={() => onManageEmployee(selectedEmployee)} onBack={onShowAllDossiers} /> : <EmployeeDossierDirectory employees={employees} dossiers={dossiers} world={world} onOpen={onSelectEmployee} onDirect={onDirectEmployee} onManage={onManageEmployee} onInvite={onInvite} /> : null}
+      {activeTab === 'dossier' ? selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined ? <EmployeeDossier key={`${world.id}:${selectedEmployee.id}`} {...(worlds === undefined ? {} : { worlds })} dossier={dossiers[selectedEmployee.id]!} employees={employees} world={world} avatarIndex={selectedEmployee.avatarIndex} onDirect={() => onDirectEmployee(selectedEmployee)} onManage={(section) => onManageEmployee(selectedEmployee, section)} onBack={onShowAllDossiers} /> : <EmployeeDossierDirectory employees={employees} dossiers={dossiers} world={world} onOpen={onSelectEmployee} onDirect={onDirectEmployee} onManage={onManageEmployee} onInvite={onInvite} /> : null}
       {activeTab === 'tasks' ? <Suspense fallback={<div className="dock-empty-state" role="status"><strong>{t('dock.loadingTasks', '正在加载任务工作台')}</strong></div>}><TaskWorkspace world={world} employees={employees} onOpenSession={onOpenTaskSession} /></Suspense> : null}
       {activeTab === 'knowledge' ? knowledgeContent ?? <Suspense fallback={<div className="dock-empty-state" role="status"><strong>{t('dock.loadingKnowledge', '正在加载知识库')}</strong></div>}><KnowledgeDock world={world} demoMode={demoMode} /></Suspense> : null}
       {activeTab === 'artifacts' ? artifactContent ?? <ArtifactEmptyState /> : null}

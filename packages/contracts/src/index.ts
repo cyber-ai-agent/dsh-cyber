@@ -1568,6 +1568,7 @@ export type {
   SkillActionStatus,
   SkillAuthorizationSource,
   SkillCatalogAvailability,
+  SkillCatalogAvailabilityReason,
   SkillCatalogEntry,
   SkillCatalogScope,
   SkillCatalogSource,

@@ -7,6 +7,7 @@ import type {
   SkillDetailFile,
   SkillDetailView,
   SkillCatalogAvailability,
+  SkillCatalogAvailabilityReason,
   SkillCatalogEntry,
   SkillCatalogScope,
   SkillCatalogSource,
@@ -57,6 +58,11 @@ interface PackageSkillIndex {
   conflicts: Set<string>
 }
 
+interface EffectiveSkillSelection {
+  skillIds: Set<string>
+  disabledReason: Extract<SkillCatalogAvailabilityReason, 'world-disabled' | 'workspace-disabled'>
+}
+
 /**
  * Derives global/workspace discovery and World availability from existing
  * package and Registry authorities. Catalog definitions remain derived from
@@ -103,7 +109,8 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
       .filter((descriptor) => descriptor.authorizationSource !== 'world-authority')
     const packages = this.#activeWorkspacePackages(world.workspaceId)
     const packageIndex = await this.#readPackageSkills(packages)
-    const selected = this.#effectiveScopeSkillIds(world.workspaceId, world.id)
+    const selection = this.#effectiveScopeSelection(world.workspaceId, world.id)
+    const selected = selection?.skillIds
     let runtimePackages = await this.#worldPackages.listRuntimePackages(worldId)
     if (selected !== undefined && this.#worldPackages.instantiate !== undefined) {
       const activePackageIds = new Set(runtimePackages.map((item) => item.packageId))
@@ -124,9 +131,9 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
       worldPackageIndex,
       worldScoped: true,
     })
-    return selected === undefined ? items : items.map((item) => selected.has(item.id)
+    return selection === undefined ? items : items.map((item) => selection.skillIds.has(item.id)
       ? item
-      : { ...item, worldAvailable: false, availability: 'unavailable' })
+      : { ...item, worldAvailable: false, availability: 'unavailable', availabilityReason: selection.disabledReason })
   }
 
   async listSettings(workspaceId: string): Promise<SkillSettingsView> {
@@ -199,7 +206,7 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
     const packages = await this.#worldPackages.listRuntimePackages(input.worldId)
     const latestWorld = this.#store.getWorld(input.worldId)
     if (latestWorld?.workspaceId !== input.workspaceId || latestWorld.status !== 'active') return []
-    const latestSelection = this.#effectiveScopeSkillIds(input.workspaceId, input.worldId)
+    const latestSelection = this.#effectiveScopeSelection(input.workspaceId, input.worldId)?.skillIds
     const latestInstances = this.#store.listWorldPackageInstances?.(input.worldId, 'active')
     return entries.flatMap((entry): SkillDocumentDescriptor[] => {
       if (latestSelection !== undefined && !latestSelection.has(entry.id)) return []
@@ -268,11 +275,11 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
       ...(end < content.length ? { nextOffset: end } : {}) }
   }
 
-  #effectiveScopeSkillIds(workspaceId: string, worldId: string): Set<string> | undefined {
+  #effectiveScopeSelection(workspaceId: string, worldId: string): EffectiveSkillSelection | undefined {
     const world = this.#scopeSettings?.get(workspaceId, 'world', worldId)
-    if (world !== undefined) return new Set(world.skillIds)
+    if (world !== undefined) return { skillIds: new Set(world.skillIds), disabledReason: 'world-disabled' }
     const global = this.#scopeSettings?.get(workspaceId, 'workspace', workspaceId)
-    return global === undefined ? undefined : new Set(global.skillIds)
+    return global === undefined ? undefined : { skillIds: new Set(global.skillIds), disabledReason: 'workspace-disabled' }
   }
 
   async #listWorldBase(worldId: string): Promise<SkillCatalogEntry[]> {
@@ -293,7 +300,7 @@ export class SkillCatalogService implements WorldSkillAvailabilityPort {
     // scope or active-instance snapshot.
     const latestWorld = this.#store.getWorld(input.worldId)
     if (latestWorld?.workspaceId !== input.workspaceId || latestWorld.status !== 'active') return []
-    const selected = this.#effectiveScopeSkillIds(input.workspaceId, input.worldId)
+    const selected = this.#effectiveScopeSelection(input.workspaceId, input.worldId)?.skillIds
     const instances = this.#store.listWorldPackageInstances?.(input.worldId, 'active')
     const available = new Set(
       entries.filter((item) => item.worldAvailable && (selected === undefined || selected.has(item.id))
@@ -375,9 +382,10 @@ function mergeCatalog(input: {
     const globalKnown = descriptor !== undefined || workspacePackage !== undefined || worldPackage !== undefined
     const hasConflict = input.packageIndex.conflicts.has(skillId) || input.worldPackageIndex?.conflicts.has(skillId) === true
     const packageBound = descriptor?.packageId !== undefined || workspacePackage !== undefined || worldPackage !== undefined
-    const worldAvailable = input.worldScoped
-      ? isWorldAvailable({ descriptor, worldPackage, packageBound, hasConflict, source })
-      : isWorkspaceAvailable({ descriptor, packageRecord, hasConflict })
+    const availabilityReason = input.worldScoped
+      ? worldUnavailableReason({ descriptor, worldPackage, packageBound, hasConflict, source })
+      : workspaceUnavailableReason({ descriptor, packageRecord, hasConflict })
+    const worldAvailable = availabilityReason === undefined
     const scope = catalogScope({ source, worldScoped: input.worldScoped, packageBound })
     const base = descriptor ?? unboundPackageDescriptor(packageRecord)
     if (base === undefined) continue
@@ -392,6 +400,7 @@ function mergeCatalog(input: {
       globalKnown,
       worldAvailable,
       availability: availability(worldAvailable),
+      ...(availabilityReason === undefined ? {} : { availabilityReason }),
       ...(packageRecord === undefined ? {} : {
         packageId: packageRecord.packageId,
         packageVersion: packageRecord.packageVersion,
@@ -406,34 +415,41 @@ function mergeCatalog(input: {
   )
 }
 
-function isWorldAvailable(input: {
+function worldUnavailableReason(input: {
   descriptor: CharacterSkillDescriptor | undefined
   worldPackage: PackageSkillRecord | undefined
   packageBound: boolean
   hasConflict: boolean
   source: SkillCatalogSource
-}): boolean {
-  if (input.hasConflict) return false
-  if (isDeclarativeRecipe(input.worldPackage)) return true
-  if (input.source === 'builtin' || input.source === 'mcp') return input.descriptor !== undefined
-  if (!input.packageBound) return input.descriptor !== undefined
-  if (input.worldPackage === undefined || input.descriptor === undefined) return false
+}): SkillCatalogAvailabilityReason | undefined {
+  if (input.hasConflict) return 'package-conflict'
+  if (isDeclarativeRecipe(input.worldPackage)) return undefined
+  if (input.source === 'builtin' || input.source === 'mcp' || !input.packageBound) {
+    return input.descriptor === undefined ? 'adapter-unavailable' : undefined
+  }
+  if (input.worldPackage === undefined) return 'package-unavailable'
+  if (input.descriptor === undefined) return 'adapter-unavailable'
   return input.descriptor.packageId === undefined || input.descriptor.packageId === input.worldPackage.packageId
+    ? undefined
+    : 'adapter-package-mismatch'
 }
 
-function isWorkspaceAvailable(input: {
+function workspaceUnavailableReason(input: {
   descriptor: CharacterSkillDescriptor | undefined
   packageRecord: PackageSkillRecord | undefined
   hasConflict: boolean
-}): boolean {
-  if (input.hasConflict) return false
+}): SkillCatalogAvailabilityReason | undefined {
+  if (input.hasConflict) return 'package-conflict'
   if (input.packageRecord !== undefined) {
-    if (isDeclarativeRecipe(input.packageRecord)) return true
+    if (isDeclarativeRecipe(input.packageRecord)) return undefined
     const descriptor = input.packageRecord.descriptor
-    return descriptor !== undefined && (descriptor.packageId === undefined || descriptor.packageId === input.packageRecord.packageId)
+    if (descriptor === undefined) return 'adapter-unavailable'
+    return descriptor.packageId === undefined || descriptor.packageId === input.packageRecord.packageId
+      ? undefined
+      : 'adapter-package-mismatch'
   }
-  if (input.descriptor?.packageId !== undefined) return false
-  return input.descriptor !== undefined
+  if (input.descriptor?.packageId !== undefined) return 'package-unavailable'
+  return input.descriptor === undefined ? 'adapter-unavailable' : undefined
 }
 
 function catalogScope(input: {

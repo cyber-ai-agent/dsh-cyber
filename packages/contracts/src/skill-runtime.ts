@@ -135,6 +135,15 @@ export type SkillCatalogScope = 'builtin' | 'workspace' | 'world'
 /** Availability of the entry in the scope used to build the catalog response. */
 export type SkillCatalogAvailability = 'available' | 'unavailable'
 
+/** The current catalog authority blocking this entry, never a role grant or connection check. */
+export type SkillCatalogAvailabilityReason =
+  | 'world-disabled'
+  | 'workspace-disabled'
+  | 'package-conflict'
+  | 'package-unavailable'
+  | 'adapter-unavailable'
+  | 'adapter-package-mismatch'
+
 /**
  * A provider-neutral, UI-safe view of one known Skill.
  *
@@ -149,6 +158,8 @@ export interface SkillCatalogEntry extends CharacterSkillDescriptor {
   globalKnown: boolean
   worldAvailable: boolean
   availability: SkillCatalogAvailability
+  /** Present only when the catalog can identify why this entry is unavailable. */
+  availabilityReason?: SkillCatalogAvailabilityReason
   packageId?: string
   packageVersion?: string
   /** User-facing identity of the package that groups one or more entrypoints. */

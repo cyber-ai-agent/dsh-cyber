@@ -1,6 +1,5 @@
 import {
   ArrowLeft,
-  ArrowSquareOut,
   BookOpenText,
   CalendarDots,
   Certificate,
@@ -17,6 +16,7 @@ import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
 import { EmployeeCurrentWork } from '../features/tasks/EmployeeCurrentWork.js'
 import { StatusDot } from './StatusDot.js'
+import { EmployeeSkillsPanel } from './EmployeeSkillsPanel.js'
 
 type DossierSection = 'profile' | 'skills' | 'milestones' | 'journal' | 'relations'
 
@@ -25,8 +25,9 @@ interface EmployeeDossierProps {
   employees: CyberEmployee[]
   avatarIndex: number
   world: World
+  worlds?: World[]
   onDirect(): void
-  onManage(): void
+  onManage(section?: 'profile' | 'abilities'): void
   onBack(): void
 }
 
@@ -38,7 +39,7 @@ const sections: Array<{ id: DossierSection; label: string; icon: typeof Identifi
   { id: 'relations', label: '关系', icon: UsersThree },
 ]
 
-export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDirect, onManage, onBack }: EmployeeDossierProps) {
+export function EmployeeDossier({ dossier, employees, avatarIndex, world, worlds = [world], onDirect, onManage, onBack }: EmployeeDossierProps) {
   const [section, setSection] = useState<DossierSection>('profile')
   const experience = worldExperience(world)
   const roleplay = experience.kind === 'tavern'
@@ -55,7 +56,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
         <span>{dossier.employee.displayName} / {identityLabel}</span>
       </div>
       <header className="dossier-hero">
-        <button className="avatar-edit-button" type="button" aria-label={`修改${dossier.employee.displayName}的名字和头像`} onClick={onManage}>
+        <button className="avatar-edit-button" type="button" aria-label={`修改${dossier.employee.displayName}的名字和头像`} onClick={() => onManage()}>
           <Avatar index={avatarIndex} size="lg" label={dossier.employee.displayName} status={dossier.employee.status} authorityRole={visualEmployee?.authorityRole} assetUrl={visualEmployee?.avatarAssetUrl} rendererKind={visualEmployee?.avatarProfile?.rendererKind} />
         </button>
         <div className="dossier-hero__identity">
@@ -68,7 +69,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
         </div>
         <div className="dossier-hero__actions">
           <span>{experience.personLabel}版本 r{dossier.employee.currentRevision}</span>
-          <button className="text-button" type="button" onClick={onManage}>管理</button>
+          <button className="text-button" type="button" onClick={() => onManage()}>管理</button>
           <button className="primary-button" type="button" onClick={onDirect}>直接对话</button>
         </div>
       </header>
@@ -115,30 +116,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
           </div>
         ) : null}
 
-        {section === 'skills' ? (
-          <div className="skill-list">
-            {dossier.skills.map((skill) => {
-              const evidence = dossier.evidence.filter((item) => skill.evidenceIds.includes(item.id))
-              return (
-                <article key={skill.skillId} className="skill-record">
-                  <header>
-                    <div><Certificate size={17} /><strong>{skill.skillId}</strong></div>
-                    <StatusDot status={skill.status === 'verified' ? 'available' : 'waiting'} label={skill.status === 'verified' ? '已验证' : '学习中'} />
-                  </header>
-                  <p>{skill.reason}</p>
-                  {evidence.map((item) => (
-                    <button key={item.id} className="evidence-link" type="button">
-                      <LinkSimple size={14} />
-                      <span>{item.summary}</span>
-                      <small>{item.kind} · {item.outcome}</small>
-                      <ArrowSquareOut size={13} />
-                    </button>
-                  ))}
-                </article>
-              )
-            })}
-          </div>
-        ) : null}
+        {section === 'skills' ? <EmployeeSkillsPanel dossier={dossier} world={world} worlds={worlds} onManageSkills={() => onManage('abilities')} /> : null}
 
         {section === 'milestones' ? (
           <ol className="milestone-timeline">
